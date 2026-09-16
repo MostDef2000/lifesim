@@ -38,3 +38,6 @@ assets/generated/
 Thumbs.db
 .vscode/
 .idea/
+runs/
+snapshots/
+*.db
