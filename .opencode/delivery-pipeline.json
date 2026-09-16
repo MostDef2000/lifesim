@@ -5,7 +5,7 @@
   "gates": [
     {
       "id": "check",
-      "argv": ["npm", "run", "check"],
+      "argv": ["bash", "scripts/check.sh"],
       "cwd": ".",
       "timeoutSeconds": 1200
     }
