@@ -1,0 +1,9 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "default_agent": "profile-delivery-orchestrator",
+  "instructions": [
+    "AGENTS.md",
+    ".specify/memory/constitution.md"
+  ],
+  "subagent_depth": 1
+}

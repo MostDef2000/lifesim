@@ -1,0 +1,13 @@
+{
+  "version": 1,
+  "evidenceLevel": "full",
+  "secretDenyGlobs": [],
+  "gates": [
+    {
+      "id": "check",
+      "argv": ["npm", "run", "check"],
+      "cwd": ".",
+      "timeoutSeconds": 1200
+    }
+  ]
+}

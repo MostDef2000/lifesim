@@ -1,0 +1,40 @@
+# Secrets / local config
+.env
+.env.*
+*.key
+*.pem
+secrets/
+
+# Logs
+logs/
+*.log
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+.pytest_cache/
+build/
+dist/
+
+# Node
+node_modules/
+
+# ML weights / model artifacts
+*.gguf
+*.safetensors
+*.pt
+*.onnx
+*.engine
+models/
+checkpoints/
+
+# Generated assets
+assets/generated/
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
