@@ -31,6 +31,8 @@ class EventType(Enum):
     # M5 (SPEC §104): player control audit + goal queue
     CONTROL_CHANGED = "CONTROL_CHANGED"
     GOAL_QUEUED = "GOAL_QUEUED"
+    # M6 (SPEC §105): visual asset audit
+    VISUAL_ASSET_CREATED = "VISUAL_ASSET_CREATED"
     MEMORY_CREATED = "MEMORY_CREATED"
     MEMORY_CONSOLIDATED = "MEMORY_CONSOLIDATED"
 

@@ -216,3 +216,14 @@ api:
   cookie_name: vl1_session
   ws_interval_s: 1.0
   secret_env: VL1_SECRET
+
+visual:
+  enabled: false
+  transport: stub
+  base_url: http://127.0.0.1:7860
+  model: flux.1-schnell
+  lora: ""
+  storage_dir: data/visual_assets
+  image_size: "512x512"
+  timeout_sec: 30.0
+  default_weather: clear
