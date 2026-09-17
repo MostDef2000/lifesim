@@ -42,3 +42,34 @@
 40: Команда генерирует JSON-отчёт с результатами прогона и проверкой инвариантов.
 41: Коды выхода: 0 — успешно, 2 — нарушение инвариантов, 3 — системная ошибка.
 
+
+## M5: Веб-API и игроки (005-player)
+
+Headless по умолчанию. Для запуска API:
+
+1. Прогнать мир: `vl1 simulate --days 1 --population 20 --seed 42` (создаёт `data/lifesim.db`).
+2. Включить API в `config/default.yaml`: `api.enabled: true`.
+3. Запустить сервер: `vl1 serve` (по умолчанию http://127.0.0.1:8000).
+
+Примеры:
+
+```bash
+curl -s -c jar -X POST localhost:8000/auth/register -H 'content-type: application/json' \
+  -d '{"username":"alice","email":"a@x.com","password":"password123","age_confirmed":true}'
+curl -s -c jar -X POST localhost:8000/auth/login -H 'content-type: application/json' \
+  -d '{"username":"alice","password":"password123"}'
+curl -s -b jar -X POST localhost:8000/characters -H 'content-type: application/json' \
+  -d '{"name":"Alice Doe","sex":"F","age":30}'
+curl -s -b jar -X POST localhost:8000/characters/plr_0001/control -H 'content-type: application/json' \
+  -d '{"mode":"DIRECT"}'
+curl -s -b jar -X POST localhost:8000/actions -H 'content-type: application/json' \
+  -d '{"character_id":"plr_0001","action_type":"WORK"}'
+curl -s -b jar -X POST localhost:8000/characters/plr_0001/goals -H 'content-type: application/json' \
+  -d '{"text":"Купи инструменты"}'
+curl -s -b jar -X POST localhost:8000/dialogue/start -H 'content-type: application/json' \
+  -d '{"npc_id":"npc_0001"}'
+```
+
+WebSocket: `ws://127.0.0.1:8000/ws?token=<JWT из cookie vl1_session>` — поток world_events.
+Секрет сессий: переменная окружения `VL1_SECRET` (в dev используется небезопасный дефолт).
+Диалоги NPC: при `llm.enabled: false` — детерминированные fallback-ответы; с реальной моделью — через Ollama (см. specs/004-llm/plan.md).

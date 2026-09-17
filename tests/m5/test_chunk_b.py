@@ -52,7 +52,6 @@ def world(tmp_path):
 
 def _engine_step(engine, factory, settings, minutes):
     """Run the simulation engine for `minutes` on the shared DB."""
-    from app.simulation.engine import Engine, TickScheduler, WorldClock
 
     with sessionmaker(bind=engine)() as session:
         clock = WorldClock()
@@ -98,7 +97,10 @@ def test_control_requires_ownership(world):
     # second user registers, cannot control pilot's character
     client.post("/auth/logout")
     client.post("/auth/register", json={
-        "username": "intruder", "email": "i@x.com", "password": "password123", "age_confirmed": True,
+        "username": "intruder",
+        "email": "i@x.com",
+        "password": "password123",
+        "age_confirmed": True,
     })
     client.post("/auth/login", json={"username": "intruder", "password": "password123"})
     r = client.post(f"/characters/{cid}/control", json={"mode": "DIRECT"})

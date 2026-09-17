@@ -54,7 +54,10 @@ def world(tmp_path):
 
     client = TestClient(app)
     client.post("/auth/register", json={
-        "username": "reader", "email": "r@x.com", "password": "password123", "age_confirmed": True,
+        "username": "reader",
+        "email": "r@x.com",
+        "password": "password123",
+        "age_confirmed": True,
     })
     client.post("/auth/login", json={"username": "reader", "password": "password123"})
     r = client.post("/characters", json={"name": "Rita Ora", "sex": "F", "age": 28})
@@ -128,7 +131,10 @@ def test_get_character_public_vs_owner(world):
     # second user sees public view without needs
     client.post("/auth/logout")
     client.post("/auth/register", json={
-        "username": "viewer", "email": "v@x.com", "password": "password123", "age_confirmed": True,
+        "username": "viewer",
+        "email": "v@x.com",
+        "password": "password123",
+        "age_confirmed": True,
     })
     client.post("/auth/login", json={"username": "viewer", "password": "password123"})
     r = client.get(f"/characters/{cid}")
@@ -180,7 +186,10 @@ def test_dialogue_start_and_message(world):
     # fallback is deterministic
     client.post("/auth/logout")
     client.post("/auth/register", json={
-        "username": "reader2", "email": "r2@x.com", "password": "password123", "age_confirmed": True,
+        "username": "reader2",
+        "email": "r2@x.com",
+        "password": "password123",
+        "age_confirmed": True,
     })
     client.post("/auth/login", json={"username": "reader2", "password": "password123"})
     client.post("/characters", json={"name": "Rita Ortega", "sex": "F", "age": 33})
@@ -233,7 +242,10 @@ def test_dialogue_requires_owned_character(world):
     # user without a character
     client.post("/auth/logout")
     client.post("/auth/register", json={
-        "username": "charless", "email": "ch@x.com", "password": "password123", "age_confirmed": True,
+        "username": "charless",
+        "email": "ch@x.com",
+        "password": "password123",
+        "age_confirmed": True,
     })
     client.post("/auth/login", json={"username": "charless", "password": "password123"})
     r = client.post("/dialogue/start", json={"npc_id": npc_id})
@@ -245,7 +257,10 @@ def test_dialogue_foreign_session_404(world):
     sid = client.post("/dialogue/start", json={"npc_id": npc_id}).json()["session_id"]
     client.post("/auth/logout")
     client.post("/auth/register", json={
-        "username": "peeker", "email": "pk@x.com", "password": "password123", "age_confirmed": True,
+        "username": "peeker",
+        "email": "pk@x.com",
+        "password": "password123",
+        "age_confirmed": True,
     })
     client.post("/auth/login", json={"username": "peeker", "password": "password123"})
     r = client.get(f"/dialogue/{sid}")

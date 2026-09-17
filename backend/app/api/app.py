@@ -219,6 +219,8 @@ def create_app(settings, session_factory: sessionmaker):
             )
             for t in tasks:
                 t.status = "cancelled"
+                if t.ends_at is None or t.ends_at > now_ts:
+                    t.ends_at = now_ts  # stop the clock: §61 "останавливается"
                 cancelled += 1
 
         log_event(
@@ -662,4 +664,9 @@ def create_app(settings, session_factory: sessionmaker):
     app.state.session_factory = session_factory
     app.state.current_user = current_user
     app.state.db = db
+
+    # M5 (R9, §79): WebSocket event stream
+    from app.api.ws import register_ws_route
+
+    register_ws_route(app, settings, session_factory)
     return app

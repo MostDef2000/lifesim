@@ -2,7 +2,6 @@
 
 import os
 import sys
-import time
 
 import pytest
 from sqlalchemy.orm import sessionmaker
@@ -141,7 +140,10 @@ def test_register_age_gate(world):
 
 def test_register_duplicate_username(world):
     _, _, client = world
-    body = {"username": "carol", "email": "c@x.com", "password": "password123", "age_confirmed": True}
+    body = {
+        "username": "carol", "email": "c@x.com",
+        "password": "password123", "age_confirmed": True,
+    }
     assert client.post("/auth/register", json=body).status_code == 201
     r = client.post("/auth/register", json={**body, "email": "other@x.com"})
     assert r.status_code == 409

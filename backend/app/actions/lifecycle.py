@@ -702,6 +702,7 @@ def _advance_character(
                 .filter(
                     CharacterTask.character_id == char.id,
                     CharacterTask.ends_at.isnot(None),
+                    CharacterTask.status != "cancelled",  # M5: cancelled ≠ scheduled
                 )
                 .scalar()
             )
