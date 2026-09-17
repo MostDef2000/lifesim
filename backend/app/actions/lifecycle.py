@@ -304,6 +304,15 @@ def complete_task(
                     conflict_event_id, [character.id, target_id]
                 )
 
+                # M4 R7: conflict triggers an LLM decision request per
+                # participant (gate R1 inside; <= 1 per character per day).
+                from app.ai.gateway import enqueue_decide
+                for cid in (character.id, target_id):
+                    enqueue_decide(
+                        session, world_id, settings, cid, conflict_event_id,
+                        EventType.CONFLICT.value, game_timestamp
+                    )
+
             affection_after = rel.affection
             rel.updated_at = game_timestamp
 

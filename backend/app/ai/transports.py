@@ -36,12 +36,14 @@ class StubTransport:
         raise ValueError(f"unknown schema_hint: {schema_hint}")
 
     def _decision(self, prompt: str) -> str:
-        # The context lists available actions; the stub picks the first one.
+        # The context lists available actions; the stub picks the first one
+        # and targets the first nearby character (socialize_with needs one).
         actions = self._json_list_after(prompt, "available_actions:")
         decision = actions[0] if actions else "work_overtime"
+        nearby = self._json_list_after(prompt, "nearby_characters:")
         return json.dumps({
             "decision": decision,
-            "target_character_id": None,
+            "target_character_id": nearby[0] if nearby else None,
             "confidence": 0.5,
             "reason": "stub: first available action",
         })

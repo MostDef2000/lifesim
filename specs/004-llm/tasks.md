@@ -17,7 +17,7 @@
 
 ## Фаза C — Решения, инварианты, отчёт
 
-- [ ] T10: Валидация решений (spec R7): `decision` ∈ available_actions → `AI_DECISION` (applied=true); иначе result.applied=false, события нет. Каталог M4: socialize_with, visit, work_overtime. Готовность: юнит-тесты обоих путей.
+- [ ] T10: Валидация решений (spec R7): `decision` ∈ available_actions → `AI_DECISION` (applied=true); иначе result.applied=false, события нет. Каталог M4: socialize_with (исполнение через SOCIALIZE task, source='ai'); visit/work_overtime — резерв. Готовность: юнит-тесты обоих путей.
 - [ ] T11: Инварианты R11 (ai_request_integrity, memory_integrity, dialogue_integrity) за гейтом R1. Готовность: позитив/негатив юнит-тесты.
 - [ ] T12: Блок `ai` в отчёте (spec Outcome): requests по статусам, decisions (applied/ignored), dialogues, memories (created/consolidated/alive); при llm-off ключа нет. Готовность: тесты обоих режимов.
 

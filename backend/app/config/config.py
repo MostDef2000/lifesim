@@ -175,6 +175,7 @@ class AiMemoryConfig(BaseModel):
 class LlmConfig(BaseModel):
     enabled: bool = False
     transport: str = "stub"  # stub | ollama
+    min_confidence: float = 0.3
     base_url: str = "http://localhost:11434"
     model_tier1: str = "qwen3:4b"
     model_tier2: str = "qwen3:14b"
