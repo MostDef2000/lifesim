@@ -368,6 +368,295 @@ def create_app(settings, session_factory: sessionmaker):
             for g in goals
         ]
 
+    # ---------- World / read endpoints (R8, §80) ----------
+
+    @app.get("/world")
+    def get_world(session: Session = Depends(db)):
+        from app.db.models import Character, World, WorldClock
+
+        wid = state["settings"].world.world_id
+        world = session.get(World, wid)
+        if world is None:
+            raise HTTPException(status_code=404, detail="world not found")
+        clock = session.query(WorldClock).filter_by(world_id=wid).first()
+        population = (
+            session.query(Character)
+            .filter_by(world_id=wid, alive=True)
+            .count()
+        )
+        return {
+            "id": wid, "seed": world.seed,
+            "game_timestamp": clock.game_timestamp if clock else 0,
+            "day": (clock.game_timestamp // 1440) if clock else 0,
+            "population": population,
+        }
+
+    @app.get("/world/events")
+    def get_world_events(
+        since: int = 0, limit: int = 100, session: Session = Depends(db)
+    ):
+        from app.db.models import WorldEvent
+
+        limit = max(1, min(limit, 500))
+        events = (
+            session.query(WorldEvent)
+            .filter_by(world_id=state["settings"].world.world_id)
+            .filter(WorldEvent.id > since)
+            .order_by(WorldEvent.id)
+            .limit(limit)
+            .all()
+        )
+        import json as _json
+
+        return [
+            {
+                "id": e.id, "event_type": e.event_type, "actor_id": e.actor_id,
+                "location_id": e.location_id, "day": e.game_timestamp // 1440,
+                "game_timestamp": e.game_timestamp,
+                "payload": _json.loads(e.payload) if e.payload else {},
+            }
+            for e in events
+        ]
+
+    @app.get("/locations/{loc_id}")
+    def get_location(loc_id: int, session: Session = Depends(db)):
+        from app.db.models import Character, Location
+
+        loc = session.get(Location, loc_id)
+        if loc is None or loc.world_id != state["settings"].world.world_id:
+            raise HTTPException(status_code=404, detail="location not found")
+        here = (
+            session.query(Character)
+            .filter_by(world_id=loc.world_id, location_id=loc.id, alive=True)
+            .all()
+        )
+        return {
+            "id": loc.id, "type": loc.type, "name": loc.name,
+            "characters_here": [c.id for c in here],
+        }
+
+    @app.get("/characters/{cid}")
+    def get_character(cid: str, user: User = Depends(current_user), session: Session = Depends(db)):
+        from app.db.models import CharacterJob, CharacterNeeds, Job
+
+        character = (
+            session.query(Character)
+            .filter_by(world_id=state["settings"].world.world_id, id=cid)
+            .first()
+        )
+        if character is None:
+            raise HTTPException(status_code=404, detail="character not found")
+        is_owner = character.user_id == user.id
+        out = {
+            "id": character.id,
+            "name": f"{character.first_name} {character.last_name}".strip(),
+            "sex": character.sex, "age": character.age,
+            "alive": character.alive,
+            "location_id": character.location_id,
+            "control_mode": character.control_mode,
+            "is_owner": is_owner,
+        }
+        if is_owner:
+            needs = (
+                session.query(CharacterNeeds).filter_by(character_id=cid).first()
+            )
+            if needs is not None:
+                out["needs"] = {
+                    "hunger": needs.hunger, "energy": needs.energy,
+                    "thirst": needs.thirst, "social": needs.social,
+                }
+            job = (
+                session.query(CharacterJob, Job)
+                .join(Job, Job.id == CharacterJob.job_id)
+                .filter(CharacterJob.character_id == cid)
+                .first()
+            )
+            out["job"] = job[1].title if job else None
+        return out
+
+    @app.get("/characters/{cid}/inventory")
+    def get_inventory(cid: str, user: User = Depends(current_user), session: Session = Depends(db)):
+        from app.db.models import WorldObject
+
+        character = (
+            session.query(Character)
+            .filter_by(world_id=state["settings"].world.world_id, id=cid)
+            .first()
+        )
+        if character is None:
+            raise HTTPException(status_code=404, detail="character not found")
+        if character.user_id != user.id:
+            raise HTTPException(status_code=403, detail="not your character")
+        items = (
+            session.query(WorldObject)
+            .filter_by(owner_character_id=cid)
+            .order_by(WorldObject.id)
+            .all()
+        )
+        return [
+            {
+                "id": o.id, "object_type": o.object_type,
+                "quantity": o.quantity, "location_id": o.location_id,
+            }
+            for o in items
+        ]
+
+    # ---------- Dialogue / chat (R7, §63-65) ----------
+
+    class DialogueStartIn(BaseModel):
+        npc_id: str
+
+    class DialogueMessageIn(BaseModel):
+        content: str
+
+    def _dialogue_session_owned(session: Session, user: User, session_id: str):
+        from app.db.models import DialogueSession
+
+        row = (
+            session.query(DialogueSession)
+            .filter_by(id=session_id, user_id=user.id)
+            .first()
+        )
+        if row is None:
+            raise HTTPException(status_code=404, detail="dialogue session not found")
+        return row
+
+    @app.post("/dialogue/start", status_code=201)
+    def dialogue_start(
+        body: DialogueStartIn,
+        user: User = Depends(current_user), session: Session = Depends(db),
+    ):
+        from app.db.models import Character as _C
+        from app.db.models import DialogueSession
+
+        character = _owned_character_by_user(session, user)
+        npc = (
+            session.query(_C)
+            .filter_by(world_id=character.world_id, id=body.npc_id)
+            .first()
+        )
+        if npc is None:
+            raise HTTPException(status_code=404, detail="npc not found")
+        if not npc.alive:
+            raise HTTPException(status_code=422, detail="npc is not alive")
+        if npc.user_id is not None:
+            raise HTTPException(status_code=422, detail="cannot chat with a player character")
+
+        sid = f"dlg_{user.id}_{npc.id}_{_world_now(session)}"
+        row = DialogueSession(
+            id=sid,
+            world_id=character.world_id,
+            user_id=user.id,
+            character_id=character.id,
+            npc_id=npc.id,
+            location_id=character.location_id,
+            started_at=_world_now(session),
+            ended_at=None,
+            context={},
+        )
+        session.add(row)
+        session.commit()
+        return {"session_id": sid, "npc_id": npc.id, "character_id": character.id}
+
+    def _owned_character_by_user(session: Session, user: User) -> Character:
+        character = (
+            session.query(Character)
+            .filter_by(
+                world_id=state["settings"].world.world_id,
+                user_id=user.id, alive=True,
+            )
+            .first()
+        )
+        if character is None:
+            raise HTTPException(status_code=422, detail="you do not own a living character")
+        return character
+
+    @app.post("/dialogue/{session_id}/message")
+    def dialogue_message(
+        session_id: str, body: DialogueMessageIn,
+        user: User = Depends(current_user), session: Session = Depends(db),
+    ):
+        from app.api.dialogue import (
+            build_context,
+            fallback_reply,
+            llm_reply,
+            safety_check,
+            suggested_responses,
+        )
+        from app.db.models import Character as _C
+        from app.db.models import DialogueMessage
+
+        row = _dialogue_session_owned(session, user, session_id)
+        content = body.content or ""
+        error = safety_check(content)
+        if error:
+            raise HTTPException(status_code=422, detail=error)
+
+        user_char = session.get(_C, row.character_id)
+        npc = session.get(_C, row.npc_id)
+        if npc is None or not npc.alive or user_char is None or not user_char.alive:
+            raise HTTPException(status_code=422, detail="dialogue participants must be alive")
+
+        now_ts = _world_now(session)
+        session.add(DialogueMessage(
+            session_id=row.id, sender="user", content=content,
+            game_timestamp=now_ts,
+        ))
+        session.flush()
+
+        context = build_context(session, row.world_id, user_char, npc)
+        history = [
+            {"sender": m.sender, "content": m.content}
+            for m in session.query(DialogueMessage)
+            .filter_by(session_id=row.id)
+            .order_by(DialogueMessage.id)
+            .all()
+        ]
+        reply = llm_reply(session, state["settings"], row.world_id, row, history, context, content)
+        if reply is None:
+            player_name = user_char.first_name
+            reply = fallback_reply(context, player_name)
+        suggestions = suggested_responses(context)
+
+        session.add(DialogueMessage(
+            session_id=row.id, sender="npc", content=reply,
+            suggested_responses=suggestions, game_timestamp=now_ts,
+        ))
+        session.commit()
+        return {
+            "npc_reply": reply,
+            "suggested_responses": suggestions,
+            "session_id": row.id,
+        }
+
+    @app.get("/dialogue/{session_id}")
+    def dialogue_get(
+        session_id: str,
+        user: User = Depends(current_user), session: Session = Depends(db),
+    ):
+        from app.db.models import DialogueMessage
+
+        row = _dialogue_session_owned(session, user, session_id)
+        messages = (
+            session.query(DialogueMessage)
+            .filter_by(session_id=row.id)
+            .order_by(DialogueMessage.id)
+            .all()
+        )
+        return {
+            "session_id": row.id,
+            "character_id": row.character_id, "npc_id": row.npc_id,
+            "started_at": row.started_at, "ended_at": row.ended_at,
+            "messages": [
+                {
+                    "sender": m.sender, "content": m.content,
+                    "suggested_responses": m.suggested_responses,
+                    "game_timestamp": m.game_timestamp,
+                }
+                for m in messages
+            ],
+        }
+
     # Expose dependency accessors for sub-routers added in later chunks
     app.state.settings = settings
     app.state.session_factory = session_factory
