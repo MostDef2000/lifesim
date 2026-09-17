@@ -184,6 +184,16 @@ class LlmConfig(BaseModel):
     retry: int = 1
     memory: AiMemoryConfig = Field(default_factory=AiMemoryConfig)
 
+class ApiConfig(BaseModel):
+    """M5 (SPEC §80-81/104): web-api surface. Headless by default (П2)."""
+    enabled: bool = False
+    host: str = "127.0.0.1"
+    port: int = 8000
+    session_ttl_min: int = 720
+    cookie_name: str = "vl1_session"
+    ws_interval_s: float = 1.0
+    secret_env: str = "VL1_SECRET"  # HMAC secret; dev fallback with warning
+
 class Settings(BaseModel):
     world: WorldConfig
     ticks: TicksConfig
@@ -200,6 +210,7 @@ class Settings(BaseModel):
     social: SocialConfig = SocialConfig()
     org: OrgConfig = Field(default_factory=OrgConfig)
     llm: LlmConfig = Field(default_factory=LlmConfig)
+    api: ApiConfig = Field(default_factory=ApiConfig)
 
 def load_config(path: str) -> Settings:
     p = pathlib.Path(path)

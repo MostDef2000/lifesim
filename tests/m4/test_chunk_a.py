@@ -13,7 +13,7 @@ from app.db.models import AiRequest, DialogueTurn, Memory, bootstrap
 from app.events.events import EventType
 
 
-def test_schema_040_tables_created(default_settings):
+def test_schema_050_tables_created(default_settings):
     default_settings.llm = LlmConfig(enabled=True)
     engine = create_engine("sqlite:///:memory:")
     bootstrap(engine, default_settings, 42)
@@ -39,13 +39,13 @@ def test_schema_040_tables_created(default_settings):
         __import__("sqlalchemy").text(
             "SELECT value FROM schema_meta WHERE key='version'")
     ).scalar()
-    assert version == "0.4.0"
+    assert version == "0.5.0"
     session.close()
 
 
-def test_event_type_closed_set_22():
+def test_event_type_closed_set_24():
     values = {e.value for e in EventType}
-    assert len(values) == 22
+    assert len(values) == 24
     for added in ("AI_DECISION", "MEMORY_CREATED", "MEMORY_CONSOLIDATED"):
         assert added in values
 

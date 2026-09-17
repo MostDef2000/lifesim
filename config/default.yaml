@@ -207,3 +207,12 @@ llm:
   memory:
     top_k: 5
     witnesses: true
+
+api:
+  enabled: false
+  host: 127.0.0.1
+  port: 8000
+  session_ttl_min: 720
+  cookie_name: vl1_session
+  ws_interval_s: 1.0
+  secret_env: VL1_SECRET

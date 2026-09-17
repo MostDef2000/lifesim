@@ -364,6 +364,7 @@ def complete_task(
     task.status = "completed"
 
     task.completed_at = game_timestamp
+    _settle_goal_for_task(session, task, "done", game_timestamp)  # M5 R6
     log_event(
         session, world_id, game_timestamp, EventType.TASK_COMPLETED,
         actor_id=character.id,
@@ -376,6 +377,7 @@ def fail_task(
     task: CharacterTask, game_timestamp: int, reason: str
 ):
     task.status = "failed"
+    _settle_goal_for_task(session, task, "failed", game_timestamp)  # M5 R6
     log_event(
         session, world_id, game_timestamp, EventType.TASK_FAILED,
         actor_id=character.id,
@@ -419,6 +421,164 @@ def _enqueue_decision(
         session, world_id, char, action_type,
         "need", params, game_timestamp, settings
     )
+
+
+# ---------- M5 (SPEC §104/R4/R6): player goals ----------
+
+GOAL_ACTION_MAP = {
+    "travel_to": "MOVE",
+    "socialize_with": "SOCIALIZE",
+    "acquire_items": "BUY_ITEM",
+}
+
+
+def _convert_queued_goal(
+    session: Session, world_id: str, char: Character,
+    game_timestamp: int, settings: Settings
+):
+    """
+    GUIDED mode: convert the oldest queued player goal into a task chain.
+
+    Returns the action CharacterTask or None (nothing queued / validation
+    failed — the failed goal is settled and utility takes over).
+    """
+    from app.db.models import CharacterGoal
+
+    goal = (
+        session.query(CharacterGoal)
+        .filter_by(world_id=world_id, character_id=char.id, status="queued")
+        .order_by(CharacterGoal.id)
+        .first()
+    )
+    if goal is None:
+        return None
+
+    action_type = GOAL_ACTION_MAP.get(goal.goal_type)
+    if action_type is None:
+        goal.status = "failed"
+        goal.updated_at = game_timestamp
+        return None
+
+    # Game-fact validation for the goal (П1: same facts the validators
+    # enforce; need thresholds are NOT applied — player intent overrides).
+
+    if goal.goal_type == "travel_to":
+        from app.db.models import Location
+        dest_id = (goal.params or {}).get("destination_location_id")
+        dest = session.get(Location, int(dest_id)) if dest_id else None
+        if dest is None or dest.world_id != world_id:
+            goal.status = "failed"
+            goal.updated_at = game_timestamp
+            return None
+        path, total_min = find_path(session, world_id, char.location_id, dest.id)
+        if not path:
+            goal.status = "failed"
+            goal.updated_at = game_timestamp
+            return None
+        action_task = enqueue_task(
+            session, world_id, char, "MOVE", "goal",
+            {"path": path, "total_minutes": total_min, "from": char.location_id},
+            game_timestamp, settings,
+        )
+
+    elif goal.goal_type == "socialize_with":
+        from app.db.models import Character as _Character
+        target = (
+            session.query(_Character)
+            .filter_by(
+                id=(goal.params or {}).get("target_character_id"),
+                world_id=world_id,
+            )
+            .first()
+        )
+        if target is None or not target.alive or target.id == char.id:
+            goal.status = "failed"
+            goal.updated_at = game_timestamp
+            return None
+        action_task = enqueue_task(
+            session, world_id, char, "SOCIALIZE", "goal",
+            {"target_id": target.id}, game_timestamp, settings,
+        )
+
+    else:  # acquire_items
+        from app.db.models import Location as _Location
+        from app.db.models import Organization, WorldObject
+        from app.economy import get_balance, open_account
+
+        item_key = (goal.params or {}).get("item_key")
+        shop_loc = (
+            session.query(_Location)
+            .filter_by(world_id=world_id, type="shop")
+            .order_by(_Location.id)
+            .first()
+        )
+        shop_org = (
+            session.query(Organization)
+            .filter_by(world_id=world_id, type="business")
+            .order_by(Organization.id)
+            .first()
+        )
+        stock = None
+        if shop_loc is not None and shop_org is not None and item_key:
+            stock = (
+                session.query(WorldObject)
+                .filter(
+                    WorldObject.world_id == world_id,
+                    WorldObject.location_id == shop_loc.id,
+                    WorldObject.owner_organization_id == shop_org.id,
+                    WorldObject.quantity >= 1,
+                )
+                .order_by(WorldObject.id)
+                .all()
+            )
+            exact = [o for o in stock if o.object_type == item_key]
+            if not exact:
+                prefix = [o for o in stock if o.object_type.startswith(item_key)]
+                stock = prefix or None
+        if stock is None:
+            goal.status = "failed"
+            goal.updated_at = game_timestamp
+            return None
+        stock_obj = stock[0]
+        price = settings.economy.prices.get(stock_obj.object_type, 0)
+        acc = open_account(session, world_id, "character", char.id)
+        if get_balance(session, acc.id) < price:
+            goal.status = "failed"
+            goal.updated_at = game_timestamp
+            return None
+        path, total_min = find_path(session, world_id, char.location_id, shop_loc.id)
+        if path:
+            enqueue_task(
+                session, world_id, char, "MOVE", "goal",
+                {"path": path, "total_minutes": total_min, "from": char.location_id},
+                game_timestamp, settings,
+            )
+        else:
+            goal.status = "failed"
+            goal.updated_at = game_timestamp
+            return None
+        action_task = enqueue_task(
+            session, world_id, char, "BUY_ITEM", "goal",
+            {"object_id": stock_obj.id, "price": price},
+            game_timestamp, settings,
+        )
+
+    goal.status = "active"
+    goal.task_id = action_task.id if action_task is not None else None
+    goal.updated_at = game_timestamp
+    return action_task
+
+
+def _settle_goal_for_task(
+    session: Session, task: CharacterTask, status: str, game_timestamp: int
+) -> None:
+    """On task completion/failure, settle the owning player goal (R6)."""
+    from app.db.models import CharacterGoal
+
+    goal = session.query(CharacterGoal).filter_by(task_id=task.id).first()
+    if goal is not None:
+        goal.status = status
+        goal.updated_at = game_timestamp
 
 
 def _apply_gradual_restore(
@@ -542,6 +702,7 @@ def _advance_character(
                 .filter(
                     CharacterTask.character_id == char.id,
                     CharacterTask.ends_at.isnot(None),
+                    CharacterTask.status != "cancelled",  # M5: cancelled ≠ scheduled
                 )
                 .scalar()
             )
@@ -549,6 +710,20 @@ def _advance_character(
         activated = activate(session, char, start_at, settings)
         if activated:
             continue
+
+        # Nothing planned: M5 player control gates first (SPEC §104/R1/R4)
+        if getattr(char, "user_id", None) is not None:
+            if char.control_mode == "DIRECT":
+                # Player commands directly; utility AI must not assign tasks.
+                # Needs still decay via needs_tick; existing tasks finish.
+                return
+            if char.control_mode == "GUIDED":
+                goal_task = _convert_queued_goal(
+                    session, world_id, char, start_at, settings
+                )
+                if goal_task is not None:
+                    continue
+                # No queued goal: fall through to utility (GUIDED = goals + AI)
 
         # Nothing planned: decide a new action and enqueue it
         action_type, params, needs_move_id = choose_action(

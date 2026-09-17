@@ -90,6 +90,9 @@ class Character(Base):
     updated_at = Column(Integer, nullable=False)
     death_game_timestamp = Column(Integer, nullable=True)
     death_cause = Column(Text, nullable=True)
+    # M5 (SPEC §60/104): player ownership + control mode
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=True)
+    control_mode = Column(String, nullable=False, default="AUTONOMOUS")  # AUTONOMOUS|GUIDED|DIRECT
 
 # 7. character_profiles
 class CharacterProfile(Base):
@@ -375,6 +378,55 @@ class DialogueTurn(Base):
     game_timestamp = Column(Integer, nullable=False)
     request_id = Column(Integer, ForeignKey("ai_requests.id"), nullable=True)
 
+# 29. users (M5, SPEC §81/104)
+class User(Base):
+    __tablename__ = "users"
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    username = Column(String, nullable=False, unique=True)
+    email = Column(String, nullable=False, unique=True)
+    password_hash = Column(String, nullable=False)
+    role = Column(String, nullable=False, default="user")  # user|moderator|admin|developer (§82)
+    age_confirmed = Column(Boolean, nullable=False, default=False)  # П4: 18+
+    created_at = Column(Integer, nullable=False)
+
+# 30. character_goals (M5, SPEC §62)
+class CharacterGoal(Base):
+    __tablename__ = "character_goals"
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    world_id = Column(String, ForeignKey("worlds.id"), nullable=False)
+    character_id = Column(String, ForeignKey("characters.id"), nullable=False)
+    goal_type = Column(String, nullable=False)
+    params = Column(JSON, nullable=False, default=dict)
+    status = Column(String, nullable=False, default="queued")  # queued|active|done|failed|cancelled
+    deadline_day = Column(Integer, nullable=True)
+    source_text = Column(Text, nullable=False)
+    task_id = Column(String, ForeignKey("character_tasks.id"), nullable=True)
+    created_at = Column(Integer, nullable=False)
+    updated_at = Column(Integer, nullable=False)
+
+# 31. dialogue_sessions (M5, SPEC §63)
+class DialogueSession(Base):
+    __tablename__ = "dialogue_sessions"
+    id = Column(String, primary_key=True)
+    world_id = Column(String, ForeignKey("worlds.id"), nullable=False)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    character_id = Column(String, ForeignKey("characters.id"), nullable=False)
+    npc_id = Column(String, ForeignKey("characters.id"), nullable=False)
+    location_id = Column(Integer, ForeignKey("locations.id"), nullable=True)
+    started_at = Column(Integer, nullable=False)
+    ended_at = Column(Integer, nullable=True)
+    context = Column(JSON, nullable=False, default=dict)
+
+# 32. dialogue_messages (M5, SPEC §63-64)
+class DialogueMessage(Base):
+    __tablename__ = "dialogue_messages"
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    session_id = Column(String, ForeignKey("dialogue_sessions.id"), nullable=False)
+    sender = Column(String, nullable=False)  # user|npc|system
+    content = Column(Text, nullable=False)
+    suggested_responses = Column(JSON, nullable=True)
+    game_timestamp = Column(Integer, nullable=False)
+
 def create_engine_factory(settings: Settings):
     engine = create_engine(
         f"sqlite:///{settings.persistence.db_path}",
@@ -396,7 +448,7 @@ def bootstrap(engine, settings: Settings, seed: int):
 
     with Session(engine) as session:
         # Schema meta
-        session.merge(SchemaMeta(key="version", value="0.4.0"))
+        session.merge(SchemaMeta(key="version", value="0.5.0"))
 
         # World
         world_id = settings.world.world_id

@@ -6,7 +6,7 @@ import sys
 import time
 from pathlib import Path
 
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, sessionmaker
 
 from app.characters.generator import generate_population
 from app.config.config import load_config
@@ -30,7 +30,17 @@ def main(argv=None):
     sim_parser.add_argument("--org", action="store_true", default=False)
     sim_parser.add_argument("--llm", action="store_true", default=False)
 
+    serve_parser = subparsers.add_parser("serve")
+    serve_parser.add_argument("--config", type=str, default="config/default.yaml")
+    serve_parser.add_argument(
+        "--db", type=str, default=None,
+        help="existing world DB path (overrides config)"
+    )
+
     args = parser.parse_args(argv)
+
+    if args.command == "serve":
+        return _run_serve(args)
 
     if args.command != "simulate":
         parser.print_help()
@@ -122,3 +132,44 @@ def main(argv=None):
 
 if __name__ == "__main__":
     sys.exit(main())
+
+
+def _run_serve(args) -> int:
+    """M5 (SPEC §104): start the web-api. Requires api.enabled=true (AE6''')."""
+    try:
+        settings = load_config(args.config)
+    except Exception as e:
+        print(f"Error loading config: {e}", file=sys.stderr)
+        return 3
+
+    if not settings.api.enabled:
+        print(
+            "Error: api.enabled=false in config; "
+            "set api.enabled=true to run 'vl1 serve'.",
+            file=sys.stderr,
+        )
+        return 2
+
+    db_path = args.db or settings.persistence.db_path
+    if not os.path.exists(db_path):
+        print(
+            f"Error: world DB not found at {db_path}; run 'vl1 simulate' first.",
+            file=sys.stderr,
+        )
+        return 2
+
+    settings = settings.model_copy(
+        update={"persistence": settings.persistence.model_copy(update={"db_path": db_path})}
+    )
+
+    from app.api.app import create_app
+    from app.db.models import create_engine_factory
+
+    engine = create_engine_factory(settings)
+    session_factory = sessionmaker(bind=engine, expire_on_commit=False)
+    app = create_app(settings, session_factory)
+
+    import uvicorn
+
+    uvicorn.run(app, host=settings.api.host, port=settings.api.port, log_level="info")
+    return 0
