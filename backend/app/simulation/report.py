@@ -46,7 +46,7 @@ def build_report(
     invariant_results = run_invariant_checks(session, world_id, settings)
     invariants_ok = all(res["ok"] for res in invariant_results)
 
-    return {
+    report = {
         "config_sha256": config_sha256,
         "seed": seed,
         "wall_duration_sec": wall_duration_sec,
@@ -58,3 +58,41 @@ def build_report(
         "invariant_results": invariant_results,
         "invariants_ok": invariants_ok
     }
+
+    if settings.social.enabled:
+        from app.db.models import Organization, OrganizationMember, Relationship
+        orgs = session.query(Organization).filter(Organization.world_id == world_id).all()
+        org_list = []
+        social_interactions = events_by_type.get("SOCIAL_INTERACTION", 0)
+        conflicts = events_by_type.get("CONFLICT", 0)
+        rel_count = session.query(func.count(Relationship.id)).filter(
+            Relationship.world_id == world_id
+        ).scalar() or 0
+
+        for o in orgs:
+            member_count = session.query(OrganizationMember).filter(
+                OrganizationMember.organization_id == o.id
+            ).count()
+            # Leader per spec R6: OrganizationMember with role='leader'
+            # (Organization.leader_character_id is a legacy nullable column,
+            # not populated by seed_social).
+            leader = session.query(OrganizationMember).filter(
+                OrganizationMember.organization_id == o.id,
+                OrganizationMember.role == "leader"
+            ).first()
+            org_list.append({
+                "name": o.name,
+                "member_count": member_count,
+                "leader_id": leader.character_id if leader else None
+            })
+        report["social"] = {
+            "organizations": org_list,
+            "summary": {
+                "relationship_count": rel_count,
+                "social_interactions": social_interactions,
+                "conflicts": conflicts
+            }
+        }
+
+    return report
+

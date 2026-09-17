@@ -18,6 +18,7 @@ needs:
     SLEEP: { energy: 2.0 }
     EAT: { hunger: 5.0 }
     DRINK: { thirst: 5.0 }
+    SOCIALIZE: { social: 0.5 }
   critical_thresholds:
     hunger: 20.0
     thirst: 20.0
@@ -56,6 +57,10 @@ actions:
     duration_minutes: 5
     max_duration_minutes: 30
     base_utility_weight: 0.7
+  SOCIALIZE:
+    duration_minutes: 30
+    max_duration_minutes: 60
+    base_utility_weight: 0.3
   IDLE:
     duration_minutes: 1
     max_duration_minutes: 60
@@ -90,11 +95,13 @@ economy:
       type: "community"
       location: "settlement"
       starting_balance: 5000
+      leader_titles: ["Farmer", "Fisher"]
     shop:
       name: "General Store"
       type: "business"
       location: "shop"
       starting_balance: 5000
+      leader_titles: ["Storekeeper"]
 
 movement:
   default_travel_minutes: 10
@@ -138,6 +145,7 @@ generation:
   trait_range: [-100, 100]
   initial_items: ["clothing_basic"]
 
+# ... (existing config)
 locations:
   houses_count: 24
   locations:
@@ -150,3 +158,13 @@ locations:
     well: { name: "Water Well", type: "well", parent: "settlement", capacity: 10 }
     pier: { name: "Main Pier", type: "pier", parent: "settlement", capacity: 20 }
     kitchen: { name: "Community Kitchen", type: "kitchen", parent: "settlement", capacity: 6 }
+
+social:
+  enabled: false
+  interaction_minutes: 30
+  social_recovery_per_minute: 0.5
+  social_action_threshold: 40.0
+  refusal_threshold: -60.0
+  initial_affection: 0.0
+  initial_conflicts: 2
+  hub_location_types: ["kitchen", "settlement"]

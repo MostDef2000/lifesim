@@ -35,10 +35,15 @@ def run_full_simulation(settings: Settings, seed: int, days: int = 30):
     bootstrap(engine, settings, seed)
     world_id = settings.world.world_id
     seed_world(session, settings, world_id)
+    sim_rng = random.Random(seed)
     generate_population(
-        session, settings, random.Random(seed), world_id,
+        session, settings, sim_rng, world_id,
         settings.world.initial_population
     )
+    # M2: social seeding (org membership/leaders, seeded conflicts) —
+    # continues the same worldgen RNG stream for determinism.
+    from app.world.social_seed import seed_social
+    seed_social(session, settings, world_id, sim_rng)
 
     clock = WorldClock()
     scheduler = TickScheduler()

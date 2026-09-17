@@ -26,6 +26,7 @@ def default_settings():
                 "SLEEP": {"energy": 1.0},
                 "EAT": {"hunger": 1.0},
                 "DRINK": {"thirst": 1.0},
+                "SOCIALIZE": {"social": 0.5},
             },
             "critical_thresholds": {"hunger": 20.0, "thirst": 20.0, "energy": 10.0},
             "health_decay_rate": 0.01,

@@ -203,7 +203,149 @@ def complete_task(
                 payload={"object_id": obj_id, "price": price}
             )
 
+    elif task_type == "SOCIALIZE":
+        from app.db.models import Character, Relationship
+
+        # Target locked at decision time (validator enqueued the MOVE toward
+        # them). The interaction applies at completion if the target is still
+        # alive — physical co-location is a decision-time property; with
+        # synchronized schedules the target may legally move during the
+        # 30-minute window (known M2 simplification, documented in spec).
+        target_id = params.get("target_id")
+        target_char = (
+            session.query(Character)
+            .filter_by(id=target_id, world_id=world_id)
+            .first()
+            if target_id else None
+        )
+        if not target_char or not target_char.alive:
+            # Enqueued target died: fall back to the best co-located alive
+            # candidate; if none, complete as a no-op (restore already
+            # applied, no events, no mutation).
+            co_located = session.query(Character).filter(
+                Character.world_id == world_id,
+                Character.alive,
+                Character.location_id == character.location_id,
+                Character.id != character.id,
+            ).all()
+            scored = []
+            for c in co_located:
+                a, b = sorted([character.id, c.id])
+                rel = session.query(Relationship).filter_by(
+                    world_id=world_id, character_a=a, character_b=b
+                ).first()
+                aff = (
+                    rel.affection if rel else settings.social.initial_affection
+                )
+                scored.append((aff, c.id, c))
+            scored.sort(key=lambda x: (-x[0], x[1]))
+            target_char = next(
+                (c for aff, _cid, c in scored
+                 if aff > settings.social.refusal_threshold),
+                None,
+            )
+        if target_char is None:
+            pass
+        else:
+            target_id = target_char.id
+            # 1. Lazy row creation & Mutation
+            a, b = sorted([character.id, target_id])
+            rel = session.query(Relationship).filter_by(
+                world_id=world_id, character_a=a, character_b=b
+            ).first()
+
+            if not rel:
+                rel = Relationship(
+                    world_id=world_id, character_a=a, character_b=b,
+                    affection=settings.social.initial_affection, updated_at=game_timestamp
+                )
+                session.add(rel)
+                session.flush()
+
+            # affection_before from the live row (stale params ignored).
+            affection_before = rel.affection
+
+            # Normal path vs Conflict path — decided by the FRESH value.
+            if affection_before >= -30:
+                rel.affection = max(-100.0, min(100.0, rel.affection + 2.0))
+                affection_delta = 2.0
+            else:
+                # Conflict path
+                rel.affection = max(-100.0, min(100.0, rel.affection - 5.0))
+                affection_delta = -5.0
+
+                # Both participants get stress += 5.0
+                from app.db.models import CharacterHealth
+                for cid in [character.id, target_id]:
+                    health = (
+                        session.query(CharacterHealth)
+                        .filter_by(character_id=cid)
+                        .first()
+                    )
+                    if health is None:
+                        continue  # defensive: participant without a health row
+                    health.stress = max(0.0, min(100.0, health.stress + 5.0))
+
+                log_event(
+                    session, world_id, game_timestamp, EventType.CONFLICT,
+                    actor_id=character.id, target_id=target_id,
+                    payload={
+                        "affection_before": affection_before,
+                        "affection_after": rel.affection,
+                        "stress_delta": 5.0
+                    }
+                )
+
+            affection_after = rel.affection
+            rel.updated_at = game_timestamp
+
+            # 2. Events
+            # SOCIAL_INTERACTION
+            log_event(
+                session, world_id, game_timestamp, EventType.SOCIAL_INTERACTION,
+                actor_id=character.id, target_id=target_id,
+                payload={
+                    "target_id": target_id,
+                    "duration": task.ends_at - task.started_at,
+                    "affection_delta": affection_delta,
+                    "affection_after": affection_after
+                }
+            )
+
+            # RELATIONSHIP_CHANGED (band crossing)
+            def get_band(aff):
+                if aff < -30:
+                    return "conflicted"
+                if aff < 10:
+                    return "stranger"
+                if aff < 50:
+                    return "acquaintance"
+                return "friend"
+
+            band_before = get_band(affection_before)
+            band_after = get_band(affection_after)
+            if band_before != band_after:
+                event_id = log_event(
+                    session, world_id, game_timestamp, EventType.RELATIONSHIP_CHANGED,
+                    actor_id=character.id, target_id=target_id,
+                    payload={
+                        "band": band_after,
+                        "affection_before": affection_before,
+                        "affection_after": affection_after
+                    }
+                )
+                # Record in RelationshipEvent table
+                from app.db.models import RelationshipEvent
+                session.add(RelationshipEvent(
+                    world_id=world_id, character_a=a, character_b=b,
+                    event_type=EventType.RELATIONSHIP_CHANGED.value,
+                    impact=affection_delta,
+                    event_id=event_id,
+                    game_timestamp=game_timestamp
+                ))
+
     task.status = "completed"
+
     task.completed_at = game_timestamp
     log_event(
         session, world_id, game_timestamp, EventType.TASK_COMPLETED,

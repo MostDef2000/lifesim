@@ -147,6 +147,16 @@ class Organization(Base):
     leader_character_id = Column(String, ForeignKey("characters.id"), nullable=True)
     location_id = Column(Integer, ForeignKey("locations.id"), nullable=True)
 
+# 11a. organization_members
+class OrganizationMember(Base):
+    __tablename__ = "organization_members"
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    organization_id = Column(Integer, ForeignKey("organizations.id"), nullable=False)
+    character_id = Column(String, ForeignKey("characters.id"), nullable=False)
+    role = Column(String, CheckConstraint("role IN ('leader', 'member')"), nullable=False)
+    joined_at = Column(Integer, nullable=False)
+    __table_args__ = (UniqueConstraint("organization_id", "character_id"),)
+
 # 12. jobs
 class Job(Base):
     __tablename__ = "jobs"
@@ -243,7 +253,48 @@ class WorldEvent(Base):
     location_id = Column(Integer, ForeignKey("locations.id"), nullable=True)
     payload = Column(Text, nullable=False) # JSON string
 
-# 20. world_snapshots
+# 21. relationships
+class Relationship(Base):
+    __tablename__ = "relationships"
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    world_id = Column(String, ForeignKey("worlds.id"), nullable=False)
+    character_a = Column(String, ForeignKey("characters.id"), nullable=False)
+    character_b = Column(String, ForeignKey("characters.id"), nullable=False)
+    trust = Column(Float, default=0.0, nullable=False)
+    affection = Column(Float, default=0.0, nullable=False)
+    respect = Column(Float, default=0.0, nullable=False)
+    fear = Column(Float, default=0.0, nullable=False)
+    anger = Column(Float, default=0.0, nullable=False)
+    attraction = Column(Float, default=0.0, nullable=False)
+    romantic_interest = Column(Float, default=0.0, nullable=False)
+    familiarity = Column(Float, default=0.0, nullable=False)
+    updated_at = Column(Integer, default=0, nullable=False)
+    __table_args__ = (
+        CheckConstraint("character_a < character_b"),
+        CheckConstraint("trust BETWEEN -100 AND 100"),
+        CheckConstraint("affection BETWEEN -100 AND 100"),
+        CheckConstraint("respect BETWEEN -100 AND 100"),
+        CheckConstraint("fear BETWEEN -100 AND 100"),
+        CheckConstraint("anger BETWEEN -100 AND 100"),
+        CheckConstraint("attraction BETWEEN -100 AND 100"),
+        CheckConstraint("romantic_interest BETWEEN -100 AND 100"),
+        CheckConstraint("familiarity BETWEEN -100 AND 100"),
+        UniqueConstraint("world_id", "character_a", "character_b"),
+    )
+
+# 22. relationship_events
+class RelationshipEvent(Base):
+    __tablename__ = "relationship_events"
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    world_id = Column(String, ForeignKey("worlds.id"), nullable=False)
+    character_a = Column(String, ForeignKey("characters.id"), nullable=False)
+    character_b = Column(String, ForeignKey("characters.id"), nullable=False)
+    event_type = Column(String, nullable=False)
+    impact = Column(Float, nullable=False)
+    event_id = Column(Integer, ForeignKey("world_events.id"), nullable=True)
+    game_timestamp = Column(Integer, nullable=False)
+
+# 23. world_snapshots
 class WorldSnapshot(Base):
     __tablename__ = "world_snapshots"
     id = Column(Integer, primary_key=True, autoincrement=True)
@@ -274,7 +325,7 @@ def bootstrap(engine, settings: Settings, seed: int):
 
     with Session(engine) as session:
         # Schema meta
-        session.merge(SchemaMeta(key="version", value="0.1.0"))
+        session.merge(SchemaMeta(key="version", value="0.2.0"))
 
         # World
         world_id = settings.world.world_id
