@@ -427,6 +427,24 @@ class DialogueMessage(Base):
     suggested_responses = Column(JSON, nullable=True)
     game_timestamp = Column(Integer, nullable=False)
 
+class VisualAsset(Base):
+    """M6 (SPEC §68): generated visual asset. scene_descriptor is structured (§67)."""
+    __tablename__ = "visual_assets"
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    world_id = Column(String, ForeignKey("worlds.id"), nullable=False)
+    asset_type = Column(String, nullable=False)  # portrait|scene
+    character_id = Column(String, ForeignKey("characters.id"), nullable=True)
+    location_id = Column(String, ForeignKey("locations.id"), nullable=True)
+    object_id = Column(String, ForeignKey("world_objects.id"), nullable=True)
+    scene_descriptor = Column(JSON, nullable=False)  # §67 structured, not just prompt
+    prompt = Column(Text, nullable=False)
+    storage_path = Column(String, nullable=False, unique=True)  # relative, traversal-safe
+    seed = Column(Integer, nullable=False)
+    model = Column(String, nullable=False)
+    lora = Column(String, nullable=True)
+    canonical = Column(Boolean, nullable=False, default=False)  # §69
+    created_at = Column(String, nullable=False)
+
 def create_engine_factory(settings: Settings):
     engine = create_engine(
         f"sqlite:///{settings.persistence.db_path}",
@@ -448,7 +466,7 @@ def bootstrap(engine, settings: Settings, seed: int):
 
     with Session(engine) as session:
         # Schema meta
-        session.merge(SchemaMeta(key="version", value="0.5.0"))
+        session.merge(SchemaMeta(key="version", value="0.6.0"))
 
         # World
         world_id = settings.world.world_id

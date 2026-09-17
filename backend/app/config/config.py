@@ -194,6 +194,18 @@ class ApiConfig(BaseModel):
     ws_interval_s: float = 1.0
     secret_env: str = "VL1_SECRET"  # HMAC secret; dev fallback with warning
 
+class VisualConfig(BaseModel):
+    """M6 (SPEC §105/66-70): visual generation. Off by default (П2-аналог)."""
+    enabled: bool = False
+    transport: str = "stub"  # stub|http
+    base_url: str = "http://127.0.0.1:7860"
+    model: str = "flux.1-schnell"
+    lora: str = ""
+    storage_dir: str = "data/visual_assets"
+    image_size: str = "512x512"
+    timeout_sec: float = 30.0
+    default_weather: str = "clear"
+
 class Settings(BaseModel):
     world: WorldConfig
     ticks: TicksConfig
@@ -211,6 +223,7 @@ class Settings(BaseModel):
     org: OrgConfig = Field(default_factory=OrgConfig)
     llm: LlmConfig = Field(default_factory=LlmConfig)
     api: ApiConfig = Field(default_factory=ApiConfig)
+    visual: VisualConfig = Field(default_factory=VisualConfig)
 
 def load_config(path: str) -> Settings:
     p = pathlib.Path(path)
