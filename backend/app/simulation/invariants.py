@@ -706,4 +706,102 @@ def run_invariant_checks(session: Session, world_id: str, settings) -> List[Dict
                     if election_violations else "none")
     })
 
+    # --- M4 AI invariants (spec R11) — gated by R1: llm enabled ---
+    ai_gate = bool(getattr(settings, "llm", None) and settings.llm.enabled)
+
+    # ai_request_integrity: terminal statuses have processed_at + payload;
+    # no pending older than the current day.
+    if not ai_gate:
+        ok_ai_req = True
+        ai_req_violations = []
+    else:
+        from app.db.models import AiRequest as _AiReq
+        from app.db.models import WorldClock as _WorldClock
+        now_ts = None
+        clock = session.query(_WorldClock).filter_by(world_id=world_id).first()
+        if clock is not None:
+            now_ts = clock.game_timestamp
+        ai_req_violations = []
+        for r in session.query(_AiReq).filter_by(world_id=world_id).all():
+            if r.status in ("done", "failed", "skipped"):
+                if r.processed_at is None:
+                    ai_req_violations.append(
+                        f"request {r.id}: terminal without processed_at")
+                if r.status == "done" and r.result is None:
+                    ai_req_violations.append(
+                        f"request {r.id}: done without result")
+                if r.status == "failed" and not r.error:
+                    ai_req_violations.append(
+                        f"request {r.id}: failed without error")
+            elif r.status == "pending" and now_ts is not None:
+                if now_ts - r.game_timestamp > 1440:
+                    ai_req_violations.append(
+                        f"request {r.id}: pending older than a day")
+            elif r.status not in ("pending", "done", "failed", "skipped"):
+                ai_req_violations.append(
+                    f"request {r.id}: unknown status {r.status}")
+        ok_ai_req = len(ai_req_violations) == 0
+    results.append({
+        "name": "ai_request_integrity",
+        "ok": ok_ai_req,
+        "details": (f"violations: {', '.join(ai_req_violations)}"
+                    if ai_req_violations else "none")
+    })
+
+    # memory_integrity: every memory references a real event; importance in
+    # 0..100; consolidated deletions leave no orphans (event_id resolvable
+    # OR the row is a consolidated record derived from a logged batch).
+    if not ai_gate:
+        ok_mem = True
+        mem_violations = []
+    else:
+        from app.db.models import Memory as _Mem
+        mem_violations = []
+        event_ids = {e.id for e in session.query(WorldEvent).filter_by(
+            world_id=world_id).all()}
+        for m in session.query(_Mem).filter_by(world_id=world_id).all():
+            if not 0 <= m.importance <= 100:
+                mem_violations.append(
+                    f"memory {m.id}: importance {m.importance} out of range")
+            if m.event_id not in event_ids:
+                mem_violations.append(
+                    f"memory {m.id}: event {m.event_id} missing")
+        ok_mem = len(mem_violations) == 0
+    results.append({
+        "name": "memory_integrity",
+        "ok": ok_mem,
+        "details": (f"violations: {', '.join(mem_violations)}"
+                    if mem_violations else "none")
+    })
+
+    # dialogue_integrity: roles valid, contents non-empty, session times
+    # monotone.
+    if not ai_gate:
+        ok_dial = True
+        dial_violations = []
+    else:
+        from app.db.models import DialogueTurn as _Dial
+        dial_violations = []
+        valid_roles = {"user", "assistant", "system"}
+        for d in session.query(_Dial).filter_by(world_id=world_id).all():
+            if d.role not in valid_roles:
+                dial_violations.append(
+                    f"turn {d.id}: invalid role {d.role}")
+            if not d.content:
+                dial_violations.append(f"turn {d.id}: empty content")
+        per_session = {}
+        for d in session.query(_Dial).filter_by(world_id=world_id).order_by(
+                _Dial.id).all():
+            per_session.setdefault(d.session_id, []).append(d.game_timestamp)
+        for sid, times in per_session.items():
+            if times != sorted(times):
+                dial_violations.append(f"session {sid}: times not monotone")
+        ok_dial = len(dial_violations) == 0
+    results.append({
+        "name": "dialogue_integrity",
+        "ok": ok_dial,
+        "details": (f"violations: {', '.join(dial_violations)}"
+                    if dial_violations else "none")
+    })
+
     return results

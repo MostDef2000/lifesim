@@ -77,7 +77,8 @@ def _process_request(session: Session, world_id: str, settings, req: AiRequest,
     session.flush()
 
     if req.task == "decide":
-        _apply_decision(session, world_id, req)
+        applied = _apply_decision(session, world_id, req)
+        req.result = {**data, "applied": bool(applied)}
 
 
 _SCHEMA_HINTS = {
@@ -114,7 +115,7 @@ def _build_prompt(session: Session, world_id: str, settings, req: AiRequest
     return {"prompt": json.dumps(req.context)}
 
 
-def _apply_decision(session: Session, world_id: str, req: AiRequest) -> None:
+def _apply_decision(session: Session, world_id: str, req: AiRequest) -> bool:
     """Spec R7: a valid decision is recorded as an event and executed via
     the existing M2 path (SOCIALIZE task, source='ai') — constitution П1:
     the LLM proposes intent, existing mechanics mutate the world."""
@@ -166,6 +167,7 @@ def _apply_decision(session: Session, world_id: str, req: AiRequest) -> None:
             "applied": bool(applied),
         },
     )
+    return bool(applied)
 
 
 def _drain(session: Session, world_id: str, settings, transport: LlmTransport,
