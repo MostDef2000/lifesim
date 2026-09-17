@@ -103,6 +103,11 @@ def run_daily_handlers(
     from app.policies.org import run_daily_org_policies
     run_daily_org_policies(session, world_id, settings, game_timestamp)
 
+    # --- 4. M4 AI phase (worker drain + memory capture/consolidation;
+    # gate R1 first line inside, zero work when llm disabled) ---
+    from app.ai.worker import run_ai_phase
+    run_ai_phase(session, world_id, settings, game_timestamp)
+
     if not community_org:
         return
 

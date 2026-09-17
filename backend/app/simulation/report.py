@@ -214,5 +214,48 @@ def build_report(
             },
         }
 
+    # M4 R10: ai block — only when the llm contour is active (R1 gate).
+    if getattr(settings, "llm", None) and settings.llm.enabled:
+        from app.db.models import AiRequest as AiRequestModel
+        from app.db.models import DialogueTurn as DialogueTurnModel
+        from app.db.models import Memory as MemoryModel
+
+        requests = (
+            session.query(AiRequestModel)
+            .filter(AiRequestModel.world_id == world_id)
+            .all()
+        )
+        by_status = {"pending": 0, "done": 0, "failed": 0, "skipped": 0}
+        decisions = {"applied": 0, "ignored": 0}
+        for r in requests:
+            by_status[r.status] = by_status.get(r.status, 0) + 1
+            if r.task == "decide" and r.status == "done":
+                if (r.result or {}).get("applied"):
+                    decisions["applied"] += 1
+                else:
+                    decisions["ignored"] += 1
+
+        memories = (
+            session.query(MemoryModel)
+            .filter(MemoryModel.world_id == world_id)
+            .all()
+        )
+        mem_consolidated = sum(
+            1 for m in memories if m.memory_type.startswith("consolidated_"))
+
+        report["ai"] = {
+            "requests_by_status": by_status,
+            "decisions": decisions,
+            "dialogue_turns": (
+                session.query(func.count(DialogueTurnModel.id))
+                .filter(DialogueTurnModel.world_id == world_id)
+                .scalar() or 0
+            ),
+            "memories": {
+                "total": len(memories),
+                "consolidated": mem_consolidated,
+            },
+        }
+
     return report
 

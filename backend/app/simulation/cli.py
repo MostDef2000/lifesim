@@ -28,6 +28,7 @@ def main(argv=None):
     sim_parser.add_argument("--out", type=str, default=None)
     sim_parser.add_argument("--social", action="store_true", default=False)
     sim_parser.add_argument("--org", action="store_true", default=False)
+    sim_parser.add_argument("--llm", action="store_true", default=False)
 
     args = parser.parse_args(argv)
 
@@ -45,7 +46,8 @@ def main(argv=None):
             update={
                 "world": settings.world.model_copy(update={"initial_population": args.population}),
                 "social": settings.social.model_copy(update={"enabled": args.social}),
-                "org": settings.org.model_copy(update={"enabled": args.org})
+                "org": settings.org.model_copy(update={"enabled": args.org}),
+                "llm": settings.llm.model_copy(update={"enabled": args.llm})
             }
         )
 

@@ -188,3 +188,22 @@ org:
       night_home:
         fine: 2
         enact_traits: { discipline: 1, sociability: -1, risk_tolerance: 1 }
+
+llm:
+  enabled: false
+  transport: stub
+  base_url: http://localhost:11434
+  model_tier1: qwen3:4b
+  model_tier2: qwen3:14b
+  timeout_sec: 30
+  retry: 1
+  budgets:
+    max_per_day: 40
+    per_task:
+      decide: 10
+      classify: 20
+      dialogue: 10
+      summarize: 10
+  memory:
+    top_k: 5
+    witnesses: true
