@@ -97,6 +97,12 @@ def run_daily_handlers(
         .filter_by(world_id=world_id, type="community")
         .first()
     )
+
+    # --- 3. M3 org policies (R3: BEFORE the early-return below so org
+    # mechanics are not lost in degenerate worlds; gate R1 is inside) ---
+    from app.policies.org import run_daily_org_policies
+    run_daily_org_policies(session, world_id, settings, game_timestamp)
+
     if not community_org:
         return
 

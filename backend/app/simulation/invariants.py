@@ -1,3 +1,4 @@
+import json
 from typing import Any, Dict, List
 
 from sqlalchemy import Float, func
@@ -12,9 +13,12 @@ from app.db.models import (
     Location,
     Organization,
     OrganizationMember,
+    OrgLaw,
+    OrgLawViolation,
     Relationship,
     RelationshipEvent,
     ResourceBalance,
+    Transaction,
     WorldEvent,
     WorldObject,
 )
@@ -371,7 +375,6 @@ def run_invariant_checks(session: Session, world_id: str, settings) -> List[Dict
     ).all()
     social_violations = []
     for e in social_events:
-        import json
         payload = json.loads(e.payload)
         # Target id: canonical location is the event column; SOCIAL_INTERACTION
         # also carries it in the payload (CONFLICT does not — spec R5).
@@ -452,6 +455,255 @@ def run_invariant_checks(session: Session, world_id: str, settings) -> List[Dict
         "name": "org_membership_integrity",
         "ok": ok_org_int,
         "details": f"violations: {', '.join(org_violations)}" if org_violations else "none"
+    })
+
+    # --- M3 org invariants (spec R9.1-R9.6) — gated by R1: org AND social ---
+    org_gate = bool(getattr(settings, "org", None) and settings.org.enabled
+                    and settings.social.enabled)
+
+    # k) org_leader_valid: exactly one leader per org AND that leader alive.
+    if not org_gate:
+        ok_leader_valid = True
+        leader_valid_violations = []
+    else:
+        orgs_m3 = session.query(Organization).filter(
+            Organization.world_id == world_id).all()
+        leader_valid_violations = []
+        for o in orgs_m3:
+            leaders = session.query(OrganizationMember).filter(
+                OrganizationMember.organization_id == o.id,
+                OrganizationMember.role == "leader"
+            ).all()
+            if len(leaders) != 1:
+                leader_valid_violations.append(
+                    f"org {o.name}: {len(leaders)} leader rows")
+                continue
+            leader_char = session.query(Character).filter_by(
+                id=leaders[0].character_id).first()
+            if leader_char is None or not leader_char.alive:
+                leader_valid_violations.append(
+                    f"org {o.name}: leader {leaders[0].character_id} not alive")
+        ok_leader_valid = len(leader_valid_violations) == 0
+    results.append({
+        "name": "org_leader_valid",
+        "ok": ok_leader_valid,
+        "details": (f"violations: {', '.join(leader_valid_violations)}"
+                    if leader_valid_violations else "none")
+    })
+
+    # l) law_consistency: <=1 org_laws row per org; law_key in the config
+    # catalog; enacter is a member of the org.
+    if not org_gate:
+        ok_law_cons = True
+        law_violations = []
+    else:
+        catalog_keys = set(settings.org.laws.catalog.keys())
+        law_violations = []
+        for o in session.query(Organization).filter(
+                Organization.world_id == world_id).all():
+            laws = session.query(OrgLaw).filter_by(
+                world_id=world_id, organization_id=o.id).all()
+            if len(laws) > 1:
+                law_violations.append(f"org {o.name}: {len(laws)} law rows")
+            for lw in laws:
+                if lw.law_key not in catalog_keys:
+                    law_violations.append(
+                        f"org {o.name}: law {lw.law_key} not in catalog")
+                member = session.query(OrganizationMember).filter_by(
+                    organization_id=o.id,
+                    character_id=lw.enacted_by_character_id).first()
+                if member is None:
+                    law_violations.append(
+                        f"org {o.name}: enacter {lw.enacted_by_character_id} "
+                        "not a member")
+        ok_law_cons = len(law_violations) == 0
+    results.append({
+        "name": "law_consistency",
+        "ok": ok_law_cons,
+        "details": (f"violations: {', '.join(law_violations)}"
+                    if law_violations else "none")
+    })
+
+    # m) law_violation_idempotency: no (org, law, char, day) duplicates;
+    # every LAW_VIOLATION event has a row; no_conflict rows carry an event
+    # link while night_home rows carry none; sum(fine_paid) == sum(LAW_FINE).
+    if not org_gate:
+        ok_viol_idem = True
+        viol_violations = []
+    else:
+        viol_violations = []
+        rows = session.query(OrgLawViolation).filter_by(
+            world_id=world_id).all()
+        seen = {}
+        for r in rows:
+            key = (r.organization_id, r.law_key, r.character_id, r.game_day)
+            seen[key] = seen.get(key, 0) + 1
+        for key, count in seen.items():
+            if count > 1:
+                viol_violations.append(f"duplicate violation row: {key}")
+        events_v = session.query(WorldEvent).filter_by(
+            world_id=world_id, event_type="LAW_VIOLATION").all()
+        row_keys = set(seen.keys())
+        for ev in events_v:
+            payload = json.loads(ev.payload) if ev.payload else {}
+            key = (payload.get("organization_id"), payload.get("law_key"),
+                   ev.actor_id, ev.game_timestamp // 1440)
+            if key not in row_keys:
+                viol_violations.append(f"LAW_VIOLATION event without row: {key}")
+        for r in rows:
+            if r.law_key == "no_conflict" and r.event_id is None:
+                viol_violations.append(
+                    f"no_conflict row without event link: {r.id}")
+            if r.law_key == "night_home" and r.event_id is not None:
+                viol_violations.append(
+                    f"night_home row with unexpected event link: {r.id}")
+        fines_paid_sum = sum(r.fine_paid for r in rows)
+        law_fine_sum = session.query(func.sum(Transaction.amount)).filter(
+            Transaction.world_id == world_id,
+            Transaction.reason == "LAW_FINE"
+        ).scalar() or 0
+        if fines_paid_sum != law_fine_sum:
+            viol_violations.append(
+                f"fine_paid sum {fines_paid_sum} != LAW_FINE sum {law_fine_sum}")
+        ok_viol_idem = len(viol_violations) == 0
+    results.append({
+        "name": "law_violation_idempotency",
+        "ok": ok_viol_idem,
+        "details": (f"violations: {', '.join(viol_violations)}"
+                    if viol_violations else "none")
+    })
+
+    # n) org_treasury_conservation: full ledger replay per org account
+    # (constitution P3): balance == sum(inflows) - sum(outflows); the reason
+    # set on org accounts is closed (mint / PURCHASE / ORG_DUES / LAW_FINE
+    # in; SALARY / ORG_FEAST out).
+    if not org_gate:
+        ok_treasury = True
+        treasury_violations = []
+    else:
+        treasury_violations = []
+        allowed_in = {"Initial organization funds", "PURCHASE", "ORG_DUES",
+                      "LAW_FINE"}
+        allowed_out = {"SALARY", "ORG_FEAST"}
+        for o in session.query(Organization).filter(
+                Organization.world_id == world_id).all():
+            acc = session.query(Account).filter_by(
+                world_id=world_id, owner_type="organization",
+                owner_id=str(o.id)).first()
+            if acc is None:
+                continue  # no treasury -> nothing to conserve
+            txs = session.query(Transaction).filter(
+                (Transaction.from_account_id == acc.id)
+                | (Transaction.to_account_id == acc.id)).all()
+            inflow = sum(t.amount for t in txs if t.to_account_id == acc.id)
+            outflow = sum(t.amount for t in txs if t.from_account_id == acc.id)
+            if acc.balance != inflow - outflow:
+                treasury_violations.append(
+                    f"org {o.name}: balance {acc.balance} != replay "
+                    f"{inflow - outflow}")
+            for t in txs:
+                if t.to_account_id == acc.id and t.from_account_id is not None \
+                        and t.reason not in allowed_in:
+                    treasury_violations.append(
+                        f"org {o.name}: unexpected inflow reason {t.reason}")
+                if t.from_account_id == acc.id \
+                        and t.reason not in allowed_out:
+                    treasury_violations.append(
+                        f"org {o.name}: unexpected outflow reason {t.reason}")
+        ok_treasury = len(treasury_violations) == 0
+    results.append({
+        "name": "org_treasury_conservation",
+        "ok": ok_treasury,
+        "details": (f"violations: {', '.join(treasury_violations)}"
+                    if treasury_violations else "none")
+    })
+
+    # o) reconciliation_link: each RECONCILIATION pair has a relationship row
+    # at exactly target_affection, thawed from <= -60, both alive members of
+    # the payload org.
+    if not org_gate:
+        ok_recon = True
+        recon_violations = []
+    else:
+        recon_violations = []
+        target_aff = settings.org.reconciliation.target_affection
+        rec_events = session.query(WorldEvent).filter_by(
+            world_id=world_id, event_type="RECONCILIATION").all()
+        for ev in rec_events:
+            payload = json.loads(ev.payload) if ev.payload else {}
+            pair = payload.get("pair") or []
+            if len(pair) != 2:
+                recon_violations.append(f"RECONCILIATION {ev.id}: bad pair")
+                continue
+            a, b = sorted(pair)
+            rel = session.query(Relationship).filter_by(
+                world_id=world_id, character_a=a, character_b=b).first()
+            if rel is None:
+                recon_violations.append(f"RECONCILIATION {ev.id}: no row {pair}")
+                continue
+            if rel.affection != target_aff:
+                recon_violations.append(
+                    f"RECONCILIATION {ev.id}: affection {rel.affection} "
+                    f"!= target {target_aff}")
+            if payload.get("affection_before", 0.0) > -60.0:
+                recon_violations.append(
+                    f"RECONCILIATION {ev.id}: affection_before "
+                    f"{payload.get('affection_before')} > -60")
+            org_id = payload.get("organization_id")
+            for cid in pair:
+                char = session.query(Character).filter_by(id=cid).first()
+                if char is None or not char.alive:
+                    recon_violations.append(
+                        f"RECONCILIATION {ev.id}: {cid} not alive")
+                member = session.query(OrganizationMember).filter_by(
+                    organization_id=org_id, character_id=cid).first()
+                if member is None:
+                    recon_violations.append(
+                        f"RECONCILIATION {ev.id}: {cid} not in org {org_id}")
+        ok_recon = len(recon_violations) == 0
+    results.append({
+        "name": "reconciliation_link",
+        "ok": ok_recon,
+        "details": (f"violations: {', '.join(recon_violations)}"
+                    if recon_violations else "none")
+    })
+
+    # p) election_consistency: the last ELECTION of an org produced the
+    # current leader row, and the winner was alive at election time.
+    if not org_gate:
+        ok_election = True
+        election_violations = []
+    else:
+        election_violations = []
+        for o in session.query(Organization).filter(
+                Organization.world_id == world_id).all():
+            last = session.query(WorldEvent).filter_by(
+                world_id=world_id, event_type="ELECTION").filter(
+                WorldEvent.payload.like(f'%"organization_id": {o.id}%')
+            ).order_by(WorldEvent.id.desc()).first()
+            if last is None:
+                continue
+            winner_id = last.actor_id
+            leader_row = session.query(OrganizationMember).filter_by(
+                organization_id=o.id, role="leader").first()
+            if leader_row is None or leader_row.character_id != winner_id:
+                election_violations.append(
+                    f"org {o.name}: last ELECTION winner {winner_id} != "
+                    f"leader {leader_row.character_id if leader_row else None}")
+                continue
+            winner = session.query(Character).filter_by(id=winner_id).first()
+            if winner is None or (
+                    winner.death_game_timestamp is not None
+                    and winner.death_game_timestamp <= last.game_timestamp):
+                election_violations.append(
+                    f"org {o.name}: election winner {winner_id} not alive "
+                    "at election time")
+        ok_election = len(election_violations) == 0
+    results.append({
+        "name": "election_consistency",
+        "ok": ok_election,
+        "details": (f"violations: {', '.join(election_violations)}"
+                    if election_violations else "none")
     })
 
     return results

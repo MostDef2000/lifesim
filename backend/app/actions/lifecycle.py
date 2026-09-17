@@ -286,7 +286,7 @@ def complete_task(
                         continue  # defensive: participant without a health row
                     health.stress = max(0.0, min(100.0, health.stress + 5.0))
 
-                log_event(
+                conflict_event_id = log_event(
                     session, world_id, game_timestamp, EventType.CONFLICT,
                     actor_id=character.id, target_id=target_id,
                     payload={
@@ -294,6 +294,14 @@ def complete_task(
                         "affection_after": rel.affection,
                         "stress_delta": 5.0
                     }
+                )
+
+                # M3 R4: enforce the no_conflict law (gate R1 inside — zero
+                # DB access when org laws are disabled; byte-identity kept).
+                from app.policies.org import enforce_no_conflict
+                enforce_no_conflict(
+                    session, world_id, settings, game_timestamp,
+                    conflict_event_id, [character.id, target_id]
                 )
 
             affection_after = rel.affection

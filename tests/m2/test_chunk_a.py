@@ -53,7 +53,7 @@ def test_schema_version(default_settings):
     Session = sessionmaker(bind=engine)
     session = Session()
     version = session.query(SchemaMeta).filter_by(key="version").first().value
-    assert version == "0.2.0"
+    assert version == "0.3.0"
 
 def _world_with_population(default_settings, rng_seed: int = 42,
                            social_enabled: bool = True):
@@ -213,8 +213,8 @@ def test_settings_validation():
     assert settings.social.enabled is False
 
 def test_event_type_count():
-    # 10 (M1) + 3 (M2) = 13
-    assert len(EventType) == 13
+    # 13 (M2) + 6 (M3) = 19
+    assert len(EventType) == 19
     assert "SOCIAL_INTERACTION" in EventType.__members__
     assert "RELATIONSHIP_CHANGED" in EventType.__members__
     assert "CONFLICT" in EventType.__members__

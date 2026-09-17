@@ -168,3 +168,23 @@ social:
   initial_affection: 0.0
   initial_conflicts: 2
   hub_location_types: ["kitchen", "settlement"]
+
+org:
+  enabled: false
+  election_interval_days: 7
+  dues_per_day: 1
+  feast_interval_days: 14
+  feast_cost: 30
+  feast_social_boost: 20.0
+  reconciliation:
+    enabled: true
+    target_affection: -30.0
+  laws:
+    enabled: true
+    catalog:
+      no_conflict:
+        fine: 5
+        enact_traits: { discipline: 1, sociability: 0, risk_tolerance: -1 }
+      night_home:
+        fine: 2
+        enact_traits: { discipline: 1, sociability: -1, risk_tolerance: 1 }
