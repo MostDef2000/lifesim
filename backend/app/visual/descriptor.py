@@ -30,7 +30,7 @@ def _time_of_day(hour: int) -> str:
 def build_scene_descriptor(
     session: Session,
     world_id: str,
-    location_id: str,
+    location_id: int,
     event_id: int | None = None,
     camera: str = "wide",
 ) -> dict:

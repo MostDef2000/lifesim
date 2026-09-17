@@ -669,4 +669,9 @@ def create_app(settings, session_factory: sessionmaker):
     from app.api.ws import register_ws_route
 
     register_ws_route(app, settings, session_factory)
+
+    # M6 (R1, §105): visual routes behind the visual.enabled gate
+    from app.api.visual_routes import register_visual_routes
+
+    register_visual_routes(app, settings, session_factory)
     return app
