@@ -160,6 +160,29 @@ class OrgConfig(BaseModel):
     reconciliation: OrgReconciliationConfig = Field(default_factory=OrgReconciliationConfig)
     laws: LawConfig = Field(default_factory=LawConfig)
 
+class AiBudgetConfig(BaseModel):
+    max_per_day: int = 40
+    per_task: Dict[str, int] = Field(
+        default_factory=lambda: {
+            "decide": 10, "classify": 20, "dialogue": 10, "summarize": 10
+        }
+    )
+
+class AiMemoryConfig(BaseModel):
+    top_k: int = 5
+    witnesses: bool = True
+
+class LlmConfig(BaseModel):
+    enabled: bool = False
+    transport: str = "stub"  # stub | ollama
+    base_url: str = "http://localhost:11434"
+    model_tier1: str = "qwen3:4b"
+    model_tier2: str = "qwen3:14b"
+    budgets: AiBudgetConfig = Field(default_factory=AiBudgetConfig)
+    timeout_sec: int = 30
+    retry: int = 1
+    memory: AiMemoryConfig = Field(default_factory=AiMemoryConfig)
+
 class Settings(BaseModel):
     world: WorldConfig
     ticks: TicksConfig
@@ -175,6 +198,7 @@ class Settings(BaseModel):
     locations: LocationsConfig
     social: SocialConfig = SocialConfig()
     org: OrgConfig = Field(default_factory=OrgConfig)
+    llm: LlmConfig = Field(default_factory=LlmConfig)
 
 def load_config(path: str) -> Settings:
     p = pathlib.Path(path)

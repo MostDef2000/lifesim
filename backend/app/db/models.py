@@ -1,6 +1,7 @@
 from datetime import datetime
 
 from sqlalchemy import (
+    JSON,
     Boolean,
     CheckConstraint,
     Column,
@@ -332,6 +333,48 @@ class OrgLawViolation(Base):
         UniqueConstraint("world_id", "organization_id", "law_key", "character_id", "game_day"),
     )
 
+# 26. memories (M4, SPEC §55)
+class Memory(Base):
+    __tablename__ = "memories"
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    world_id = Column(String, ForeignKey("worlds.id"), nullable=False)
+    character_id = Column(String, ForeignKey("characters.id"), nullable=False)
+    event_id = Column(Integer, ForeignKey("world_events.id"), nullable=False)
+    memory_type = Column(String, nullable=False)
+    importance = Column(Integer, nullable=False)
+    emotional_valence = Column(Float, nullable=False, default=0.0)
+    summary = Column(Text, nullable=False)
+    created_at = Column(Integer, nullable=False)
+    last_recalled_at = Column(Integer, nullable=True)
+
+# 27. ai_requests (M4, SPEC §50-51)
+class AiRequest(Base):
+    __tablename__ = "ai_requests"
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    world_id = Column(String, ForeignKey("worlds.id"), nullable=False)
+    character_id = Column(String, ForeignKey("characters.id"), nullable=True)
+    task = Column(String, nullable=False)
+    context = Column(JSON, nullable=False, default=dict)
+    priority = Column(String, nullable=False)
+    status = Column(String, nullable=False, default="pending")
+    result = Column(JSON, nullable=True)
+    error = Column(Text, nullable=True)
+    created_at = Column(Integer, nullable=False)
+    processed_at = Column(Integer, nullable=True)
+    game_timestamp = Column(Integer, nullable=False)
+
+# 28. dialogue_turns (M4, SPEC §49/104-adjacent journal)
+class DialogueTurn(Base):
+    __tablename__ = "dialogue_turns"
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    world_id = Column(String, ForeignKey("worlds.id"), nullable=False)
+    session_id = Column(String, nullable=False)
+    character_id = Column(String, ForeignKey("characters.id"), nullable=False)
+    role = Column(String, nullable=False)
+    content = Column(Text, nullable=False)
+    game_timestamp = Column(Integer, nullable=False)
+    request_id = Column(Integer, ForeignKey("ai_requests.id"), nullable=True)
+
 def create_engine_factory(settings: Settings):
     engine = create_engine(
         f"sqlite:///{settings.persistence.db_path}",
@@ -353,7 +396,7 @@ def bootstrap(engine, settings: Settings, seed: int):
 
     with Session(engine) as session:
         # Schema meta
-        session.merge(SchemaMeta(key="version", value="0.3.0"))
+        session.merge(SchemaMeta(key="version", value="0.4.0"))
 
         # World
         world_id = settings.world.world_id

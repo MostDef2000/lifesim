@@ -4,7 +4,7 @@
 
 - [ ] T1: Таблицы `memories`, `ai_requests`, `dialogue_turns` (поля spec R3/R8/R9) в `models.py`; `schema_meta` 0.3.0 → 0.4.0. Готовность: create_all создаёт схему; FK memories.event_id → world_events.
 - [ ] T2: `LlmConfig` в `config.py` + секция `llm:` в `default.yaml` (spec R12; enabled: false). Готовность: конфиг без секции `llm:` грузится с дефолтами; minimal-settings тест проходит.
-- [ ] T3: EventType 19 → 21 (AI_DECISION, MEMORY_CREATED, MEMORY_CONSOLIDATED); структурный тест обновлён сознательно. Готовность: closed-set тест фиксирует 21.
+- [ ] T3: EventType 19 → 22 (AI_DECISION, MEMORY_CREATED, MEMORY_CONSOLIDATED); структурный тест обновлён сознательно. Готовность: closed-set тест фиксирует 22.
 - [ ] T4: `app/ai/transports.py`: протокол `LlmTransport.complete(prompt, schema_hint) -> str`; `StubTransport` (детерминированные ответы по задачам); `OllamaTransport` (urllib POST /api/chat, format='json', timeout). Готовность: stub-ответы детерминированы; ollama-контракт покрыт monkeypatch-тестом.
 - [ ] T5: CLI-флаг `--llm` (паттерн `--org`). Готовность: `--llm` ставит `settings.llm.enabled = true`.
 

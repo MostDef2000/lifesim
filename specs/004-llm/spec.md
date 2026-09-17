@@ -15,7 +15,7 @@
   - Tier-1 классификация: задача `classify` — оценка важности события (0-100) для памяти; детерминированная Tier-0 карта важности остаётся источником для значимых типов (смерть, конфликт, выборы, примирение, праздник, штраф).
   - Память (§55-57): таблица `memories` (поля §55), захват по значимым событиям, ежедневная консолидация (группировка → summarize → долгосрочная память; производные мелкие записи удаляются), `memory-select` — top-K по важности×свежести для prompt-контекста, `last_recalled_at` обновляется при выборке.
   - Диалог: метод `dialogue` — персонаж + история + контекст → валидируемый `{reply, intent?, confidence}`; журнал `dialogue_turns` (сессия, роль, содержание); NPC-NPC автодиалоги в цикле симуляции не запускаются (socialize остаётся Tier 0).
-  - Контракт событий: closed set 19 → 21 (`AI_DECISION`, `MEMORY_CREATED`, `MEMORY_CONSOLIDATED`).
+  - Контракт событий: closed set 19 → 22 (`AI_DECISION`, `MEMORY_CREATED`, `MEMORY_CONSOLIDATED`).
   - Конфигурация: раздел `llm:` (enabled: false, transport: stub, base_url/model, tier1/tier2, бюджеты, timeout, retry), CLI-флаг `--llm`.
   - Отчёт: блок `ai` при включённом режиме (requests по статусам, decisions, dialogues, memories).
   - Схема: 3 новые таблицы (`memories`, `ai_requests`, `dialogue_turns`), `schema_meta` 0.3.0 → 0.4.0.
@@ -46,7 +46,7 @@
   - Консолидация (§57, ежедневно): события дня персонажа группируются по `memory_type`; группы ≥ 2 записей → `summarize` (stub-детерминированный; при реальном транспорте — LLM) → новая запись `memory_type='consolidated_<type>'` с importance = max группы, `summary` — агрегат; исходные записи группы удаляются (производный кэш, П1 не нарушается — источник world_events). Событие `MEMORY_CONSOLIDATED` (aggregate, actor=null): payload `{character_id, groups, removed, created}` — максимум 1 на персонажа в день (только при факте консолидации).
   - Выборка (`memory_select`, §49): top-K (K=5) по `importance DESC, created_at DESC` с обновлением `last_recalled_at`; используется в prompt-контексте (R6).
 - **R9: Диалог**. `dialogue(session, world_id, character_id, messages, priority='interactive')`: journal `dialogue_turns` (session_id uuid, character_id, role: user|assistant|system, content, game_timestamp, request_id?); ответ валидируется по R5; NPC-NPC автодиалогов нет. Диалог не мутирует мир (кроме журнала и опционального AI_DECISION, если worker применит intent — в M4-цикле intent диалога не исполняется: только запись).
-- **R10: Контракт событий** (closed set 19 → 21):
+- **R10: Контракт событий** (closed set 19 → 22):
   - `AI_DECISION`: actor = персонаж; payload `{request_id, decision, target_character_id, confidence, reason, applied}`; consumer: отчёт, тесты AE.
   - `MEMORY_CREATED`: actor = персонаж-владелец; payload `{event_id, memory_type, importance}`; consumer: memory-инвариант, отчёт.
   - `MEMORY_CONSOLIDATED`: actor = null; payload `{character_id, groups, removed, created}`; consumer: memory-инвариант, отчёт.
