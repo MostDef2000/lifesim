@@ -51,6 +51,7 @@ def initialize_registry() -> None:
     register_action(ActionDefinition("WORK", validate, None, "workplace"))
     register_action(ActionDefinition("MOVE", validate, None, None))
     register_action(ActionDefinition("BUY_ITEM", validate, None, "shop"))
+    register_action(ActionDefinition("SOCIALIZE", validate, None, None))
     register_action(ActionDefinition("IDLE", validate, None, None))
 
 

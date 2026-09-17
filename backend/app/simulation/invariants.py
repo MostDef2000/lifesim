@@ -10,6 +10,10 @@ from app.db.models import (
     CharacterNeeds,
     CharacterTask,
     Location,
+    Organization,
+    OrganizationMember,
+    Relationship,
+    RelationshipEvent,
     ResourceBalance,
     WorldEvent,
     WorldObject,
@@ -17,6 +21,8 @@ from app.db.models import (
 
 
 def run_invariant_checks(session: Session, world_id: str, settings) -> List[Dict[str, Any]]:
+
+
     """
     Runs the set of invariants defined in spec §118.
     Returns a list of results: {name, ok, details}.
@@ -189,6 +195,8 @@ def run_invariant_checks(session: Session, world_id: str, settings) -> List[Dict
     )
 
     # e) death_summary: fail if any dead character lacks a CHARACTER_DIED event.
+    # ... (existing death_summary code) ...
+    # (Wait, the previous block was long. I will append the social invariants at the end)
     dead_chars = (
         session.query(Character)
         .filter(Character.world_id == world_id, Character.alive.is_(False))
@@ -282,6 +290,20 @@ def run_invariant_checks(session: Session, world_id: str, settings) -> List[Dict
         or max_h > settings.invariants.health_range[1]
     )
 
+    min_s = session.query(func.min(CharacterHealth.stress)).filter(
+        CharacterHealth.character_id.in_(
+            session.query(Character.id).filter(Character.world_id == world_id)
+        )
+    ).scalar()
+    max_s = session.query(func.max(CharacterHealth.stress)).filter(
+        CharacterHealth.character_id.in_(
+            session.query(Character.id).filter(Character.world_id == world_id)
+        )
+    ).scalar()
+    stress_out_of_range = min_s is not None and (
+        min_s < 0 or max_s > 100
+    )
+
     # 2. Referential Integrity
     # Characters -> Locations
     invalid_locs = session.query(Character.id).filter(
@@ -301,6 +323,7 @@ def run_invariant_checks(session: Session, world_id: str, settings) -> List[Dict
     ok_states = (
         not needs_out_of_range
         and not health_out_of_range
+        and not stress_out_of_range
         and not invalid_locs
         and not invalid_tasks
     )
@@ -311,11 +334,124 @@ def run_invariant_checks(session: Session, world_id: str, settings) -> List[Dict
             "details": {
                 "needs_range_ok": not needs_out_of_range,
                 "health_range_ok": not health_out_of_range,
+                "stress_range_ok": not stress_out_of_range,
                 "invalid_locs_count": len(invalid_locs),
                 "invalid_tasks_count": len(invalid_tasks),
             },
         }
     )
 
+
+    # g) relationship_range: dimensions in [-100, 100], no self-pairs, a < b
+    rel_rows = session.query(Relationship).filter(Relationship.world_id == world_id).all()
+    rel_violations = []
+    for r in rel_rows:
+        if r.character_a == r.character_b:
+            rel_violations.append(f"self-pair: {r.character_a}")
+        if not (r.character_a < r.character_b):
+            rel_violations.append(f"order violation: {r.character_a} {r.character_b}")
+        for col in [
+            "trust", "affection", "respect", "fear", "anger",
+            "attraction", "romantic_interest", "familiarity",
+        ]:
+            val = getattr(r, col)
+            if not (-100 <= val <= 100):
+                rel_violations.append(f"{col} range: {val}")
+    ok_rel_range = len(rel_violations) == 0
+    results.append({
+        "name": "relationship_range",
+        "ok": ok_rel_range,
+        "details": f"violations: {', '.join(rel_violations)}" if rel_violations else "none"
+    })
+
+    # h) social_event_integrity: CONFLICT and SOCIAL_INTERACTION checks
+    social_events = session.query(WorldEvent).filter(
+        WorldEvent.world_id == world_id,
+        WorldEvent.event_type.in_(["CONFLICT", "SOCIAL_INTERACTION"])
+    ).all()
+    social_violations = []
+    for e in social_events:
+        import json
+        payload = json.loads(e.payload)
+        # Target id: canonical location is the event column; SOCIAL_INTERACTION
+        # also carries it in the payload (CONFLICT does not — spec R5).
+        target_id = e.target_id or payload.get("target_id")
+        if not target_id or e.actor_id == target_id:
+            social_violations.append(f"event {e.id}: invalid actor/target")
+            continue
+        # Check if relationship exists
+        # Note: Relationship table uses a < b
+        a, b = sorted([e.actor_id, target_id])
+        rel = session.query(Relationship).filter(
+            Relationship.world_id == world_id,
+            Relationship.character_a == a,
+            Relationship.character_b == b
+        ).first()
+        if not rel:
+            social_violations.append(f"event {e.id}: no relationship row")
+        elif e.event_type == "SOCIAL_INTERACTION":
+            delta = payload.get("affection_delta")
+            after = payload.get("affection_after")
+            if delta not in [2.0, -5.0]:
+                social_violations.append(f"event {e.id}: invalid delta {delta}")
+            if not (-100 <= (after or 0) <= 100):
+                social_violations.append(f"event {e.id}: invalid affection_after {after}")
+    ok_soc_int = len(social_violations) == 0
+    results.append({
+        "name": "social_event_integrity",
+        "ok": ok_soc_int,
+        "details": f"violations: {', '.join(social_violations)}" if social_violations else "none"
+    })
+
+    # i) relationship_event_link: relationship_events.event_id references world_events
+    rel_evs = session.query(RelationshipEvent).filter(RelationshipEvent.world_id == world_id).all()
+    link_violations = []
+    for re in rel_evs:
+        if re.event_id is not None:
+            exists = (
+                session.query(WorldEvent)
+                .filter(WorldEvent.id == re.event_id)
+                .first()
+                is not None
+            )
+            if not exists:
+                link_violations.append(f"rel_event {re.id} -> missing world_event {re.event_id}")
+    ok_rel_link = len(link_violations) == 0
+    results.append({
+        "name": "relationship_event_link",
+        "ok": ok_rel_link,
+        "details": f"violations: {', '.join(link_violations)}" if link_violations else "none"
+    })
+
+    # j) org_membership_integrity: 1 leader per org, every char in 1 community org
+    if not settings.social.enabled:
+        ok_org_int = True
+        org_violations = []
+    else:
+        orgs = session.query(Organization).filter(Organization.world_id == world_id).all()
+        org_violations = []
+        for o in orgs:
+            leaders = session.query(OrganizationMember).filter(
+                OrganizationMember.organization_id == o.id,
+                OrganizationMember.role == "leader"
+            ).count()
+            if leaders != 1:
+                org_violations.append(f"org {o.name}: {leaders} leaders")
+
+        community_orgs = [o.id for o in orgs if o.type == "community"]
+        chars = session.query(Character).filter(Character.world_id == world_id).all()
+        for c in chars:
+            member_count = session.query(OrganizationMember).filter(
+                OrganizationMember.character_id == c.id,
+                OrganizationMember.organization_id.in_(community_orgs)
+            ).count()
+            if member_count != 1:
+                org_violations.append(f"char {c.id}: {member_count} community memberships")
+        ok_org_int = len(org_violations) == 0
+    results.append({
+        "name": "org_membership_integrity",
+        "ok": ok_org_int,
+        "details": f"violations: {', '.join(org_violations)}" if org_violations else "none"
+    })
 
     return results

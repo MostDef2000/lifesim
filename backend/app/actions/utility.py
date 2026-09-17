@@ -30,6 +30,11 @@ def choose_action(
     # Needs are read-only during scoring, query once before the loop.
     needs = session.query(CharacterNeeds).filter_by(character_id=character.id).one()
 
+    # Per-decision read cache shared by all validate() calls in this loop.
+    # A decision never mutates the world between branch validations, so
+    # memoizing org/location/relationship lookups here is safe (R10).
+    decision_ctx = {}
+
     for action_def in ACTION_REGISTRY:
         action_type = action_def.name
 
@@ -38,7 +43,8 @@ def choose_action(
             continue
 
         ok, reason, needs_move, params = validate(
-            session, world_id, character, action_type, timestamp, settings
+            session, world_id, character, action_type, timestamp, settings,
+            needs=needs, ctx=decision_ctx,
         )
 
         if not ok:
@@ -65,6 +71,14 @@ def choose_action(
             # Buying food restores hunger
             score += settings.utility.weights.hunger * (100.0 - needs.hunger)
             score += settings.actions.BUY_ITEM.base_utility_weight
+        elif action_type == "SOCIALIZE":
+            if settings.social.enabled:
+                score += settings.utility.weights.social * (100.0 - needs.social)
+                base_w = (
+                    settings.actions.SOCIALIZE.base_utility_weight
+                    if settings.actions.SOCIALIZE else 0.3
+                )
+                score += base_w
         elif action_type == "IDLE":
             score = settings.actions.IDLE.base_utility_weight
 

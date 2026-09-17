@@ -3,7 +3,7 @@ import pathlib
 from typing import Any, Dict, List, Optional
 
 import yaml
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 class WorldConfig(BaseModel):
@@ -28,6 +28,7 @@ class NeedsRecovery(BaseModel):
     SLEEP: Dict[str, float]
     EAT: Dict[str, float]
     DRINK: Dict[str, float]
+    SOCIALIZE: Optional[Dict[str, float]] = None
 
 class NeedsConfig(BaseModel):
     decay_rates: NeedsDecay
@@ -57,6 +58,12 @@ class ActionsConfig(BaseModel):
     MOVE: ActionParams
     BUY_ITEM: ActionParams
     IDLE: ActionParams
+    SOCIALIZE: ActionParams = Field(
+        default_factory=lambda: ActionParams(
+            duration_minutes=30, max_duration_minutes=60,
+            base_utility_weight=0.3,
+        )
+    )
 
 class EconomyConfig(BaseModel):
     starting_balance: int
@@ -112,6 +119,16 @@ class LocationsConfig(BaseModel):
     locations: Dict[str, LocationParams]
     houses_count: int = 24
 
+class SocialConfig(BaseModel):
+    enabled: bool = False
+    interaction_minutes: int = 30
+    social_recovery_per_minute: float = 0.5
+    social_action_threshold: float = 40.0
+    refusal_threshold: float = -60.0
+    initial_affection: float = 0.0
+    initial_conflicts: int = 2
+    hub_location_types: List[str] = ["kitchen", "settlement"]
+
 class Settings(BaseModel):
     world: WorldConfig
     ticks: TicksConfig
@@ -125,6 +142,7 @@ class Settings(BaseModel):
     invariants: InvariantsConfig
     generation: GenerationConfig
     locations: LocationsConfig
+    social: SocialConfig = SocialConfig()
 
 def load_config(path: str) -> Settings:
     p = pathlib.Path(path)

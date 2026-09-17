@@ -26,6 +26,7 @@ def main(argv=None):
     sim_parser.add_argument("--seed", type=int, required=True)
     sim_parser.add_argument("--config", type=str, default="config/default.yaml")
     sim_parser.add_argument("--out", type=str, default=None)
+    sim_parser.add_argument("--social", action="store_true", default=False)
 
     args = parser.parse_args(argv)
 
@@ -41,7 +42,8 @@ def main(argv=None):
         # settings is a Pydantic model, we use model_copy for a clean update
         settings = settings.model_copy(
             update={
-                "world": settings.world.model_copy(update={"initial_population": args.population})
+                "world": settings.world.model_copy(update={"initial_population": args.population}),
+                "social": settings.social.model_copy(update={"enabled": args.social})
             }
         )
 
@@ -67,6 +69,10 @@ def main(argv=None):
             # Seed population
             rng = random.Random(args.seed)
             generate_population(session, settings, rng, world_id, args.population)
+
+            # M2: social seeding (org membership/leaders, seeded conflicts)
+            from app.world.social_seed import seed_social
+            seed_social(session, settings, world_id, rng)
 
             # 5. Run Simulation
             clock = WorldClock()

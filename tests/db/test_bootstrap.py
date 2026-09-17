@@ -35,7 +35,7 @@ def test_bootstrap_tables(tmp_path):
     # 2. Check if 20 tables exist
     cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'")
     tables = [row[0] for row in cursor.fetchall()]
-    assert len(tables) == 20, f"Expected 20 tables, found {len(tables)}: {tables}"
+    assert len(tables) == 23, f"Expected 23 tables, found {len(tables)}: {tables}"
 
     # Check basic rows
     cursor.execute("SELECT id, seed FROM worlds")
