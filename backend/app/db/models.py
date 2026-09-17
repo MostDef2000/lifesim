@@ -304,6 +304,34 @@ class WorldSnapshot(Base):
     path = Column(Text, nullable=False)
     notes = Column(Text, nullable=True)
 
+# 24. org_laws
+class OrgLaw(Base):
+    __tablename__ = "org_laws"
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    world_id = Column(String, ForeignKey("worlds.id"), nullable=False)
+    organization_id = Column(Integer, ForeignKey("organizations.id"), nullable=False)
+    law_key = Column(String, nullable=False)
+    enacted_by_character_id = Column(String, ForeignKey("characters.id"), nullable=False)
+    enacted_day = Column(Integer, nullable=False)
+    enacted_at = Column(Integer, nullable=False)
+    __table_args__ = (UniqueConstraint("world_id", "organization_id"),)
+
+# 25. org_law_violations
+class OrgLawViolation(Base):
+    __tablename__ = "org_law_violations"
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    world_id = Column(String, ForeignKey("worlds.id"), nullable=False)
+    organization_id = Column(Integer, ForeignKey("organizations.id"), nullable=False)
+    law_key = Column(String, nullable=False)
+    character_id = Column(String, ForeignKey("characters.id"), nullable=False)
+    game_day = Column(Integer, nullable=False)
+    game_timestamp = Column(Integer, nullable=False)
+    fine_paid = Column(Integer, nullable=False, default=0)
+    event_id = Column(Integer, ForeignKey("world_events.id"), nullable=True)
+    __table_args__ = (
+        UniqueConstraint("world_id", "organization_id", "law_key", "character_id", "game_day"),
+    )
+
 def create_engine_factory(settings: Settings):
     engine = create_engine(
         f"sqlite:///{settings.persistence.db_path}",
@@ -325,7 +353,7 @@ def bootstrap(engine, settings: Settings, seed: int):
 
     with Session(engine) as session:
         # Schema meta
-        session.merge(SchemaMeta(key="version", value="0.2.0"))
+        session.merge(SchemaMeta(key="version", value="0.3.0"))
 
         # World
         world_id = settings.world.world_id

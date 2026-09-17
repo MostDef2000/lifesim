@@ -32,10 +32,10 @@ def test_bootstrap_tables(tmp_path):
 
     assert db_sha == expected_sha, f"Expected {expected_sha}, found {db_sha}"
 
-    # 2. Check if 20 tables exist
+    # 2. Check if 25 tables exist (23 from M1/M2 + org_laws + org_law_violations in M3)
     cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'")
     tables = [row[0] for row in cursor.fetchall()]
-    assert len(tables) == 23, f"Expected 23 tables, found {len(tables)}: {tables}"
+    assert len(tables) == 25, f"Expected 25 tables, found {len(tables)}: {tables}"
 
     # Check basic rows
     cursor.execute("SELECT id, seed FROM worlds")

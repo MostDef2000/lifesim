@@ -27,6 +27,7 @@ def main(argv=None):
     sim_parser.add_argument("--config", type=str, default="config/default.yaml")
     sim_parser.add_argument("--out", type=str, default=None)
     sim_parser.add_argument("--social", action="store_true", default=False)
+    sim_parser.add_argument("--org", action="store_true", default=False)
 
     args = parser.parse_args(argv)
 
@@ -43,7 +44,8 @@ def main(argv=None):
         settings = settings.model_copy(
             update={
                 "world": settings.world.model_copy(update={"initial_population": args.population}),
-                "social": settings.social.model_copy(update={"enabled": args.social})
+                "social": settings.social.model_copy(update={"enabled": args.social}),
+                "org": settings.org.model_copy(update={"enabled": args.org})
             }
         )
 
@@ -73,6 +75,10 @@ def main(argv=None):
             # M2: social seeding (org membership/leaders, seeded conflicts)
             from app.world.social_seed import seed_social
             seed_social(session, settings, world_id, rng)
+
+            # M3: initial laws enactment
+            from app.policies.org import enact_initial_laws
+            enact_initial_laws(session, world_id, settings, timestamp=0)
 
             # 5. Run Simulation
             clock = WorldClock()

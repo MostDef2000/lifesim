@@ -129,6 +129,37 @@ class SocialConfig(BaseModel):
     initial_conflicts: int = 2
     hub_location_types: List[str] = ["kitchen", "settlement"]
 
+class LawEntry(BaseModel):
+    fine: int
+    enact_traits: Dict[str, int]
+
+class LawConfig(BaseModel):
+    enabled: bool = True
+    catalog: Dict[str, LawEntry] = Field(
+        default_factory=lambda: {
+            "no_conflict": LawEntry(
+                fine=5, enact_traits={"discipline": 1, "sociability": 0, "risk_tolerance": -1}
+            ),
+            "night_home": LawEntry(
+                fine=2, enact_traits={"discipline": 1, "sociability": -1, "risk_tolerance": 1}
+            ),
+        }
+    )
+
+class OrgReconciliationConfig(BaseModel):
+    enabled: bool = True
+    target_affection: float = -30.0
+
+class OrgConfig(BaseModel):
+    enabled: bool = False
+    election_interval_days: int = 7
+    dues_per_day: int = 1
+    feast_interval_days: int = 14
+    feast_cost: int = 30
+    feast_social_boost: float = 20.0
+    reconciliation: OrgReconciliationConfig = Field(default_factory=OrgReconciliationConfig)
+    laws: LawConfig = Field(default_factory=LawConfig)
+
 class Settings(BaseModel):
     world: WorldConfig
     ticks: TicksConfig
@@ -143,6 +174,7 @@ class Settings(BaseModel):
     generation: GenerationConfig
     locations: LocationsConfig
     social: SocialConfig = SocialConfig()
+    org: OrgConfig = Field(default_factory=OrgConfig)
 
 def load_config(path: str) -> Settings:
     p = pathlib.Path(path)
