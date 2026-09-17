@@ -73,3 +73,28 @@ curl -s -b jar -X POST localhost:8000/dialogue/start -H 'content-type: applicati
 WebSocket: `ws://127.0.0.1:8000/ws?token=<JWT из cookie vl1_session>` — поток world_events.
 Секрет сессий: переменная окружения `VL1_SECRET` (в dev используется небезопасный дефолт).
 Диалоги NPC: при `llm.enabled: false` — детерминированные fallback-ответы; с реальной моделью — через Ollama (см. specs/004-llm/plan.md).
+
+## M6: Визуальная генерация Flux (006-flux)
+
+Мир → визуальный слой: портреты персонажей, сцены локаций, реестр `visual_assets`, канонические референсы (§66-70). По умолчанию выключен (`visual.enabled: false`) — headless-мир не меняется.
+
+1. Включить визуал: `visual.enabled: true` в `config/default.yaml`.
+2. Транспорт: `visual.transport: stub` (детерминированные PNG-плейсхолдеры, CI) или `http` (реальный Flux-сервер: `base_url`, `model`, `lora`).
+3. Запустить: `vl1 serve`.
+
+Примеры:
+
+```bash
+# портрет своего персонажа (201; повтор без канона — новая генерация)
+curl -s -b jar -X POST localhost:8000/visual/portraits/plr_0001
+# назначить каноническим лицом (последующие генерации используют как reference §69-70)
+curl -s -b jar -X POST localhost:8000/visual/assets/1/canonical -H 'content-type: application/json' -d '{"canonical":true}'
+# повтор -> 200 {"reused": true} без вызова Flux
+curl -s -b jar -X POST localhost:8000/visual/portraits/plr_0001
+# сцена локации (канонические портреты персонажей сцены попадают в references)
+curl -s -b jar -X POST localhost:8000/visual/scenes -H 'content-type: application/json' -d '{"location_id":1}'
+# файл ассета
+curl -s -b jar localhost:8000/visual/assets/1/file -o asset.png
+```
+
+Границы MVP: только on-demand генерация по API (без автогенерации по событиям), локальное хранилище `data/visual_assets/`, weather в сцене — стаб (`clear`), реальный Flux не делает игровых решений (§15).

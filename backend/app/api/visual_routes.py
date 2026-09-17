@@ -89,9 +89,12 @@ def register_visual_routes(app, settings: Settings, session_factory: sessionmake
             world_id, character_id or location_id, asset_type, existing
         )
 
-        bytes_out = transport_factory().generate(
-            prompt, seed, visual_settings.image_size
-        )
+        try:
+            bytes_out = transport_factory().generate(
+                prompt, seed, visual_settings.image_size
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=502, detail=str(exc))
 
         asset = VisualAsset(
             world_id=world_id,
@@ -171,7 +174,8 @@ def register_visual_routes(app, settings: Settings, session_factory: sessionmake
         from app.db.models import VisualAsset
         from app.visual.descriptor import build_portrait_descriptor
 
-        character = _owned_character_for_portrait(session, request_user, cid)
+        # ownership + aliveness guard (404/422/403)
+        _owned_character_for_portrait(session, request_user, cid)
         # §70 reuse: existing canonical portrait -> return it, no generation
         canonical = (
             session.query(VisualAsset)

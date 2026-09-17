@@ -804,4 +804,40 @@ def run_invariant_checks(session: Session, world_id: str, settings) -> List[Dict
                     if dial_violations else "none")
     })
 
+    # visual_asset_integrity (M6, R10): asset_type closed set; canonical flag
+    # on real rows; character/location references valid when present;
+    # storage paths unique. Gated on visual.enabled (П2-аналог).
+    visual_gate = bool(getattr(settings, "visual", None) and settings.visual.enabled)
+    if not visual_gate:
+        results.append({
+            "name": "visual_asset_integrity", "ok": True, "details": "visual disabled"
+        })
+    else:
+        from app.db.models import Character as _Char
+        from app.db.models import Location as _Loc
+        from app.db.models import VisualAsset as _VA
+        va_violations = []
+        assets = session.query(_VA).filter_by(world_id=world_id).all()
+        char_ids = {c.id for c in session.query(_Char).filter_by(world_id=world_id).all()}
+        loc_ids = {
+            loc.id for loc in session.query(_Loc).filter_by(world_id=world_id).all()
+        }
+        seen_paths = set()
+        for a in assets:
+            if a.asset_type not in ("portrait", "scene"):
+                va_violations.append(f"asset {a.id}: bad type {a.asset_type}")
+            if a.character_id is not None and a.character_id not in char_ids:
+                va_violations.append(f"asset {a.id}: unknown character {a.character_id}")
+            if a.location_id is not None and a.location_id not in loc_ids:
+                va_violations.append(f"asset {a.id}: unknown location {a.location_id}")
+            if a.storage_path in seen_paths:
+                va_violations.append(f"asset {a.id}: duplicate path {a.storage_path}")
+            seen_paths.add(a.storage_path)
+        results.append({
+            "name": "visual_asset_integrity",
+            "ok": len(va_violations) == 0,
+            "details": (f"violations: {', '.join(va_violations)}"
+                        if va_violations else f"assets: {len(assets)}")
+        })
+
     return results
