@@ -67,3 +67,10 @@ drain-порядок: critical → interactive → background (FIFO по id вн
 - Юнит: schema-валидация ответов (валид/мусор/граничные), stub-детерминизм, приоритеты, бюджеты, memory capture/consolidate/select, диалог-журнал.
 - Интеграция: 7д/30д llm-on(stub) прогоны (AE1''/AE2''), детерминизм (AE4''), keystone llm-off на всех pinned-векторах M1/M2/M3 (AE5''), config sensitivity (AE6'').
 - Регрессия: полный fast-набор + slow (121 тестов M1-M3) зелёные до и после.
+
+## Ручной прогон с реальной моделью (T17, вне CI)
+
+1. Установить Ollama на домашнем AI-сервере (RTX 4070 Ti 12GB): `ollama pull qwen3:14b` (Tier 2), `ollama pull qwen3:4b` (Tier 1).
+2. В `config/default.yaml` выставить: `llm.enabled: true`, `llm.transport: ollama`, `llm.base_url: http://localhost:11434` (OllamaTransport обращается к `POST {base_url}/api/chat`, format=json, stream=false).
+3. Запуск: `vl1 simulate --days 7 --population 20 --seed 42 --social --org --llm` — решения/диалоги пойдут через модель; при недоступности сервера транспорт вернёт ошибку → retry 1 раз → request `failed`, мир продолжит детерминированный путь (П2 проверяется самим прогоном).
+4. Проверка: отчёт `ai.requests_by_status` — доля `done`/`failed`; инварианты `ai_request_integrity`/`memory_integrity` в отчёте зелёные.
