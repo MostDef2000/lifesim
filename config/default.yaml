@@ -254,3 +254,13 @@ external:
       description: "Tools and construction materials"
       services:
         - { service_type: "purchase", item_type: "tool_kit", price: 90, duration_minutes: 25 }
+
+admin:
+  registration_enabled: true
+  max_players: 0
+  rate_limit_enabled: true
+  global_rpm: 600
+  auth_rpm: 10
+  rate_limit_window_sec: 60
+  backup_dir: backups
+  backup_keep: 7

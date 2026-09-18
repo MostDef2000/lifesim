@@ -19,6 +19,7 @@ from app.db.models import (
     RelationshipEvent,
     ResourceBalance,
     Transaction,
+    User,
     WorldEvent,
     WorldObject,
 )
@@ -910,6 +911,40 @@ def run_invariant_checks(session: Session, world_id: str, settings) -> List[Dict
         "ok": len(ext_violations) == 0,
         "details": (f"violations: {', '.join(ext_violations)}"
                     if ext_violations else f"contacts: {len(ext_contacts)}")
+    })
+
+    # admin_integrity (M8, R11): audit entries reference admin-role users;
+    # disabled accounts have no live (planned/active) tasks.
+    from app.db.models import AdminAuditLog as _AAL
+    admin_violations = []
+    admin_roles = {"admin", "developer"}
+    users_by_id = {u.id: u for u in session.query(User).all()}
+    for entry in session.query(_AAL).filter_by(world_id=world_id).all():
+        actor = users_by_id.get(entry.admin_user_id)
+        if actor is None or actor.role not in admin_roles:
+            admin_violations.append(
+                f"audit {entry.id}: actor {entry.admin_user_id} not admin"
+            )
+    from app.db.models import CharacterTask as _CT
+    for u in session.query(User).filter(User.disabled == True).all():  # noqa: E712
+        player_rows = session.query(Character).filter_by(user_id=u.id).all()
+        player_ids = [c.id for c in player_rows]
+        if player_ids:
+            live = (
+                session.query(_CT)
+                .filter(
+                    _CT.character_id.in_(player_ids),
+                    _CT.status.in_(["planned", "active"]),
+                )
+                .count()
+            )
+            if live > 0:
+                admin_violations.append(f"user {u.id}: disabled with live tasks")
+    results.append({
+        "name": "admin_integrity",
+        "ok": len(admin_violations) == 0,
+        "details": (f"violations: {', '.join(admin_violations)}"
+                    if admin_violations else "ok")
     })
 
     return results

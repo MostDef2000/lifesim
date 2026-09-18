@@ -37,10 +37,28 @@ def main(argv=None):
         help="existing world DB path (overrides config)"
     )
 
+    backup_parser = subparsers.add_parser("backup")
+    backup_parser.add_argument("--config", type=str, default="config/default.yaml")
+    backup_parser.add_argument(
+        "--db", type=str, default=None,
+        help="existing world DB path (overrides config)"
+    )
+    backup_parser.add_argument(
+        "--backup-dir", type=str, default=None,
+        help="backup output directory (overrides config admin.backup_dir)"
+    )
+    backup_parser.add_argument(
+        "--keep", type=int, default=None,
+        help="retention count (overrides config admin.backup_keep)"
+    )
+
     args = parser.parse_args(argv)
 
     if args.command == "serve":
         return _run_serve(args)
+
+    if args.command == "backup":
+        return _run_backup(args)
 
     if args.command != "simulate":
         parser.print_help()
@@ -134,10 +152,6 @@ def main(argv=None):
         return 3
 
 
-if __name__ == "__main__":
-    sys.exit(main())
-
-
 def _run_serve(args) -> int:
     """M5 (SPEC §104): start the web-api. Requires api.enabled=true (AE6''')."""
     try:
@@ -177,3 +191,70 @@ def _run_serve(args) -> int:
 
     uvicorn.run(app, host=settings.api.host, port=settings.api.port, log_level="info")
     return 0
+
+
+def _run_backup(args) -> int:
+    """M8 (§87): consistent snapshot of DB + visual assets, with retention.
+
+    Uses sqlite3 Connection.backup (safe on a live WAL database — read-only
+    on the source). Assets are copied if the directory exists. Keeps the
+    newest `admin.backup_keep` DB backups; older files are removed.
+    """
+    import shutil
+    import sqlite3
+    from datetime import datetime as _dt
+    from pathlib import Path
+
+    try:
+        settings = load_config(args.config)
+    except Exception as e:
+        print(f"Error loading config: {e}", file=sys.stderr)
+        return 3
+
+    db_path = args.db or settings.persistence.db_path
+    if not os.path.exists(db_path):
+        print(f"Error: database not found: {db_path}", file=sys.stderr)
+        return 2
+
+    backup_dir = Path(args.backup_dir or settings.admin.backup_dir)
+    backup_dir.mkdir(parents=True, exist_ok=True)
+    stamp = _dt.utcnow().strftime("%Y%m%d_%H%M%S")
+    # collision-proof stamp (multiple backups within one second)
+    suffix = 0
+    while (backup_dir / f"world_{stamp}.db").exists():
+        suffix += 1
+        stamp = f"{_dt.utcnow().strftime('%Y%m%d_%H%M%S')}_{suffix}"
+
+    # 1. consistent DB snapshot
+    db_backup = backup_dir / f"world_{stamp}.db"
+    src = sqlite3.connect(db_path)
+    dst = sqlite3.connect(str(db_backup))
+    with dst:
+        src.backup(dst)
+    dst.close()
+    src.close()
+
+    # 2. visual assets (§87: images may be backed up less often, but a full
+    #    copy per run keeps the snapshot self-contained)
+    assets_src = Path("data/visual_assets")
+    if assets_src.exists():
+        shutil.copytree(assets_src, backup_dir / f"assets_{stamp}")
+
+    # 3. retention: keep newest backup_keep DB files
+    backups = sorted(backup_dir.glob("world_*.db"))
+    removed = 0
+    keep = args.keep if args.keep is not None else settings.admin.backup_keep
+    for old in backups[: max(0, len(backups) - keep)]:
+        old.unlink()
+        removed += 1
+
+    print(
+        f"backup ok: {db_backup} "
+        f"(assets: {'yes' if assets_src.exists() else 'none'}; "
+        f"retention removed: {removed})"
+    )
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

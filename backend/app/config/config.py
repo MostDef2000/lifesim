@@ -235,6 +235,17 @@ class ExternalConfig(BaseModel):
     contact_probability: float = 0.5  # second contact per NPC
     locations: List[ExternalLocationSpec] = Field(default_factory=list)
 
+class AdminConfig(BaseModel):
+    """M8 (§85/§27/§107): public alpha operations."""
+    registration_enabled: bool = True
+    max_players: int = 0  # 0 = unlimited
+    rate_limit_enabled: bool = True
+    global_rpm: int = 600
+    auth_rpm: int = 10
+    rate_limit_window_sec: int = 60
+    backup_dir: str = "backups"
+    backup_keep: int = 7
+
 class Settings(BaseModel):
     world: WorldConfig
     ticks: TicksConfig
@@ -254,6 +265,7 @@ class Settings(BaseModel):
     api: ApiConfig = Field(default_factory=ApiConfig)
     visual: VisualConfig = Field(default_factory=VisualConfig)
     external: ExternalConfig = Field(default_factory=ExternalConfig)
+    admin: AdminConfig = Field(default_factory=AdminConfig)
 
 def load_config(path: str) -> Settings:
     p = pathlib.Path(path)

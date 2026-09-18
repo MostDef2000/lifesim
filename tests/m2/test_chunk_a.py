@@ -53,7 +53,7 @@ def test_schema_version(default_settings):
     Session = sessionmaker(bind=engine)
     session = Session()
     version = session.query(SchemaMeta).filter_by(key="version").first().value
-    assert version == "0.7.0"
+    assert version == "0.8.0"
 
 def _world_with_population(default_settings, rng_seed: int = 42,
                            social_enabled: bool = True):

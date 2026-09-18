@@ -41,3 +41,7 @@ Thumbs.db
 runs/
 snapshots/
 *.db
+
+# Runtime artifacts (M8)
+backups/
+data/
