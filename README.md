@@ -98,3 +98,22 @@ curl -s -b jar localhost:8000/visual/assets/1/file -o asset.png
 ```
 
 Границы MVP: только on-demand генерация по API (без автогенерации по событиям), локальное хранилище `data/visual_assets/`, weather в сцене — стаб (`clear`), реальный Flux не делает игровых решений (§15).
+
+## M7: Внешний Владивосток (007-external)
+
+Владивосток — внешний условно симулируемый мир (§38): `external_locations`/`external_services`/`external_contacts`, без физической симуляции. Поездка — штатная задача `TRAVEL_EXTERNAL` (§39): порт → сервис → возврат. NPC-utility выключен (`external.npc_utility: false`) — headless-мир M1-M4 байт-идентичен.
+
+```bash
+# каталог внешних сервисов (больница/супермаркет/хозяйственный)
+curl -s -b jar localhost:8000/external
+# биографические контакты персонажа (владелец)
+curl -s -b jar localhost:8000/characters/plr_0001/contacts
+# поездка за лечением (сначала MOVE к пирсу, если не там — валидатор вернёт needs_move)
+curl -s -b jar -X POST localhost:8000/actions -H 'content-type: application/json' \
+  -d '{"character_id":"plr_0001","action_type":"TRAVEL_EXTERNAL","params":{"service_id":1,"purpose":"heal"}}'
+# поездка за покупками (корзина через items, приходит инвентарём на возврате)
+curl -s -b jar -X POST localhost:8000/actions -H 'content-type: application/json' \
+  -d '{"character_id":"plr_0001","action_type":"TRAVEL_EXTERNAL","params":{"service_id":2,"purpose":"shop","items":{"food_groceries":2}}}'
+```
+
+Экономика поездки: транзит + покупки — через ledger (`EXTERNAL_TRAVEL`/`EXTERNAL_PURCHASE`), предметы — стандартный inventory-контур (П1). Каталог и цены — в `config/default.yaml` (`external:`). Инварианты: `external_integrity`, object_conservation учитывает внешний приход.
