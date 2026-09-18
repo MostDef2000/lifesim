@@ -14,7 +14,7 @@ from app.db.models import (
 )
 from app.economy import transfer as economy_transfer
 from app.events.events import EventType, log_event
-from app.inventory import adjust_resource, consume_object, transfer_object
+from app.inventory import adjust_resource, consume_object, create_object, transfer_object
 from app.world.seed_world import find_path
 
 
@@ -202,6 +202,98 @@ def complete_task(
                 actor_id=character.id,
                 payload={"object_id": obj_id, "price": price}
             )
+
+    elif task_type == "TRAVEL_EXTERNAL":
+        # M7 (SPEC §39): off-island trip completion.
+        # Order: DEPARTED -> ledger/purchases/heal -> RETURNED.
+        from app.db.models import ExternalService
+        from app.economy import get_balance as _get_balance
+
+        service = session.get(ExternalService, params.get("service_id"))
+        purpose = params.get("purpose", "")
+        travel_cost = int(params.get("travel_cost", 0))
+        basket_cost = int(params.get("basket_cost", 0))
+        items = params.get("items") or {}
+
+        if service is None or service.world_id != world_id:
+            fail_task(session, world_id, character, task, game_timestamp, "service gone")
+            return
+
+        log_event(
+            session, world_id, game_timestamp, EventType.TRAVEL_EXTERNAL_DEPARTED,
+            actor_id=character.id,
+            payload={"service_id": service.id, "purpose": purpose,
+                     "travel_cost": travel_cost},
+        )
+
+        char_acc = (
+            session.query(Account)
+            .filter_by(owner_type="character", owner_id=character.id)
+            .one()
+        )
+        if _get_balance(session, char_acc.id) < travel_cost + basket_cost:
+            fail_task(
+                session, world_id, character, task, game_timestamp,
+                "insufficient funds at departure",
+            )
+            return
+
+        spent = 0
+        # Ferry cost -> business org (ferry operator stand-in)
+        business = (
+            session.query(Organization)
+            .filter_by(world_id=world_id, type="business")
+            .first()
+        )
+        if business is not None and travel_cost > 0:
+            business_acc = (
+                session.query(Account)
+                .filter_by(owner_type="organization", owner_id=str(business.id))
+                .one()
+            )
+            economy_transfer(
+                session, world_id, game_timestamp, char_acc.id, business_acc.id,
+                travel_cost, reason="EXTERNAL_TRAVEL",
+            )
+            spent += travel_cost
+
+        # Purchase basket: transfer + new inventory objects (external import)
+        if items and service.service_type == "purchase":
+            if basket_cost > 0:
+                business_acc = (
+                    session.query(Account)
+                    .filter_by(owner_type="organization", owner_id=str(business.id))
+                    .one()
+                )
+                economy_transfer(
+                    session, world_id, game_timestamp, char_acc.id, business_acc.id,
+                    basket_cost, reason="EXTERNAL_PURCHASE",
+                )
+                spent += basket_cost
+            for item_type, qty in items.items():
+                create_object(
+                    session, world_id, item_type, character.location_id, qty,
+                    owner_character_id=character.id,
+                    metadata={"source": "external_purchase",
+                              "external_location_id": service.external_location_id},
+                )
+
+        healed = 0.0
+        if service.service_type == "treatment":
+            from app.db.models import CharacterHealth
+            health = session.get(CharacterHealth, character.id)
+            if health is not None:
+                heal_amount = float(service.heal_amount or 0.0)
+                before = health.health
+                health.health = min(100.0, health.health + heal_amount)
+                healed = round(health.health - before, 2)
+
+        log_event(
+            session, world_id, game_timestamp, EventType.TRAVEL_EXTERNAL_RETURNED,
+            actor_id=character.id,
+            payload={"purpose": purpose, "spent": spent, "items": items,
+                     "healed": healed},
+        )
 
     elif task_type == "SOCIALIZE":
         from app.db.models import Character, Relationship

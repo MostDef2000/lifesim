@@ -445,6 +445,42 @@ class VisualAsset(Base):
     canonical = Column(Boolean, nullable=False, default=False)  # §69
     created_at = Column(String, nullable=False)
 
+class ExternalLocation(Base):
+    """M7 (SPEC §38): external world entity — conditionally simulated, no physics."""
+    __tablename__ = "external_locations"
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    world_id = Column(String, ForeignKey("worlds.id"), nullable=False)
+    name = Column(String, nullable=False)
+    # hospital|university|hardware_store|government|port|bank|supermarket
+    ext_type = Column(String, nullable=False)
+    description = Column(Text, nullable=True)
+
+
+class ExternalService(Base):
+    """M7: a purchasable service at an external location (fixed price, §74-style)."""
+    __tablename__ = "external_services"
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    world_id = Column(String, ForeignKey("worlds.id"), nullable=False)
+    external_location_id = Column(Integer, ForeignKey("external_locations.id"), nullable=False)
+    service_type = Column(String, nullable=False)  # treatment|purchase|visit|registration|transfer
+    item_type = Column(String, nullable=True)  # for purchase services
+    price = Column(Integer, nullable=False, default=0)
+    heal_amount = Column(Float, nullable=True)  # for treatment
+    duration_minutes = Column(Integer, nullable=False, default=30)
+
+
+class ExternalContact(Base):
+    """M7 (§106): biographical connection of a character to the external world."""
+    __tablename__ = "external_contacts"
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    world_id = Column(String, ForeignKey("worlds.id"), nullable=False)
+    character_id = Column(String, ForeignKey("characters.id"), nullable=False)
+    contact_type = Column(String, nullable=False)  # family|friend|colleague|official
+    name = Column(String, nullable=False)
+    external_location_id = Column(Integer, ForeignKey("external_locations.id"), nullable=True)
+    note = Column(Text, nullable=True)
+
+
 def create_engine_factory(settings: Settings):
     engine = create_engine(
         f"sqlite:///{settings.persistence.db_path}",
@@ -466,7 +502,7 @@ def bootstrap(engine, settings: Settings, seed: int):
 
     with Session(engine) as session:
         # Schema meta
-        session.merge(SchemaMeta(key="version", value="0.6.0"))
+        session.merge(SchemaMeta(key="version", value="0.7.0"))
 
         # World
         world_id = settings.world.world_id
