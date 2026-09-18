@@ -387,7 +387,21 @@ class User(Base):
     password_hash = Column(String, nullable=False)
     role = Column(String, nullable=False, default="user")  # user|moderator|admin|developer (§82)
     age_confirmed = Column(Boolean, nullable=False, default=False)  # П4: 18+
+    disabled = Column(Boolean, nullable=False, default=False)  # M8 (§84): account moderation
     created_at = Column(Integer, nullable=False)
+
+
+# M8 (§86): administrative action audit
+class AdminAuditLog(Base):
+    __tablename__ = "admin_audit_log"
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    world_id = Column(String, nullable=True)
+    admin_user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    action = Column(String, nullable=False)
+    target_type = Column(String, nullable=False)  # world|user|character|task
+    target_id = Column(String, nullable=True)
+    payload = Column(JSON, nullable=True)
+    wall_created_at = Column(String, nullable=False)
 
 # 30. character_goals (M5, SPEC §62)
 class CharacterGoal(Base):
@@ -502,7 +516,7 @@ def bootstrap(engine, settings: Settings, seed: int):
 
     with Session(engine) as session:
         # Schema meta
-        session.merge(SchemaMeta(key="version", value="0.7.0"))
+        session.merge(SchemaMeta(key="version", value="0.8.0"))
 
         # World
         world_id = settings.world.world_id

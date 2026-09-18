@@ -36,6 +36,62 @@ def create_app(settings, session_factory: sessionmaker):
     app = FastAPI(title="VL1 LifeSim API", version="0.1.0")
     state: dict[str, Any] = {"settings": settings, "session_factory": session_factory}
 
+    # M8 (§88): request-id + access log
+    @app.middleware("http")
+    async def request_id_middleware(request: Request, call_next):
+        import time as _time
+        import uuid as _uuid
+
+        request_id = request.headers.get("x-request-id") or str(_uuid.uuid4())
+        started = _time.perf_counter()
+        response = await call_next(request)
+        duration_ms = int((_time.perf_counter() - started) * 1000)
+        response.headers["X-Request-ID"] = request_id
+        print(
+            f"request_id={request_id} method={request.method} "
+            f"path={request.url.path} status={response.status_code} "
+            f"duration_ms={duration_ms}",
+            flush=True,
+        )
+        return response
+
+    # M8 (§27): per-IP sliding-window rate limits (in-memory, per-process)
+    if settings.admin.rate_limit_enabled:
+        import collections
+
+        _hits: dict[str, collections.deque] = {}
+
+        def _client_ip(request: Request) -> str:
+            forwarded = request.headers.get("x-forwarded-for")
+            if forwarded:
+                return forwarded.split(",")[0].strip()
+            return request.client.host if request.client else "unknown"
+
+        @app.middleware("http")
+        async def rate_limit_middleware(request: Request, call_next):
+            import time as _time
+
+            ip = _client_ip(request)
+            now = _time.time()
+            window = settings.admin.rate_limit_window_sec
+            is_auth = request.url.path.startswith("/auth/")
+            limit = settings.admin.auth_rpm if is_auth else settings.admin.global_rpm
+            bucket = _hits.setdefault(ip, collections.deque())
+            while bucket and now - bucket[0] > window:
+                bucket.popleft()
+            if len(bucket) >= limit:
+                from fastapi.responses import PlainTextResponse
+
+                return PlainTextResponse(
+                    "rate limit exceeded",
+                    status_code=429,
+                    headers={"Retry-After": str(window)},
+                )
+            bucket.append(now)
+            return await call_next(request)
+
+    app.state.ws_connections = 0
+
     def db() -> Session:
         s = state["session_factory"]()
         try:
@@ -58,6 +114,8 @@ def create_app(settings, session_factory: sessionmaker):
         user = session.get(User, int(payload["sub"]))
         if user is None:
             raise HTTPException(status_code=401, detail="user not found")
+        if user.disabled:  # M8 (§84): banned accounts lose API access
+            raise HTTPException(status_code=403, detail="account disabled")
         return user
 
     # ---------- Schemas ----------
@@ -110,6 +168,13 @@ def create_app(settings, session_factory: sessionmaker):
 
     @app.post("/auth/register", status_code=201)
     def register(body: RegisterIn, session: Session = Depends(db)):
+        # M8 (§85): registration controls
+        if not settings.admin.registration_enabled:
+            raise HTTPException(status_code=403, detail="registration disabled")
+        if settings.admin.max_players > 0:
+            users_count = session.query(User).count()
+            if users_count >= settings.admin.max_players:
+                raise HTTPException(status_code=409, detail="max players reached")
         errors = validate_registration(body.username, body.email, body.password, body.age_confirmed)
         if errors:
             return JSONResponse(status_code=422, content={"detail": errors})
@@ -137,6 +202,8 @@ def create_app(settings, session_factory: sessionmaker):
         user = session.query(User).filter_by(username=body.username).first()
         if user is None or not verify_password(body.password, user.password_hash):
             raise HTTPException(status_code=401, detail="invalid credentials")
+        if user.disabled:  # M8 (§84): account moderation
+            raise HTTPException(status_code=403, detail="account disabled")
         _set_cookie(response, user)
         return {"id": user.id, "username": user.username}
 

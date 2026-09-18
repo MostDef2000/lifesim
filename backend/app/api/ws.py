@@ -58,6 +58,8 @@ def register_ws_route(app, settings, session_factory) -> None:
             return
 
         await websocket.accept()
+        # M8 (§89): live connection counter for /admin/overview
+        app.state.ws_connections = getattr(app.state, "ws_connections", 0) + 1
         cursor = 0
         await websocket.send_json({"type": "hello", "cursor": cursor})
 
@@ -89,8 +91,10 @@ def register_ws_route(app, settings, session_factory) -> None:
 
                 await asyncio.sleep(interval)
         except WebSocketDisconnect:
+            app.state.ws_connections = max(0, getattr(app.state, "ws_connections", 1) - 1)
             return
         except Exception:
+            app.state.ws_connections = max(0, getattr(app.state, "ws_connections", 1) - 1)
             try:
                 await websocket.close()
             except Exception:
