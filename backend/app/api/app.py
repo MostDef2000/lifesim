@@ -672,6 +672,63 @@ def create_app(settings, session_factory: sessionmaker):
 
     register_ws_route(app, settings, session_factory)
 
+    # ---------- External Vladivostok (M7, §38-39/106) ----------
+
+    @app.get("/external")
+    def get_external(
+        user: User = Depends(current_user), session: Session = Depends(db)
+    ):
+        from app.db.models import ExternalLocation, ExternalService
+
+        locations = (
+            session.query(ExternalLocation)
+            .filter_by(world_id=state["settings"].world.world_id)
+            .order_by(ExternalLocation.id)
+            .all()
+        )
+        services = (
+            session.query(ExternalService)
+            .filter_by(world_id=state["settings"].world.world_id)
+            .order_by(ExternalService.id)
+            .all()
+        )
+        by_loc: dict = {}
+        for svc in services:
+            by_loc.setdefault(svc.external_location_id, []).append({
+                "id": svc.id, "service_type": svc.service_type,
+                "item_type": svc.item_type, "price": svc.price,
+                "heal_amount": svc.heal_amount,
+                "duration_minutes": svc.duration_minutes,
+            })
+        return [
+            {
+                "id": loc.id, "name": loc.name, "ext_type": loc.ext_type,
+                "description": loc.description, "services": by_loc.get(loc.id, []),
+            }
+            for loc in locations
+        ]
+
+    @app.get("/characters/{cid}/contacts")
+    def get_contacts(
+        cid: str, user: User = Depends(current_user), session: Session = Depends(db)
+    ):
+        from app.db.models import ExternalContact
+
+        character = _owned_character(session, user, cid)
+        contacts = (
+            session.query(ExternalContact)
+            .filter_by(world_id=state["settings"].world.world_id, character_id=character.id)
+            .order_by(ExternalContact.id)
+            .all()
+        )
+        return [
+            {
+                "id": c.id, "contact_type": c.contact_type, "name": c.name,
+                "external_location_id": c.external_location_id, "note": c.note,
+            }
+            for c in contacts
+        ]
+
     # M6 (R1, §105): visual routes behind the visual.enabled gate
     from app.api.visual_routes import register_visual_routes
 
