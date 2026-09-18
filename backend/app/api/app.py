@@ -91,6 +91,9 @@ def create_app(settings, session_factory: sessionmaker):
             return await call_next(request)
 
     app.state.ws_connections = 0
+    import time as _time
+
+    app.state.started_at = _time.time()
 
     def db() -> Session:
         s = state["session_factory"]()
@@ -733,6 +736,267 @@ def create_app(settings, session_factory: sessionmaker):
     app.state.session_factory = session_factory
     app.state.current_user = current_user
     app.state.db = db
+
+    # ---------- Admin (M8, §82-86) ----------
+
+    def require_role(minimum: str):
+        allowed = {
+            "moderator": {"moderator", "admin", "developer"},
+            "admin": {"admin", "developer"},
+        }[minimum]
+
+        def guard(user: User = Depends(current_user)) -> User:
+            if user.role not in allowed:
+                raise HTTPException(status_code=403, detail="insufficient role")
+            return user
+
+        return guard
+
+    def audit(
+        session: Session, admin_user: User, action: str,
+        target_type: str, target_id, payload=None,
+    ):
+        from datetime import datetime as _dt
+
+        from app.db.models import AdminAuditLog
+
+        entry = AdminAuditLog(
+            world_id=state["settings"].world.world_id,
+            admin_user_id=admin_user.id,
+            action=action,
+            target_type=target_type,
+            target_id=str(target_id) if target_id is not None else None,
+            payload=payload or {},
+            wall_created_at=_dt.utcnow().isoformat(),
+        )
+        session.add(entry)
+        session.flush()
+
+    @app.get("/admin/overview")
+    def admin_overview(
+        user: User = Depends(require_role("moderator")),
+        session: Session = Depends(db),
+    ):
+        import time as _time
+
+        from app.db.models import (
+            Character,
+            CharacterTask,
+            WorldClock,
+            WorldEvent,
+        )
+
+        world_id = state["settings"].world.world_id
+        started = getattr(app.state, "started_at", None)
+        users_count = session.query(User).count()
+        players = session.query(Character).filter(Character.user_id.isnot(None)).count()
+        npcs = session.query(Character).filter(Character.user_id.is_(None)).count()
+        active_tasks = (
+            session.query(CharacterTask)
+            .filter(CharacterTask.status.in_(["planned", "active"]))
+            .count()
+        )
+        hour_ago = max(0, _world_now(session) - 60)
+        events_last_hour = (
+            session.query(WorldEvent)
+            .filter(
+                WorldEvent.world_id == world_id,
+                WorldEvent.id > 0,
+                WorldEvent.game_timestamp >= hour_ago,
+            )
+            .count()
+        )
+        clock = session.get(WorldClock, world_id)
+        return {
+            "users": users_count,
+            "players": players,
+            "npcs": npcs,
+            "active_tasks": active_tasks,
+            "events_last_hour": events_last_hour,
+            "world_clock": {
+                "game_timestamp": clock.game_timestamp if clock else 0,
+                "day": (clock.game_timestamp // 1440) if clock else 0,
+                "is_paused": bool(clock.is_paused) if clock else False,
+                "time_scale": clock.time_scale if clock else 1.0,
+            },
+            "schema_version": "0.8.0",
+            "uptime_sec": int(_time.time() - started) if started else 0,
+            "ws_connections": getattr(app.state, "ws_connections", 0),
+        }
+
+    class TimescaleIn(BaseModel):
+        time_scale: float
+
+    class TeleportIn(BaseModel):
+        location_id: int
+
+    @app.post("/admin/world/pause")
+    def admin_pause(
+        user: User = Depends(require_role("admin")), session: Session = Depends(db)
+    ):
+        from app.db.models import WorldClock
+
+        clock = session.get(WorldClock, state["settings"].world.world_id)
+        if clock is None:
+            raise HTTPException(status_code=404, detail="world clock not found")
+        previous = bool(clock.is_paused)
+        clock.is_paused = True
+        audit(session, user, "pause_world", "world",
+              state["settings"].world.world_id, {"previous": previous})
+        session.commit()
+        return {"is_paused": True}
+
+    @app.post("/admin/world/resume")
+    def admin_resume(
+        user: User = Depends(require_role("admin")), session: Session = Depends(db)
+    ):
+        from app.db.models import WorldClock
+
+        clock = session.get(WorldClock, state["settings"].world.world_id)
+        if clock is None:
+            raise HTTPException(status_code=404, detail="world clock not found")
+        clock.is_paused = False
+        audit(session, user, "resume_world", "world",
+              state["settings"].world.world_id, {})
+        session.commit()
+        return {"is_paused": False}
+
+    @app.post("/admin/world/timescale")
+    def admin_timescale(
+        body: TimescaleIn,
+        user: User = Depends(require_role("admin")),
+        session: Session = Depends(db),
+    ):
+        from app.db.models import WorldClock
+
+        if body.time_scale <= 0:
+            raise HTTPException(status_code=422, detail="time_scale must be > 0")
+        clock = session.get(WorldClock, state["settings"].world.world_id)
+        if clock is None:
+            raise HTTPException(status_code=404, detail="world clock not found")
+        previous = clock.time_scale
+        clock.time_scale = body.time_scale
+        audit(session, user, "set_timescale", "world",
+              state["settings"].world.world_id,
+              {"previous": previous, "new": body.time_scale})
+        session.commit()
+        return {"time_scale": body.time_scale}
+
+    @app.post("/admin/characters/{cid}/teleport")
+    def admin_teleport(
+        cid: str,
+        body: TeleportIn,
+        user: User = Depends(require_role("admin")),
+        session: Session = Depends(db),
+    ):
+        from app.db.models import Location
+
+        character = (
+            session.query(Character)
+            .filter_by(world_id=state["settings"].world.world_id, id=cid)
+            .first()
+        )
+        if character is None:
+            raise HTTPException(status_code=404, detail="character not found")
+        if not character.alive:
+            raise HTTPException(status_code=422, detail="character is not alive")
+        location = session.get(Location, body.location_id)
+        if location is None or location.world_id != state["settings"].world.world_id:
+            raise HTTPException(status_code=422, detail="unknown location")
+        previous = character.location_id
+        character.location_id = body.location_id
+        audit(session, user, "teleport_character", "character", cid,
+              {"previous": previous, "new": body.location_id})
+        session.commit()
+        return {"character_id": cid, "location_id": body.location_id}
+
+    @app.post("/admin/tasks/{task_id}/cancel")
+    def admin_cancel_task(
+        task_id: str,
+        user: User = Depends(require_role("admin")),
+        session: Session = Depends(db),
+    ):
+        from app.db.models import CharacterTask
+
+        task = session.get(CharacterTask, int(task_id))
+        if task is None:
+            raise HTTPException(status_code=404, detail="task not found")
+        if task.status in ("completed", "failed", "cancelled"):
+            raise HTTPException(status_code=409, detail="task already terminal")
+        now_ts = _world_now(session)
+        task.status = "cancelled"
+        if task.ends_at is None or task.ends_at > now_ts:
+            task.ends_at = now_ts  # stop-the-clock semantics (§61)
+        audit(session, user, "cancel_task", "task", task_id,
+              {"character_id": task.character_id, "previous_status": task.status})
+        session.commit()
+        return {"task_id": task.id, "status": task.status}
+
+    @app.post("/admin/users/{user_id}/disable")
+    def admin_disable_user(
+        user_id: int,
+        user: User = Depends(require_role("admin")),
+        session: Session = Depends(db),
+    ):
+        target = session.get(User, user_id)
+        if target is None:
+            raise HTTPException(status_code=404, detail="user not found")
+        if target.id == user.id:
+            raise HTTPException(status_code=422, detail="cannot disable yourself")
+        target.disabled = True
+        # Kill in-flight work of the banned account (§84: disable account)
+        from app.db.models import Character, CharacterTask
+
+        player_ids = [
+            c.id for c in session.query(Character).filter_by(user_id=target.id).all()
+        ]
+        if player_ids:
+            session.query(CharacterTask).filter(
+                CharacterTask.character_id.in_(player_ids),
+                CharacterTask.status.in_(["planned", "active"]),
+            ).update({"status": "cancelled"}, synchronize_session=False)
+        audit(session, user, "disable_account", "user", target.id,
+              {"username": target.username, "cancelled_tasks": len(player_ids)})
+        session.commit()
+        return {"user_id": target.id, "disabled": True}
+
+    @app.post("/admin/users/{user_id}/enable")
+    def admin_enable_user(
+        user_id: int,
+        user: User = Depends(require_role("admin")),
+        session: Session = Depends(db),
+    ):
+        target = session.get(User, user_id)
+        if target is None:
+            raise HTTPException(status_code=404, detail="user not found")
+        target.disabled = False
+        audit(session, user, "enable_account", "user", target.id, {})
+        session.commit()
+        return {"user_id": target.id, "disabled": False}
+
+    @app.get("/admin/audit")
+    def admin_audit(
+        limit: int = 50,
+        user: User = Depends(require_role("moderator")),
+        session: Session = Depends(db),
+    ):
+        from app.db.models import AdminAuditLog
+
+        limit = max(1, min(limit, 500))
+        rows = (
+            session.query(AdminAuditLog)
+            .order_by(AdminAuditLog.id.desc())
+            .limit(limit)
+            .all()
+        )
+        return [
+            {
+                "id": r.id, "admin_user_id": r.admin_user_id, "action": r.action,
+                "target_type": r.target_type, "target_id": r.target_id,
+                "payload": r.payload, "wall_created_at": r.wall_created_at,
+            }
+            for r in rows
+        ]
 
     # M5 (R9, §79): WebSocket event stream
     from app.api.ws import register_ws_route
