@@ -2,23 +2,30 @@
 
 ## Outcome
 
-Мир имеет погоду: на каждый игровой день детерминированно (seed+день) генерируется `weather_state` (temperature, wind, precipitation, cloudiness, visibility — §71). Погода видна в API и в шапке UI, участвует в Flux-descriptor (вместо хардкода «clear») и мягко влияет на needs-декей (MVP: один множитель на холод). Искусственная генерация разрешена §71 («Для MVP можно использовать искусственную генерацию»).
+Мир имеет погоду: на каждый игровой день формируется `weather_state` (temperature, wind, precipitation, cloudiness, visibility — §71) из **двух источников**:
+- **synthetic** (default, MVP): детерминированная искусственная генерация (seed+день) — разрешена §71.
+- **historical**: **реальная погода на острове Рейнеке (42.98°N, 132.55°E, залив Петра Великого) год назад за тот же календарный день**. Игровое время отображается на реальное с модификатором скорости (time_scale — «как в Симс»): игровой день N соответствует реальной дате `start_real_date + N·(1440/time_scale) минут`; погода берётся за эту дату минус 1 год из архива Open-Meteo Historical Weather API (ERA5, бесплатно, без ключа, JSON, timezone=Asia/Vladivostok).
+
+Погода видна в API и в шапке UI, участвует в Flux-descriptor (вместо хардкода «clear») и мягко влияет на needs-декей (MVP: множитель на холод).
 
 ## Scope
 
 - **Included**:
-  - Таблица `weather_state` (§71): id, world_id, day (unique вместе с world_id), temperature (Float, °C), wind (Float, м/с), precipitation (Float, мм), cloudiness (Float 0-1), visibility (Float, км). Schema 0.8.0 → **0.9.0** (38 таблиц).
-  - Генерация `app/simulation/weather.py::generate_weather(day, seed, config) -> WeatherSample`: детерминированный rng (sha256(seed, day) → uniform-потоки), сезонный базовый профиль из конфига (усреднённый умеренный климат Приморья: t −18…+24 по сезонам, ветер 0-15, осадки 0-12, облачность 0-1, видимость 0.2-30 — туман коррелирует со штилем+влажностью).
+  - Таблица `weather_state` (§71): id, world_id, day (unique вместе с world_id), temperature (Float, °C), wind (Float, м/с), precipitation (Float, мм), cloudiness (Float 0-1), visibility (Float, км), `source` (String: synthetic|historical), `real_date` (String ISO, дата реального мира, от которой взята погода). Schema 0.8.0 → **0.9.0** (38 таблиц).
+  - Synthetic-генерация `app/simulation/weather.py::generate_weather(day, seed, config) -> WeatherSample`: детерминированный rng (sha256(seed, day) → uniform-потоки), сезонный базовый профиль из конфига (усреднённый климат Приморья: t −18…+24 по сезонам, ветер 0-15, осадки 0-12, облачность 0-1, видимость 0.2-30).
+  - Historical-источник `fetch_historical_weather(real_date, config) -> WeatherSample | None`: GET `https://archive-api.open-meteo.com/v1/archive?latitude={lat}&longitude={lon}&start_date={d}&end_date={d}&daily=temperature_2m_mean,wind_speed_10m_max,precipitation_sum,cloud_cover_mean&wind_speed_unit=ms&timezone=Asia%2FVladivostok` (без ключа; таймаут config). Маппинг: temp ← temperature_2m_mean, wind ← wind_speed_10m_max (м/с), precipitation ← precipitation_sum, cloudiness ← cloud_cover_mean/100; **visibility — дериват** (архив ERA5 не содержит видимость): детерминированно из осадков/облачности (ясно→20км, дождь→8км, снег→2км, туман-риск при штиль+высокая облачность→0.5км) с seed-джиттером.
+  - Кэш fetch: `data/weather_cache/{real_date}.json` (сырой ответ) — рестарт не рефетчит; офлайн/таймаут/ошибка → синтетический фолбэк для этого дня (source=synthetic) без падения шага.
+  - Маппинг игрового дня на реальную дату `real_date_for_game_day(day, settings)`: `start_real_timestamp + day·1440/time_scale минут` (таймзона Asia/Vladivostok), затем `-1 год` (config year_lag). Пример: time_scale=60 → игровой день = 24 реальных минутам; start 2026-01-01 → день 365 ≈ реальное 2026-01-07 → погода за 2025-01-07.
   - Запись на каждый новый день: при первом обращении к дню (лениво, из `get_or_create_weather`) строка создаётся; headless-дни пишутся движком (step → ensure_weather_for_day). Событие **WEATHER_CHANGED** (28-е) при создании записи нового дня (payload: все поля).
   - Конфиг `WeatherConfig`: enabled=true, seed_offset, seasonal_profile (4 сезона: base_temp, amplitude), cold_need_multiplier (порог t<0: hunger/energy декей ×1.15 — мягкое влияние MVP).
   - API: `GET /weather` (auth) — текущий день; `GET /weather/history?days=N` (≤30).
   - UI: шапка — температура/осадки/ветер текстом (из /weather).
   - Flux-descriptor: `build_scene_descriptor/build_portrait_descriptor` получают `weather` строкой (fetch из мира при наличии записи; фолбэк «clear») — §70-каноничность сохраняется (погода входит в prompt → другой детерминированный стаб-PNG, кейстоун: без weather-записей дескриптор байт-идентичен прежнему).
   - Инвариант `weather_integrity`: для каждого дня с записью — ровно одна строка на (world_id, day); значение в валидных диапазонах.
-- **Excluded**: реальные исторические/текущие данные (§71 «позже»); влияние на travel/движение; погодные катастрофы; кэш/полнотекст; снежный покров.
+- **Excluded**: текущая (не архивная) погода и прогнозы; реальные метеостанции (NOAA ISD/RIHMI) — Open-Meteo покрывает MVP; влияние на travel/движение; погодные катастрофы; снежный покров; почасовая детализация (только суточная агрегация).
 - **Protected boundaries**:
   - П1: влияние на needs — через штатные decay-расчёты (множитель в config, применяется в needs-фазе), без прямых мутаций.
-  - П2: **кейстоун**: при enabled=false или отсутствующих записях — байт-идентичность headless M1-M4 (WEATHER_CHANGED не эмитится, дескриптор без weather-суффикса); с включённой погодой — headless-мир с погодой детерминирован от seed.
+  - П2: **кейстоун**: при enabled=false или отсутствующих записях — байт-идентичность headless M1-M4 (WEATHER_CHANGED не эмитится, дескриптор без weather-суффикса). **source=synthetic — default** (headless-тесты детерминированы без сети); historical включается конфигом владельца на сервере.
   - П4: n/a.
 
 ## Requirements
