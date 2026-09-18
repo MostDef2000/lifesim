@@ -1,0 +1,72 @@
+/* ВЛ1: Рейнеке — MVP web client (§78) */
+:root {
+  --bg: #101418; --panel: #1a2027; --line: #2a323c;
+  --text: #d8dee6; --dim: #8a94a3; --accent: #4da3ff; --ok: #6fd08c; --warn: #e0b050;
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--text);
+  font: 14px/1.45 system-ui, sans-serif; }
+#app { max-width: 1100px; margin: 0 auto; padding: 12px; }
+h1 { font-size: 18px; margin: 0 0 8px; }
+h2 { font-size: 15px; margin: 0 0 6px; color: var(--dim); }
+a { color: var(--accent); text-decoration: none; }
+button { background: var(--panel); color: var(--text); border: 1px solid var(--line);
+  border-radius: 6px; padding: 6px 12px; cursor: pointer; }
+button:hover { border-color: var(--accent); }
+button.primary { background: var(--accent); color: #081018; border: none; font-weight: 600; }
+input, select, textarea { background: #0c1014; color: var(--text);
+  border: 1px solid var(--line); border-radius: 6px; padding: 6px 8px; width: 100%; }
+label { display: block; margin: 8px 0 2px; color: var(--dim); }
+
+.topbar { display: flex; gap: 10px; align-items: center; flex-wrap: wrap;
+  border-bottom: 1px solid var(--line); padding-bottom: 8px; margin-bottom: 10px; }
+.topbar .spacer { flex: 1; }
+.tabs { display: flex; gap: 6px; }
+.tabs button.active { border-color: var(--accent); color: var(--accent); }
+
+.grid { display: grid; grid-template-columns: 1fr 1.4fr; gap: 10px; }
+.panel { background: var(--panel); border: 1px solid var(--line);
+  border-radius: 8px; padding: 10px; }
+.panel + .panel { margin-top: 10px; }
+
+.need { margin: 4px 0; }
+.need .bar { height: 8px; background: #0c1014; border-radius: 4px; overflow: hidden; }
+.need .bar > div { height: 100%; background: var(--ok); }
+.need.low .bar > div { background: var(--warn); }
+.need .row { display: flex; justify-content: space-between; color: var(--dim); }
+
+.locs { display: flex; flex-direction: column; gap: 4px; }
+.loc { padding: 6px 8px; border: 1px solid var(--line); border-radius: 6px;
+  cursor: pointer; display: flex; justify-content: space-between; }
+.loc:hover { border-color: var(--accent); }
+.loc.here { border-color: var(--ok); color: var(--ok); }
+
+.feed { max-height: 260px; overflow-y: auto; }
+.feed .ev { padding: 3px 0; border-bottom: 1px dashed var(--line); }
+.feed .ev .t { color: var(--dim); margin-right: 6px; }
+
+.task { padding: 4px 0; display: flex; gap: 8px; }
+.task .status { color: var(--dim); }
+
+.chatlog { max-height: 320px; overflow-y: auto; }
+.chatmsg { margin: 4px 0; }
+.chatmsg .who { color: var(--accent); margin-right: 6px; }
+.chatmsg.npc .who { color: var(--ok); }
+.sugg { display: inline-block; margin: 2px 4px 0 0; padding: 3px 8px;
+  border: 1px solid var(--line); border-radius: 10px; cursor: pointer; color: var(--dim); }
+.sugg:hover { color: var(--accent); border-color: var(--accent); }
+
+table.inv { width: 100%; border-collapse: collapse; }
+table.inv td, table.inv th { padding: 4px 6px; border-bottom: 1px solid var(--line);
+  text-align: left; }
+
+.toast { position: fixed; bottom: 14px; left: 50%; transform: translateX(-50%);
+  background: var(--panel); border: 1px solid var(--accent); border-radius: 8px;
+  padding: 8px 16px; z-index: 10; max-width: 80%; }
+.toast.hidden { display: none; }
+.toast.err { border-color: var(--warn); }
+
+.authbox { max-width: 360px; margin: 60px auto; }
+.muted { color: var(--dim); }
+.err-text { color: var(--warn); }
+.actions { display: flex; gap: 6px; flex-wrap: wrap; margin: 6px 0; }

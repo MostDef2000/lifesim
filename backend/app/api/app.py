@@ -156,6 +156,7 @@ def create_app(settings, session_factory: sessionmaker):
         username: str
         email: str
         role: str
+        ws_token: str  # M9 (§79): browser cannot read the httpOnly cookie
 
     # ---------- Auth routes (§81) ----------
 
@@ -219,7 +220,16 @@ def create_app(settings, session_factory: sessionmaker):
 
     @app.get("/auth/me", response_model=MeOut)
     def me(user: User = Depends(current_user)):
-        return MeOut(id=user.id, username=user.username, email=user.email, role=user.role)
+        from app.api.auth import sign_token
+
+        token = sign_token(
+            user.id, user.role, get_secret(state["settings"]),
+            state["settings"].api.session_ttl_min,
+        )
+        return MeOut(
+            id=user.id, username=user.username, email=user.email,
+            role=user.role, ws_token=token,
+        )
 
     # ---------- Characters (R3) ----------
 
@@ -492,6 +502,41 @@ def create_app(settings, session_factory: sessionmaker):
                 "payload": _json.loads(e.payload) if e.payload else {},
             }
             for e in events
+        ]
+
+    @app.get("/locations")
+    def list_locations(user: User = Depends(current_user), session: Session = Depends(db)):
+        """M9 (§78): map — list of world locations for the client."""
+        from app.db.models import Location
+
+        locs = (
+            session.query(Location)
+            .filter_by(world_id=state["settings"].world.world_id)
+            .order_by(Location.id)
+            .all()
+        )
+        return [
+            {"id": loc.id, "type": loc.type, "name": loc.name}
+            for loc in locs
+        ]
+
+    @app.get("/characters/by-user/{user_id}")
+    def characters_by_user(user_id: int, session: Session = Depends(db)):
+        """M9: characters of the authenticated user (client bootstrap)."""
+        from app.db.models import Character
+
+        rows = (
+            session.query(Character)
+            .filter_by(
+                world_id=state["settings"].world.world_id, user_id=user_id
+            )
+            .order_by(Character.id)
+            .all()
+        )
+        return [
+            {"id": c.id, "name": f"{c.first_name} {c.last_name}",
+             "alive": bool(c.alive), "control_mode": c.control_mode}
+            for c in rows
         ]
 
     @app.get("/locations/{loc_id}")
@@ -1066,4 +1111,19 @@ def create_app(settings, session_factory: sessionmaker):
     from app.api.visual_routes import register_visual_routes
 
     register_visual_routes(app, settings, session_factory)
+
+    # M9 (§77): static web client — served last so API routes win
+    from fastapi.responses import FileResponse
+    from fastapi.staticfiles import StaticFiles
+
+    web_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "web")
+    if os.path.isdir(web_dir):
+        app.mount(
+            "/static", StaticFiles(directory=web_dir), name="static"
+        )
+
+        @app.get("/", include_in_schema=False)
+        def web_index():
+            return FileResponse(os.path.join(web_dir, "index.html"))
+
     return app
