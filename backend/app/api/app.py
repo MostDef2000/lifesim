@@ -36,6 +36,43 @@ def create_app(settings, session_factory: sessionmaker):
     app = FastAPI(title="VL1 LifeSim API", version="0.1.0")
     state: dict[str, Any] = {"settings": settings, "session_factory": session_factory}
 
+    # M8 (§27): per-IP sliding-window rate limits (in-memory, per-process)
+    if settings.admin.rate_limit_enabled:
+        import collections
+
+        # separate windows per (ip, scope): auth endpoints are stricter
+        _hits: dict[tuple[str, str], collections.deque] = {}
+
+        def _client_ip(request: Request) -> str:
+            forwarded = request.headers.get("x-forwarded-for")
+            if forwarded:
+                return forwarded.split(",")[0].strip()
+            return request.client.host if request.client else "unknown"
+
+        @app.middleware("http")
+        async def rate_limit_middleware(request: Request, call_next):
+            import time as _time
+
+            ip = _client_ip(request)
+            now = _time.time()
+            window = settings.admin.rate_limit_window_sec
+            is_auth = request.url.path.startswith("/auth/")
+            scope = "auth" if is_auth else "global"
+            limit = settings.admin.auth_rpm if is_auth else settings.admin.global_rpm
+            bucket = _hits.setdefault((ip, scope), collections.deque())
+            while bucket and now - bucket[0] > window:
+                bucket.popleft()
+            if len(bucket) >= limit:
+                from fastapi.responses import PlainTextResponse
+
+                return PlainTextResponse(
+                    "rate limit exceeded",
+                    status_code=429,
+                    headers={"Retry-After": str(window)},
+                )
+            bucket.append(now)
+            return await call_next(request)
+
     # M8 (§88): request-id + access log
     @app.middleware("http")
     async def request_id_middleware(request: Request, call_next):
@@ -54,41 +91,6 @@ def create_app(settings, session_factory: sessionmaker):
             flush=True,
         )
         return response
-
-    # M8 (§27): per-IP sliding-window rate limits (in-memory, per-process)
-    if settings.admin.rate_limit_enabled:
-        import collections
-
-        _hits: dict[str, collections.deque] = {}
-
-        def _client_ip(request: Request) -> str:
-            forwarded = request.headers.get("x-forwarded-for")
-            if forwarded:
-                return forwarded.split(",")[0].strip()
-            return request.client.host if request.client else "unknown"
-
-        @app.middleware("http")
-        async def rate_limit_middleware(request: Request, call_next):
-            import time as _time
-
-            ip = _client_ip(request)
-            now = _time.time()
-            window = settings.admin.rate_limit_window_sec
-            is_auth = request.url.path.startswith("/auth/")
-            limit = settings.admin.auth_rpm if is_auth else settings.admin.global_rpm
-            bucket = _hits.setdefault(ip, collections.deque())
-            while bucket and now - bucket[0] > window:
-                bucket.popleft()
-            if len(bucket) >= limit:
-                from fastapi.responses import PlainTextResponse
-
-                return PlainTextResponse(
-                    "rate limit exceeded",
-                    status_code=429,
-                    headers={"Retry-After": str(window)},
-                )
-            bucket.append(now)
-            return await call_next(request)
 
     app.state.ws_connections = 0
     import time as _time

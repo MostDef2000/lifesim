@@ -240,7 +240,7 @@ class AdminConfig(BaseModel):
     registration_enabled: bool = True
     max_players: int = 0  # 0 = unlimited
     rate_limit_enabled: bool = True
-    global_rpm: int = 120
+    global_rpm: int = 600
     auth_rpm: int = 10
     rate_limit_window_sec: int = 60
     backup_dir: str = "backups"

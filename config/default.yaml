@@ -259,7 +259,7 @@ admin:
   registration_enabled: true
   max_players: 0
   rate_limit_enabled: true
-  global_rpm: 120
+  global_rpm: 600
   auth_rpm: 10
   rate_limit_window_sec: 60
   backup_dir: backups
