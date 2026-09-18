@@ -1,5 +1,5 @@
 /* ВЛ1: Рейнеке — MVP web client (§77-78). Vanilla JS, без сборки.
-   XSS-гигиена: только textContent — никаких innerHTML для данных API. */
+   XSS-гигиена: рендер данных API только через textContent/createTextNode. */
 "use strict";
 
 const app = document.getElementById("app");
@@ -209,6 +209,8 @@ function renderWorld(locs) {
   const actions = el("div", { class: "actions" },
     ...["WORK", "EAT", "DRINK", "SLEEP", "SOCIALIZE"].map((a) =>
       el("button", { onclick: () => doAction(a) }, a)));
+  const extBtn = el("button", { onclick: () => viewExternal() },
+    "Поездка во Владивосток");
   const tasks = (ch.tasks || []).map((t) => el("div", { class: "task" },
     el("span", { class: "status" }, t.status), el("span", {}, t.action_type || t.task_type || "")));
   app.replaceChildren(
@@ -231,7 +233,8 @@ function renderWorld(locs) {
           needBar("Вода", needs.thirst ?? 100),
           needBar("Энергия", needs.energy ?? 100),
           needBar("Общение", needs.social ?? 100),
-          actions)),
+          actions,
+          el("div", { style: "margin-top:6px" }, extBtn))),
       el("div", {},
         el("div", { class: "panel" },
           el("h2", {}, "Задачи"),
@@ -263,6 +266,64 @@ async function moveTo(loc) {
   }
 }
 
+/* ---------- external travel (§38-39, M7) ---------- */
+
+async function viewExternal() {
+  const oldHash = location.hash;
+  location.hash = "#/external";
+  app.replaceChildren(topbar("#/world"), el("div", { class: "muted" }, "Загрузка…"));
+  try {
+    const catalog = await api("/external");
+    const services = [];
+    for (const loc of catalog) {
+      for (const svc of loc.services || []) {
+        services.push({
+          id: svc.id,
+          label: `${loc.name || `#${loc.id}`} — ${svc.service_type}` +
+            (svc.item_type ? ` (${svc.item_type})` : ""),
+          type: svc.service_type,
+        });
+      }
+    }
+    const svcSel = el("select", {},
+      ...services.map((s) => el("option", { value: s.id }, s.label)));
+    const purpose = el("select", {},
+      el("option", { value: "heal" }, "лечение"),
+      el("option", { value: "shop" }, "покупки"),
+      el("option", { value: "visit" }, "визит"));
+    const items = el("input", { placeholder: '{"food_groceries": 2} — для покупок' });
+    const err = el("div", { class: "err-text" });
+    app.replaceChildren(topbar("#/world"),
+      el("div", { class: "panel", style: "max-width:520px" },
+        el("h2", {}, "Поездка во Владивосток"),
+        el("label", {}, "Сервис"), svcSel,
+        el("label", {}, "Цель"), purpose,
+        el("label", {}, "Корзина (JSON, только для покупок)"), items,
+        err,
+        el("div", { style: "margin-top:10px; display:flex; gap:6px" },
+          el("button", { class: "primary", onclick: async () => {
+            let parsed = {};
+            try {
+              if (items.value.trim()) parsed = JSON.parse(items.value);
+            } catch (e) { err.textContent = "Корзина: невалидный JSON"; return; }
+            try {
+              await api("/actions", { method: "POST", body: {
+                character_id: S.character.id, action_type: "TRAVEL_EXTERNAL",
+                params: { service_id: Number(svcSel.value),
+                  purpose: purpose.value, items: parsed } } });
+              toast("Поездка запланирована (транзит через порт)");
+              location.hash = "#/world";
+              viewWorld();
+            } catch (e) {
+              err.textContent = String(e.detail);
+              if (String(e.detail).includes("port")) toast("Сначала дойдите до порта", true);
+            }
+          } }, "Отправиться"),
+          el("button", { onclick: () => { location.hash = oldHash; viewWorld(); } },
+            "Назад"))));
+  } catch (e) { toast(e.message, true); }
+}
+
 /* ---------- event feed (§79 WS + polling fallback) ---------- */
 
 function feedRow(ev) {
@@ -286,9 +347,10 @@ function stopFeed() {
 async function pollEvents() {
   try {
     const data = await api(`/world/events?since=${S.cursor}`);
-    if (data && data.events && data.events.length) {
-      S.cursor = data.events[data.events.length - 1].id;
-      S.feed.push(...data.events);
+    const events = Array.isArray(data) ? data : (data.events || []);
+    if (events.length) {
+      S.cursor = events[events.length - 1].id;
+      S.feed.push(...events);
       const feedBox = document.getElementById("feed");
       if (feedBox) {
         feedBox.replaceChildren(el("h2", {}, "События"),
@@ -372,7 +434,7 @@ function renderChat(session) {
         suggested_responses: r.suggested_responses || [] });
     } catch (e) { toast(e.message, true); }
   }
-  const startBtn = el("button", { class: "primary", onclick: () => send() }, "Отправить");
+  const sendBtn = el("button", { class: "primary", onclick: () => send() }, "Отправить");
   input.addEventListener("keydown", (ev) => { if (ev.key === "Enter") send(); });
   app.replaceChildren(topbar("#/chat"),
     el("div", { class: "grid" },
@@ -381,7 +443,7 @@ function renderChat(session) {
         el("label", {}, "NPC на этой локации"), npcSel,
         el("div", { style: "margin-top:8px" }, log),
         sugg,
-        el("div", { style: "display:flex;gap:6px;margin-top:8px" }, input, startBtn)),
+        el("div", { style: "display:flex;gap:6px;margin-top:8px" }, input, sendBtn)),
       el("div", { class: "panel" }, el("h2", {}, "Подсказки"),
         el("div", { class: "muted" }, "Кликните подсказку, чтобы отправить её."))));
 }
@@ -393,31 +455,20 @@ async function viewInventory() {
   app.replaceChildren(topbar("#/inventory"), el("div", { class: "muted" }, "Загрузка…"));
   try {
     const inv = await api(`/characters/${S.character.id}/inventory`);
-    const rows = (inv.items || inv || []).map((it) => el("tr", {},
+    const items = Array.isArray(inv) ? inv : (inv.items || []);
+    const rows = items.map((it) => el("tr", {},
       el("td", {}, it.object_type || it.type || ""),
-      el("td", {}, it.condition ?? it.qty ?? ""),
-      el("td", {},
-        el("button", { onclick: () => itemAction("use", it) }, "использовать"),
-        " ",
-        el("button", { onclick: () => itemAction("eat", it) }, "съесть"),
-        " ",
-        el("button", { onclick: () => itemAction("drop", it) }, "выбросить"))));
+      el("td", {}, it.quantity ?? ""),
+      el("td", { class: "muted" }, `#${it.id}`)));
     app.replaceChildren(topbar("#/inventory"),
       el("div", { class: "panel" },
         el("h2", {}, "Инвентарь"),
         el("table", { class: "inv" },
-          el("tr", {}, el("th", {}, "Предмет"), el("th", {}, "Сост."), el("th", {}, "Действия")),
+          el("tr", {}, el("th", {}, "Предмет"), el("th", {}, "Кол-во"), el("th", {}, "ID")),
           rows.length ? rows : el("tr", {}, el("td", { colspan: "3", class: "muted" },
-            "Пусто — купите что-нибудь во Владивостоке")))));
-  } catch (e) { toast(e.message, true); }
-}
-
-async function itemAction(action, it) {
-  try {
-    await api(`/characters/${S.character.id}/inventory/${it.id}/${action}`, {
-      method: "POST", body: {} });
-    toast("Готово");
-    viewInventory();
+            "Пусто — купите что-нибудь во Владивостоке"))),
+        el("p", { class: "muted" },
+          "Использование предметов выполняется игровыми действиями (EAT/DRINK).")));
   } catch (e) { toast(e.message, true); }
 }
 
