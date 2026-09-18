@@ -142,3 +142,14 @@ uv run python -m app.simulation.cli backup --backup-dir backups --keep 7
 - **Регистрация** (§85): `admin.registration_enabled` / `admin.max_players` (0 = без лимита).
 - **Миграция на 0.8.0** для существующей БД: `ALTER TABLE users ADD COLUMN disabled BOOLEAN NOT NULL DEFAULT 0; CREATE TABLE admin_audit_log (...)` (см. models.py).
 - **Domain/HTTPS** — на стороне VPS (§26): reverse proxy (Caddy/nginx) с TLS перед uvicorn.
+
+## M9: Веб-клиент (009-web, §77-78)
+
+Браузерный MVP без сборки: vanilla SPA (`backend/app/web/`), раздаётся FastAPI (`/` и `/static/*`). Экраны §77: login/register (18+), world (§78: время, needs-бары, карта с MOVE, действия, задачи, лента событий), chat (диалоги с NPC на локации), inventory, profile (control mode), admin (overview/pause/timescale/audit — по роли §82). События — live через WS (`/ws?token=` из `/auth/me`), при недоступности — polling-фолбэк.
+
+```bash
+uv run python -m app.simulation.cli serve --db data/world.db
+# открыть http://127.0.0.1:8000/ → регистрация → создание персонажа → игра
+```
+
+Ручной смоук-чеклист: регистрация → персонаж создан → needs-бары живые → клик по локации = MOVE → кнопка WORK → событие в ленте → чат с NPC (3 подсказки) → инвентарь пуст → админ-вкладка скрыта для user-роли, видна admin'у → TRAVEL_EXTERNAL из мира (порт обязателен).
