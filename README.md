@@ -117,3 +117,28 @@ curl -s -b jar -X POST localhost:8000/actions -H 'content-type: application/json
 ```
 
 Экономика поездки: транзит + покупки — через ledger (`EXTERNAL_TRAVEL`/`EXTERNAL_PURCHASE`), предметы — стандартный inventory-контур (П1). Каталог и цены — в `config/default.yaml` (`external:`). Инварианты: `external_integrity`, object_conservation учитывает внешний приход.
+
+## M8: Public Alpha — админ-инструменты и эксплуатация (008-alpha)
+
+Административный контур (§83-86): роли §82 (user|moderator|admin|developer), audit log `admin_audit_log` (schema 0.8.0, 37 таблиц), rate limits §27, бэкапы §87, request-id логирование §88.
+
+```bash
+# админ-действия (роль admin; moderator — только чтение overview/audit)
+curl -s -b jar localhost:8000/admin/overview
+curl -s -b jar -X POST localhost:8000/admin/world/pause
+curl -s -b jar -X POST localhost:8000/admin/world/timescale -H 'content-type: application/json' -d '{"time_scale": 2.0}'
+curl -s -b jar -X POST localhost:8000/admin/characters/plr_0001/teleport -H 'content-type: application/json' -d '{"location_id": 3}'
+curl -s -b jar -X POST localhost:8000/admin/tasks/42/cancel
+curl -s -b jar -X POST localhost:8000/admin/users/5/disable   # бан: логин 403, токены 403, задачи отменены
+curl -s -b jar "localhost:8000/admin/audit?limit=100"
+
+# бэкап (консистентный снапшот sqlite + visual assets, retention)
+uv run python -m app.simulation.cli backup --backup-dir backups --keep 7
+# cron: 0 4 * * * cd /srv/lifesim && uv run python -m app.simulation.cli backup
+```
+
+Эксплуатация:
+- **Rate limits** (§27): per-IP sliding window — auth 10/мин, API 120/мин (429 + Retry-After); настройка в `admin:` конфига. In-memory (per-process); Redis — на этапе PostgreSQL.
+- **Регистрация** (§85): `admin.registration_enabled` / `admin.max_players` (0 = без лимита).
+- **Миграция на 0.8.0** для существующей БД: `ALTER TABLE users ADD COLUMN disabled BOOLEAN NOT NULL DEFAULT 0; CREATE TABLE admin_audit_log (...)` (см. models.py).
+- **Domain/HTTPS** — на стороне VPS (§26): reverse proxy (Caddy/nginx) с TLS перед uvicorn.
