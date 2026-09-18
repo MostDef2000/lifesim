@@ -254,12 +254,14 @@ def create_app(settings, session_factory: sessionmaker):
                 status_code=409,
                 detail="character is AUTONOMOUS; switch to GUIDED or DIRECT first (§61)",
             )
-        if not any(a.name == body.action_type for a in ACTION_REGISTRY):
+        if not any(a.name == body.action_type for a in ACTION_REGISTRY) and \
+                body.action_type != "TRAVEL_EXTERNAL":
             raise HTTPException(status_code=422, detail=f"unknown action_type {body.action_type}")
 
         now_ts = _world_now(session)
         ok, reason, needs_move_id, vparams = validate(
-            session, character.world_id, character, body.action_type, now_ts, state["settings"]
+            session, character.world_id, character, body.action_type, now_ts,
+            state["settings"], params=body.params or {},
         )
         if not ok:
             raise HTTPException(status_code=422, detail=f"action not possible: {reason}")

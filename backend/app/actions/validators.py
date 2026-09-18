@@ -15,10 +15,15 @@ def validate(
     settings: Settings,
     needs=None,
     ctx=None,
+    params: Optional[Dict[str, Any]] = None,
 ) -> Tuple[bool, Optional[str], Optional[int], Dict[str, Any]]:
     """
     Validates if an action is possible for a character.
     Returns: (ok, reason, needs_move_location_id, params)
+
+    `params` carries caller-supplied request parameters (e.g. TRAVEL_EXTERNAL
+    service_id/purpose/items from POST /actions). Other branches ignore it —
+    their params are derived from world state.
 
     `needs` may be passed pre-fetched by the caller (choose_action reads it
     once per decision — R10 batch needs-fetch). When omitted, it is read
@@ -280,5 +285,71 @@ def validate(
                 "target_id": best_target.id,
                 "affection_at_start": best_affection,
             }
+
+    elif action_type == "TRAVEL_EXTERNAL":
+        # M7 (SPEC §39): off-island trip via external service catalog.
+        request_params = params or {}
+        if not request_params or request_params.get("__utility_probe__"):
+            # Utility probe without explicit params: never auto-picked (П2).
+            return False, "External travel requires explicit parameters", None, {}
+
+        from app.db.models import ExternalService
+        from app.economy import get_balance, open_account
+
+        # NPC gate: MVP players only (П2; utility never reaches here anyway —
+        # action is not in ACTION_REGISTRY, this is a belt-and-suspenders check).
+        if character.type != "player" and not settings.external.npc_utility:
+            return False, "External travel disabled for NPCs", None, {}
+
+        service_id = request_params.get("service_id")
+        if service_id is None:
+            return False, "Missing service_id", None, {}
+        service = session.get(ExternalService, service_id)
+        if service is None or service.world_id != world_id:
+            return False, "Unknown external service", None, {}
+
+        purpose = str(request_params.get("purpose", "")).strip()
+        if not purpose or len(purpose) > 64:
+            return False, "Purpose must be 1-64 characters", None, {}
+
+        travel_cost = settings.external.travel_cost
+        items: dict = {}
+        if service.service_type == "purchase":
+            raw_items = request_params.get("items") or {}
+            if not isinstance(raw_items, dict) or not raw_items:
+                return False, "Purchase travel requires items", None, {}
+            for item_type, qty in raw_items.items():
+                if service.item_type != item_type:
+                    return False, f"Service does not offer {item_type}", None, {}
+                if not isinstance(qty, int) or not (1 <= qty <= 10):
+                    return False, "Item quantity must be 1-10", None, {}
+                items[item_type] = qty
+        elif items or params.get("items"):
+            return False, "Only purchase services accept items", None, {}
+
+        basket_cost = sum(items[t] * service.price for t in items)
+        char_acc = open_account(session, world_id, "character", character.id)
+        needed = travel_cost + basket_cost
+        if get_balance(session, char_acc.id) < needed:
+            return False, "Insufficient funds", None, {}
+
+        extra = {
+            "service_id": service.id, "purpose": purpose, "items": items,
+            "travel_cost": travel_cost, "basket_cost": basket_cost,
+            "ext_location_id": service.external_location_id,
+        }
+        if service.service_type == "treatment":
+            from app.db.models import CharacterHealth
+            health = session.get(CharacterHealth, character.id)
+            if health is None or health.health >= 100.0:
+                return False, "Health already full", None, {}
+
+        # Departure from the pier (§39: port first)
+        pier = _ctx_get("loc_by_type", _loc_by_type).get("pier")
+        if not pier:
+            return False, "No pier available in world", None, {}
+        if character.location_id != pier.id:
+            return True, "Needs to move to pier", pier.id, extra
+        return True, None, None, extra
 
     return False, "Unknown action type", None, {}

@@ -64,6 +64,12 @@ class ActionsConfig(BaseModel):
             base_utility_weight=0.3,
         )
     )
+    TRAVEL_EXTERNAL: ActionParams = Field(
+        default_factory=lambda: ActionParams(
+            duration_minutes=480, max_duration_minutes=960,
+            base_utility_weight=0.0,
+        )
+    )
 
 class EconomyConfig(BaseModel):
     starting_balance: int
@@ -206,6 +212,29 @@ class VisualConfig(BaseModel):
     timeout_sec: float = 30.0
     default_weather: str = "clear"
 
+class ExternalServiceSpec(BaseModel):
+    """M7 (SPEC §38): one service at an external location."""
+    service_type: str  # treatment|purchase|visit|registration|transfer
+    item_type: Optional[str] = None
+    price: int = 0
+    heal_amount: float = 0.0
+    duration_minutes: int = 30
+
+class ExternalLocationSpec(BaseModel):
+    name: str
+    ext_type: str
+    description: str = ""
+    services: List[ExternalServiceSpec] = Field(default_factory=list)
+
+class ExternalConfig(BaseModel):
+    """M7 (SPEC §106/38-39): external Vladivostok. Off-island content, no physics."""
+    enabled: bool = True
+    travel_minutes: int = 480
+    travel_cost: int = 50
+    npc_utility: bool = False  # MVP: NPCs never choose external travel (П2)
+    contact_probability: float = 0.5  # second contact per NPC
+    locations: List[ExternalLocationSpec] = Field(default_factory=list)
+
 class Settings(BaseModel):
     world: WorldConfig
     ticks: TicksConfig
@@ -224,6 +253,7 @@ class Settings(BaseModel):
     llm: LlmConfig = Field(default_factory=LlmConfig)
     api: ApiConfig = Field(default_factory=ApiConfig)
     visual: VisualConfig = Field(default_factory=VisualConfig)
+    external: ExternalConfig = Field(default_factory=ExternalConfig)
 
 def load_config(path: str) -> Settings:
     p = pathlib.Path(path)

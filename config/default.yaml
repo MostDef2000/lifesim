@@ -65,6 +65,10 @@ actions:
     duration_minutes: 1
     max_duration_minutes: 60
     base_utility_weight: 0.1
+  TRAVEL_EXTERNAL:
+    duration_minutes: 480
+    max_duration_minutes: 960
+    base_utility_weight: 0.0
 
 economy:
   starting_balance: 1000
@@ -227,3 +231,26 @@ visual:
   image_size: "512x512"
   timeout_sec: 30.0
   default_weather: clear
+
+external:
+  enabled: true
+  travel_minutes: 480
+  travel_cost: 50
+  npc_utility: false
+  contact_probability: 0.5
+  locations:
+    - name: "Vladivostok City Hospital"
+      ext_type: "hospital"
+      description: "Regional hospital on Svetlanskaya street"
+      services:
+        - { service_type: "treatment", price: 120, heal_amount: 60, duration_minutes: 180 }
+    - name: "Golden Bridge Supermarket"
+      ext_type: "supermarket"
+      description: "Large grocery store in the city center"
+      services:
+        - { service_type: "purchase", item_type: "food_groceries", price: 25, duration_minutes: 20 }
+    - name: "City Hardware Store"
+      ext_type: "hardware_store"
+      description: "Tools and construction materials"
+      services:
+        - { service_type: "purchase", item_type: "tool_kit", price: 90, duration_minutes: 25 }

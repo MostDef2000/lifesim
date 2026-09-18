@@ -88,6 +88,10 @@ def main(argv=None):
             from app.world.social_seed import seed_social
             seed_social(session, settings, world_id, rng)
 
+            # M7: external Vladivostok (locations, services, contacts — no events)
+            from app.world.seed_external import seed_external_world
+            seed_external_world(session, settings, world_id, rng)
+
             # M3: initial laws enactment
             from app.policies.org import enact_initial_laws
             enact_initial_laws(session, world_id, settings, timestamp=0)

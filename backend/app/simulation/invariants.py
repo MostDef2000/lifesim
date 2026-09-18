@@ -89,12 +89,33 @@ def run_invariant_checks(session: Session, world_id: str, settings) -> List[Dict
     )
     consumed_by_type = {otype: float(qty or 0) for otype, qty in consumed_rows}
 
+    # M7: external purchases import new objects (TRAVEL_EXTERNAL_RETURNED
+    # payload.items {item_type: qty}) — accounted as external inflow.
+    external_rows = (
+        session.query(
+            WorldEvent.payload,
+        )
+        .filter(
+            WorldEvent.world_id == world_id,
+            WorldEvent.event_type == "TRAVEL_EXTERNAL_RETURNED",
+        )
+        .all()
+    )
+    external_bought: dict = {}
+    import json as _json
+
+    for (payload_json,) in external_rows:
+        payload = _json.loads(payload_json) if payload_json else {}
+        for item_type, qty in (payload.get("items") or {}).items():
+            external_bought[item_type] = external_bought.get(item_type, 0) + qty
+
     conservation_violations = []
     for otype, actual in type_rows:
         expected = (
             daily_stock.get(otype, 0)  # seed stock + per-day stock
             + days_elapsed * daily_stock.get(otype, 0)
             + char_count * initial_items_per_char.count(otype)
+            + external_bought.get(otype, 0)  # M7 external inflow
             - consumed_by_type.get(otype, 0.0)
         )
         # float tolerance for REAL-typed quantities
@@ -839,5 +860,56 @@ def run_invariant_checks(session: Session, world_id: str, settings) -> List[Dict
             "details": (f"violations: {', '.join(va_violations)}"
                         if va_violations else f"assets: {len(assets)}")
         })
+
+    # external_integrity (M7, R10): contacts reference real characters and
+    # external locations; services belong to locations; every RETURNED with
+    # spent > 0 has matching transactions (ledger discipline).
+    from app.db.models import ExternalContact as _EC
+    from app.db.models import ExternalLocation as _EL
+    from app.db.models import ExternalService as _ES
+    from app.db.models import Transaction as _Tx
+    ext_violations = []
+    ext_char_ids = {
+        c.id for c in session.query(Character).filter_by(world_id=world_id).all()
+    }
+    ext_locations = {
+        el.id for el in session.query(_EL).filter_by(world_id=world_id).all()
+    }
+    ext_contacts = session.query(_EC).filter_by(world_id=world_id).all()
+    for c in ext_contacts:
+        if c.character_id not in ext_char_ids:
+            ext_violations.append(f"contact {c.id}: unknown character {c.character_id}")
+        if c.external_location_id is not None and c.external_location_id not in ext_locations:
+            ext_violations.append(f"contact {c.id}: unknown external location")
+    for s in session.query(_ES).filter_by(world_id=world_id).all():
+        if s.external_location_id not in ext_locations:
+            ext_violations.append(f"service {s.id}: unknown external location")
+    # RETURNED spent -> transactions exist (EXTERNAL_TRAVEL / EXTERNAL_PURCHASE)
+    ext_events = session.query(WorldEvent).filter_by(
+        world_id=world_id, event_type="TRAVEL_EXTERNAL_RETURNED"
+    ).all()
+    for ev in ext_events:
+        payload = _json.loads(ev.payload) if ev.payload else {}
+        spent = int(payload.get("spent") or 0)
+        if spent > 0:
+            tx_count = (
+                session.query(_Tx)
+                .filter(
+                    _Tx.world_id == world_id,
+                    _Tx.game_timestamp == ev.game_timestamp,
+                    _Tx.reason.in_(["EXTERNAL_TRAVEL", "EXTERNAL_PURCHASE"]),
+                )
+                .count()
+            )
+            if tx_count == 0:
+                ext_violations.append(
+                    f"event {ev.id}: spent {spent} without ledger transaction"
+                )
+    results.append({
+        "name": "external_integrity",
+        "ok": len(ext_violations) == 0,
+        "details": (f"violations: {', '.join(ext_violations)}"
+                    if ext_violations else f"contacts: {len(ext_contacts)}")
+    })
 
     return results
