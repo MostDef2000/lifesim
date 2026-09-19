@@ -59,13 +59,13 @@ WS (websockets) проксируется автоматически. Сжати�
 ## 6. Проверка
 
 ```bash
+curl -s http://127.0.0.1:8000/health && echo                         # {"status":"ok"}
 curl -s -o /dev/null -w '%{http_code}\n' http://127.0.0.1:8000/docs   # 200
 curl -s http://127.0.0.1:8000/world && echo                          # мир
 curl -s https://<домен>/ | head -1                                   # после DNS
 ```
 
-UI — на `/`, OpenAPI — на `/docs`. Эндпоинт `/health` в приложении пока не
-реализован (включён в бэклог) — проверять по `/docs` и `/world`.
+UI — на `/`, OpenAPI — на `/docs`, liveness — на `/health`.
 
 ## 7. Smoke-тест реальной погоды (опционально, Рейнеке)
 

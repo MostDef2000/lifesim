@@ -71,7 +71,8 @@ class TestEnvExample:
         env = read(".env.example")
         unit = read("lifesim.service")
         assert "/opt/lifesim" in unit
-        assert "LIFESIM_CONFIG=config/default.yaml" in env
+        assert "LIFESIM_CONFIG=config/production.yaml" in env
+        assert "config/default.yaml" not in env
 
 
 class TestRunbook:
