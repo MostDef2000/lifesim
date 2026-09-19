@@ -94,6 +94,19 @@ class Engine:
                     run_npc_trip_phase(session, world_id, day, settings),
                 )
             )
+            # 016 (§32-35): crime commit/witness + police resolution
+            from app.crime.crime import run_crime_phase, run_police_phase
+
+            self.scheduler.run_phase(
+                "crime",
+                lambda: run_crime_phase(
+                    session, world_id, day, timestamp, settings)
+            )
+            self.scheduler.run_phase(
+                "police",
+                lambda: run_police_phase(
+                    session, world_id, day, timestamp, settings)
+            )
 
         # 1. Needs tick: apply decay for the whole window
         self.scheduler.run_phase(

@@ -204,3 +204,11 @@ weather: { source: historical }   # в config/default.yaml или env
 ## M15: Deploy-kit (015-deploy-kit)
 
 Файлы развёртывания в `deploy/` (реальный сервер/домен/LLM — вне скоупа по директиве владельца): `lifesim.service` (systemd, uvicorn `app.run:app`, EnvironmentFile, hardening), `Caddyfile` (reverse proxy 80/443 → 127.0.0.1:8000, WS проксируется), `.env.example` (VL1_SECRET placeholder + все флаги-кейстоуны выключенными: weather synthetic, fire spontaneous 0, npc_utility/supply_demand/visual/llm = false), `README.md` (runbook: установка, .env, systemd, Caddy, health-check, smoke-тест исторической погоды Рейнеке, бэкап SQLite, обновление). Точка входа — `backend/app/run.py` (LIFESIM_CONFIG). Структурные тесты — `tests/m15`.
+
+## M16: Преступность, закон, полиция (016-crime, §32-35)
+
+Флаг `crime.enabled` (**default false** — П2-кейстоун, headless-векторы неизменны).
+
+**Преступления (§33)**: NPC при голоде<25 и нищете (баланс<50) может украсть еду (P=0.15/день); при социальном голоде — vandal (P=0.05, condition-30). Таблица `crimes` (41-я), событие `CRIME_COMMITED`. **Свидетели (§34)**: NPC на локации замечают с P=0.4 (детерминированный rng) → Memory (importance 8) + донос `CRIME_REPORTED`; без свидетелей дело не заводится.
+
+**Закон (§32)**: санкции в конфиге — штраф (theft 200₽, vandalism 150₽) или тюрьма 7 дней. **Полиция (§35)**: org «Полиция Рейнеке» сеется только при включённом флаге; daily-резолвер от имени офицера: платёжеспособный вор платит через ledger (`FINE_PAID`), неплатёжеспособный — арест (`ARRESTED`, `characters.prison_until_day`, пин в полиции, декей нужд ×0.3 — «кормёжка») и `RELEASED` в день освобождения. Инвариант `crime_integrity`. Schema 0.13.0, 40 событий.

@@ -907,6 +907,13 @@ def progress_tick(session: Session, world_id: str, game_timestamp: int, settings
     from app.characters.needs import iter_alive_characters
 
     for char in iter_alive_characters(session, world_id):
+        # 016 (§35): prisoners make no decisions; pinned + slow decay.
+        # Release is handled by the daily police phase.
+        if (
+            char.prison_until_day is not None
+            and char.prison_until_day > game_timestamp // 1440
+        ):
+            continue
         _advance_character(session, world_id, char, game_timestamp, settings)
 
     session.flush()

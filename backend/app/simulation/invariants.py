@@ -955,6 +955,32 @@ def run_invariant_checks(session: Session, world_id: str, settings) -> List[Dict
             weather_violations.append(f"day {w.day}: field out of range")
         if w.source not in ("synthetic", "historical"):
             weather_violations.append(f"day {w.day}: unknown source")
+    # crime_integrity (016, R6): resolved crimes have resolutions;
+    # every fine resolution has a FINE_PAID event.
+    from app.db.models import Crime as _Crime
+    crime_violations = []
+    crimes = session.query(_Crime).filter_by(world_id=world_id).all()
+    fine_events = {
+        (ev.actor_id, _json.loads(ev.payload).get("crime_id"))
+        for ev in session.query(WorldEvent)
+        .filter_by(world_id=world_id, event_type="FINE_PAID").all()
+        if ev.payload
+    }
+    for c in crimes:
+        if c.status == "resolved" and c.resolution not in ("fine", "prison"):
+            crime_violations.append(f"crime {c.id}: bad resolution")
+        if c.status == "resolved" and c.resolution == "fine":
+            if (c.actor_character_id, c.id) not in fine_events:
+                crime_violations.append(f"crime {c.id}: fine without FINE_PAID")
+        if c.status == "reported" and c.resolution is not None:
+            crime_violations.append(f"crime {c.id}: resolution before resolve")
+    results.append({
+        "name": "crime_integrity",
+        "ok": len(crime_violations) == 0,
+        "details": (f"violations: {', '.join(crime_violations)}"
+                    if crime_violations else f"crimes: {len(crimes)}"),
+    })
+
     # messages_integrity (013, R6): body domain; alive participants
     from app.db.models import Message as _Msg
     msg_violations = []
