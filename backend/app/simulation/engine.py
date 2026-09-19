@@ -74,6 +74,13 @@ class Engine:
                 "weather",
                 lambda: get_or_create_weather(session, world_id, day, settings)
             )
+            # 011 (§72): daily fire phase (spread/damage/burnout/spontaneous)
+            from app.simulation.fire import run_fire_phase
+
+            self.scheduler.run_phase(
+                "fire",
+                lambda: run_fire_phase(session, world_id, day, settings)
+            )
 
         # 1. Needs tick: apply decay for the whole window
         self.scheduler.run_phase(

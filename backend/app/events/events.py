@@ -39,6 +39,8 @@ class EventType(Enum):
     MEMORY_CREATED = "MEMORY_CREATED"
     MEMORY_CONSOLIDATED = "MEMORY_CONSOLIDATED"
     WEATHER_CHANGED = "WEATHER_CHANGED"  # 010 (§71): daily weather record
+    OBJECT_BURNING = "OBJECT_BURNING"  # 011 (§72): object caught fire
+    OBJECT_BURNED = "OBJECT_BURNED"  # 011 (§72): object fully burned
 
 def log_event(
     session: Session,

@@ -275,3 +275,10 @@ weather:
   cache_dir: data/weather_cache
   seed_offset: 0
   cold_need_multiplier: 1.15
+
+fire:
+  enabled: true
+  spontaneous_chance_per_day: 0.0
+  ignition_chance: 0.35
+  damage_per_day: 8.0
+  burnout_days: 2

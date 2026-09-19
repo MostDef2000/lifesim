@@ -1179,6 +1179,65 @@ def create_app(settings, session_factory: sessionmaker):
 
     # M9 (§77): static web client — served last so API routes win
     from fastapi.responses import FileResponse
+    @app.post("/admin/fire/ignite")
+    def admin_fire_ignite(
+        payload: dict = None, session: Session = Depends(db),
+        user: User = Depends(require_role("moderator")),
+    ):
+        """011 (§72, R6): manual ignition (admin/moderator), audited §86."""
+        from app.db.models import WorldClock, WorldObject
+        from app.simulation.fire import ignite_object
+
+        world_id = state["settings"].world.world_id
+        object_id = (payload or {}).get("object_id")
+        if object_id is None:
+            raise HTTPException(status_code=422, detail="object_id required")
+        obj = session.query(WorldObject).filter_by(
+            id=object_id, world_id=world_id).first()
+        if obj is None:
+            raise HTTPException(status_code=404, detail="object not found")
+        clock = session.get(WorldClock, world_id)
+        day = clock.game_timestamp // 1440 if clock is not None else 0
+        ignite_object(session, world_id, obj, day, state["settings"])
+        audit(session, user, "fire_ignite", "world_object", obj.id,
+              {"day": day})
+        session.commit()
+        return {"ok": True, "object_id": obj.id, "day": day}
+
+    @app.get("/fire/active")
+    def fire_active(session: Session = Depends(db), user: User = Depends(current_user)):
+        """011 (§72, R7): currently burning objects."""
+        from app.db.models import WorldClock, WorldEvent, WorldObject
+
+        world_id = state["settings"].world.world_id
+        clock = session.query(WorldClock).filter_by(world_id=world_id).first()
+        day = clock.game_timestamp // 1440 if clock is not None else 0
+        burning = (
+            session.query(WorldObject)
+            .filter_by(world_id=world_id, burn_state="burning")
+            .all()
+        )
+        out = []
+        for obj in burning:
+            days = None
+            import json as _json
+
+            evs = (
+                session.query(WorldEvent)
+                .filter_by(world_id=world_id, event_type="OBJECT_BURNING")
+                .all()
+            )
+            for e in evs:
+                p = _json.loads(e.payload) if e.payload else {}
+                if p.get("object_id") == obj.id:
+                    days = day - p.get("day", day)
+                    break
+            out.append({
+                "object_id": obj.id, "location_id": obj.location_id,
+                "type": obj.object_type, "days_burning": days,
+            })
+        return out
+
     from fastapi.staticfiles import StaticFiles
 
     web_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "web")
