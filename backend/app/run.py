@@ -38,14 +38,16 @@ def _build():
 
 # uvicorn app.run:app — module-level attribute access; defer build until
 # first import completes (factory-style lazy init keeps import cheap).
-# __call__ must be a real method: ASGI invokes app(scope, receive, send) and
-# special methods bypass instance __getattr__.
+# __call__ must be a real ASYNC method: ASGI invokes app(scope, receive, send),
+# special methods bypass instance __getattr__, and uvicorn's interface
+# auto-detection picks ASGI3 only when __call__ is a coroutine function
+# (uvicorn/config.py: iscoroutinefunction(app.__call__)).
 class _AppProxy:  # pragma: no cover - deployment glue
     def __getattr__(self, name):
         return getattr(_build(), name)
 
-    def __call__(self, scope, receive, send):
-        return _build()(scope, receive, send)
+    async def __call__(self, scope, receive, send):
+        await _build()(scope, receive, send)
 
 
 app = _AppProxy()
