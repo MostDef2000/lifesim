@@ -200,3 +200,7 @@ weather: { source: historical }   # в config/default.yaml или env
 **Создание персонажа**: опциональные поля «Внешность» (≤500) и «Биография» (≤2000) — сохраняются в `characters.looks`/`biography` (schema 0.12.0), возвращаются в POST /characters и GET /characters/by-user. Форма в UI — два textarea.
 
 **Портрет в UI**: блок «Портрет» в виде мира — при загрузке подтягивает canonical-портрет (M6 reuse), кнопка «Сгенерировать портрет» идёт через штатный POST /visual/portraits → GET /visual/assets/{id}/file (blob + Authorization → objectURL). При `visual.enabled=false` — graceful деградация (кнопка, статус ошибки). Повторная генерация переиспользует canonical (бэкенд).
+
+## M15: Deploy-kit (015-deploy-kit)
+
+Файлы развёртывания в `deploy/` (реальный сервер/домен/LLM — вне скоупа по директиве владельца): `lifesim.service` (systemd, uvicorn `app.run:app`, EnvironmentFile, hardening), `Caddyfile` (reverse proxy 80/443 → 127.0.0.1:8000, WS проксируется), `.env.example` (VL1_SECRET placeholder + все флаги-кейстоуны выключенными: weather synthetic, fire spontaneous 0, npc_utility/supply_demand/visual/llm = false), `README.md` (runbook: установка, .env, systemd, Caddy, health-check, smoke-тест исторической погоды Рейнеке, бэкап SQLite, обновление). Точка входа — `backend/app/run.py` (LIFESIM_CONFIG). Структурные тесты — `tests/m15`.

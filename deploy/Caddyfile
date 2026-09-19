@@ -1,0 +1,10 @@
+# ВЛ1: Рейнеке — Caddy reverse proxy (015-deploy-kit)
+# Единственный публичный порт — 80/443 (Caddy). API и статика — через него.
+{
+	gzip
+}
+
+# Замените example.com на домен после покупки/делегирования DNS (см. deploy/README.md)
+example.com {
+	reverse_proxy 127.0.0.1:8000
+}
