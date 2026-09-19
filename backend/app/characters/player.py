@@ -48,6 +48,8 @@ def create_player_character(
     sex: str,
     age: int,
     game_timestamp: int,
+    looks: str | None = None,
+    biography: str | None = None,
 ) -> Character:
     """
     Create a player-owned character (R3).
@@ -132,6 +134,8 @@ def create_player_character(
         location_id=free[0].id,
         home_location_id=free[0].id,
         occupation_id=job.id,
+        looks=looks,
+        biography=biography,
         created_at=game_timestamp,
         updated_at=game_timestamp,
     )

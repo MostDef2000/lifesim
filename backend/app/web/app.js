@@ -139,17 +139,23 @@ function viewCreateCharacter() {
   const sex = el("select", {},
     el("option", { value: "F" }, "Ж"), el("option", { value: "M" }, "М"));
   const age = el("input", { type: "number", value: "28", min: "18", max: "80" });
+  const looks = el("textarea", { placeholder: "Внешность (необязательно)", maxlength: "500" });
+  const biography = el("textarea", { placeholder: "Биография (необязательно)", maxlength: "2000" });
   const err = el("div", { class: "err-text" });
   app.replaceChildren(el("div", { class: "authbox panel" },
     el("h1", {}, "Новый житель Рейнеке"),
     el("label", {}, "Имя"), name,
     el("label", {}, "Пол"), sex,
     el("label", {}, "Возраст"), age,
+    el("label", {}, "Внешность"), looks,
+    el("label", {}, "Биография"), biography,
     el("div", { style: "margin-top:10px" }, el("button", {
       class: "primary", onclick: async () => {
         try {
           const r = await api("/characters", { method: "POST", body: {
-            name: name.value, sex: sex.value, age: Number(age.value) } });
+            name: name.value, sex: sex.value, age: Number(age.value),
+            looks: looks.value.trim() || undefined,
+            biography: biography.value.trim() || undefined } });
           S.character = r;
           location.hash = "#/world";
           route();
@@ -157,6 +163,49 @@ function viewCreateCharacter() {
       },
     }, "Появиться на острове")), err,
   ));
+}
+
+/* ---------- portrait (014, M6 visual pipeline) ---------- */
+
+async function fetchPortraitBlob(path) {
+  const token = S.token || localStorage.getItem("token");
+  const r = await fetch(path, { headers: { Authorization: `Bearer ${token}` } });
+  if (!r.ok) throw new Error(`HTTP ${r.status}`);
+  return await r.blob();
+}
+
+async function generatePortrait(container) {
+  const status = container.querySelector(".portrait-status");
+  if (status) status.textContent = "Генерация…";
+  try {
+    const r = await api(`/visual/portraits/${S.character.id}`, { method: "POST" });
+    const blob = await fetchPortraitBlob(`/visual/assets/${r.asset.id}/file`);
+    const url = URL.createObjectURL(blob);
+    const img = el("img", { class: "portrait-img", src: url, alt: "Портрет" });
+    const old = container.querySelector(".portrait-img");
+    if (old) old.remove();
+    container.insertBefore(img, status);
+    if (status) status.textContent = "";
+  } catch (e) {
+    if (status) status.textContent = String(e.detail || e.message || "Ошибка генерации");
+  }
+}
+
+async function portraitBlock() {
+  const status = el("div", { class: "portrait-status muted" });
+  const btn = el("button", { onclick: () => generatePortrait(box) }, "Сгенерировать портрет");
+  const box = el("div", { class: "panel portrait" },
+    el("h2", {}, "Портрет"), status, btn);
+  // show canonical portrait when it already exists (reuse, M6)
+  try {
+    const asset = await api(`/visual/characters/${S.character.id}/portrait`);
+    const blob = await fetchPortraitBlob(`/visual/assets/${asset.id}/file`);
+    const url = URL.createObjectURL(blob);
+    box.insertBefore(
+      el("img", { class: "portrait-img", src: url, alt: "Портрет" }), status);
+    btn.textContent = "Сгенерировать заново";
+  } catch { /* no portrait yet — keep button */ }
+  return box;
 }
 
 /* ---------- topbar ---------- */
@@ -220,6 +269,7 @@ function renderWorld(locs) {
     "Поездка во Владивосток");
   const tasks = (ch.tasks || []).map((t) => el("div", { class: "task" },
     el("span", { class: "status" }, t.status), el("span", {}, t.action_type || t.task_type || "")));
+  const portraitBox = portraitBlock();
   app.replaceChildren(
     topbar("#/world"),
     el("div", { class: "grid" },
@@ -246,6 +296,7 @@ function renderWorld(locs) {
         el("div", { class: "panel" },
           el("h2", {}, "Задачи"),
           tasks.length ? tasks : el("div", { class: "muted" }, "Нет активных задач")),
+        portraitBox,
         feed)));
 }
 
