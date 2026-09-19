@@ -52,7 +52,20 @@ def build_context(
             .first()
         )
     loc = session.get(Location, npc.location_id)
-    return {
+    # 013 (R4): NPC's most recent mainland trip enters the dialogue context
+    from app.db.models import WorldEvent
+
+    last_return = (
+        session.query(WorldEvent)
+        .filter_by(
+            world_id=world_id,
+            event_type="TRAVEL_EXTERNAL_RETURNED",
+            actor_id=npc.id,
+        )
+        .order_by(WorldEvent.id.desc())
+        .first()
+    )
+    context = {
         "npc_name": f"{npc.first_name} {npc.last_name}".strip(),
         "npc_memories": [m.summary for m in memories],
         "relationship": (
@@ -64,6 +77,15 @@ def build_context(
         ),
         "npc_location": loc.name if loc is not None else None,
     }
+    if last_return is not None:
+        import json as _json
+
+        payload = _json.loads(last_return.payload) if last_return.payload else {}
+        parts = [payload.get("purpose", "поездка")]
+        if payload.get("healed"):
+            parts.append("полечился")
+        context["npc_recent_trip"] = "; ".join(str(p) for p in parts)
+    return context
 
 
 _FALLBACK_BY_AFFECTION = [
@@ -76,6 +98,14 @@ _FALLBACK_BY_AFFECTION = [
 
 def fallback_reply(context: Dict[str, Any], player_name: str) -> str:
     """Deterministic NPC reply when llm.enabled=false (П2)."""
+    base = _fallback_base(context, player_name)
+    trip = context.get("npc_recent_trip")
+    if trip:
+        return f"{base} Только что вернулся с материка: {trip}."
+    return base
+
+
+def _fallback_base(context: Dict[str, Any], player_name: str) -> str:
     affection = context.get("relationship", {}).get("affection", 0.0)
     for threshold, template in _FALLBACK_BY_AFFECTION:
         if affection >= threshold:

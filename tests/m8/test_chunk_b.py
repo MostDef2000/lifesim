@@ -225,7 +225,7 @@ class TestOverview:
         assert data["npcs"] == 20
         assert data["active_tasks"] == 1
         assert data["world_clock"]["is_paused"] is False
-        assert data["schema_version"] == "0.10.0"
+        assert data["schema_version"] == "0.11.0"
         assert "uptime_sec" in data and "ws_connections" in data
 
 

@@ -45,6 +45,7 @@ class EventType(Enum):
     MARKET_SOLD = "MARKET_SOLD"  # 012 (§74): offer bought via ledger
     CONSTRUCTED = "CONSTRUCTED"  # 012 (§75): new object built
     OBJECT_DESTROYED = "OBJECT_DESTROYED"  # 012 (§76): condition reached 0
+    MESSAGE_SENT = "MESSAGE_SENT"  # 013: letters/phone via contacts
 
 def log_event(
     session: Session,

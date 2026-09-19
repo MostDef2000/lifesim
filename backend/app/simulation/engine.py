@@ -81,6 +81,19 @@ class Engine:
                 "fire",
                 lambda: run_fire_phase(session, world_id, day, settings)
             )
+            # 013: NPC utility trips + supply/demand multipliers (flag-gated)
+            from app.external.npc_trips import (
+                run_npc_trip_phase,
+                update_service_multipliers,
+            )
+
+            self.scheduler.run_phase(
+                "external_followups",
+                lambda: (
+                    update_service_multipliers(session, world_id, day, settings),
+                    run_npc_trip_phase(session, world_id, day, settings),
+                )
+            )
 
         # 1. Needs tick: apply decay for the whole window
         self.scheduler.run_phase(

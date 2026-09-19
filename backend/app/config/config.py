@@ -238,6 +238,7 @@ class ExternalConfig(BaseModel):
     travel_minutes: int = 480
     travel_cost: int = 50
     npc_utility: bool = False  # MVP: NPCs never choose external travel (П2)
+    supply_demand: bool = False  # 013: dynamic service pricing (П2 keystone)
     contact_probability: float = 0.5  # second contact per NPC
     locations: List[ExternalLocationSpec] = Field(default_factory=list)
 

@@ -1375,6 +1375,80 @@ def create_app(settings, session_factory: sessionmaker):
         return {"task_id": task.id, "object_type": object_type,
                 "ends_at": task.ends_at}
 
+    @app.post("/messages")
+    def send_message_route(
+        payload: dict = None, session: Session = Depends(db),
+        user: User = Depends(current_user),
+    ):
+        """013 (R5): letter to a contact; NPC auto-replies deterministically."""
+        from app.social.messages import MessageError, send_message
+
+        data = payload or {}
+        char = session.query(Character).filter_by(
+            user_id=user.id,
+            world_id=state["settings"].world.world_id,
+        ).first()
+        if char is None:
+            raise HTTPException(status_code=409, detail="no character")
+        try:
+            msg = send_message(
+                session, state["settings"].world.world_id,
+                _world_now(session), char,
+                str(data.get("to_character_id", "")),
+                str(data.get("body", "")),
+            )
+        except MessageError as exc:
+            session.rollback()
+            raise HTTPException(status_code=exc.status, detail=exc.code)
+        session.commit()
+        return {"message_id": msg.id, "status": "sent"}
+
+    @app.get("/messages")
+    def inbox_route(
+        mark_read: bool = False, session: Session = Depends(db),
+        user: User = Depends(current_user),
+    ):
+        """013 (R5): incoming letters."""
+        from app.social.messages import inbox as _inbox
+        from app.social.messages import mark_read as _mr
+
+        char = session.query(Character).filter_by(
+            user_id=user.id,
+            world_id=state["settings"].world.world_id,
+        ).first()
+        if char is None:
+            raise HTTPException(status_code=409, detail="no character")
+        rows = _inbox(session, state["settings"].world.world_id, char)
+        read_count = 0
+        if mark_read:
+            read_count = _mr(session, state["settings"].world.world_id, char)
+            session.commit()
+        return {"unread_marked": read_count, "messages": [
+            {"id": m.id, "from": m.from_character_id, "body": m.body,
+             "created_at": m.created_at, "read_at": m.read_at}
+            for m in rows
+        ]}
+
+    @app.get("/messages/sent")
+    def sent_route(
+        session: Session = Depends(db), user: User = Depends(current_user),
+    ):
+        """013 (R5): outgoing letters."""
+        from app.social.messages import sent as _sent
+
+        char = session.query(Character).filter_by(
+            user_id=user.id,
+            world_id=state["settings"].world.world_id,
+        ).first()
+        if char is None:
+            raise HTTPException(status_code=409, detail="no character")
+        rows = _sent(session, state["settings"].world.world_id, char)
+        return [
+            {"id": m.id, "to": m.to_character_id, "body": m.body,
+             "created_at": m.created_at}
+            for m in rows
+        ]
+
     from fastapi.staticfiles import StaticFiles
 
     web_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "web")

@@ -184,3 +184,13 @@ weather: { source: historical }   # в config/default.yaml или env
 **Разрушение (§76)**: ежедневная проверка — объект с `condition<=0` уничтожается (quantity=0), событие `OBJECT_DESTROYED` сохраняется навсегда. Пожар (011) доводит объекты до сгорания.
 
 События 31-34 (MARKET_LISTED, MARKET_SOLD, CONSTRUCTED, OBJECT_DESTROYED), schema 0.10.0 (39 таблиц).
+
+## M13: External follow-ups (013-external2, M7-наследование)
+
+**NPC-поездки** (флаг `external.npc_utility`, default false): NPC с health<40 раз в 30 дней едет на материк лечиться — штатный конвейер TRAVEL_EXTERNAL.
+
+**Supply/demand** (флаг `external.supply_demand`, default false): у внешних сервисов множитель цены `price_multiplier` растёт с вчерашними покупками (+2%/покупка), ежедневно затухает к 1.0 (×0.95), диапазон [0.8, 1.5]; покупка платит `price × multiplier`.
+
+**Память о поездках**: контекст диалога NPC включает последнюю поездку на материк (`npc_recent_trip`: цель, лечение); fallback-ответ упоминает её.
+
+**Письма/телефон**: `POST /messages {to_character_id, body}` (гвард: relationship или co-location, 403 на незнакомца), `GET /messages` (входящие, ?mark_read), `GET /messages/sent`. NPC отвечает детерминированным шаблоном по affection (MVP-упрощение: мгновенный ответ). Таблица `messages` (40-я), событие `MESSAGE_SENT` (35), инвариант `messages_integrity`. Schema 0.11.0.
