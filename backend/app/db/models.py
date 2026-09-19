@@ -218,6 +218,9 @@ class WorldObject(Base):
     condition = Column(Integer, default=100, nullable=False)
     quantity = Column(Integer, nullable=False)
     object_metadata = Column(Text, nullable=False) # JSON string
+    # 011 (§72): probabilistic fire model
+    flammability = Column(Float, nullable=False, default=0.1)
+    burn_state = Column(String, nullable=False, default="intact")
 
 # 17. resource_balances
 class ResourceBalance(Base):

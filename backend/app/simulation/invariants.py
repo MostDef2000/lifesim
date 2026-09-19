@@ -955,6 +955,22 @@ def run_invariant_checks(session: Session, world_id: str, settings) -> List[Dict
             weather_violations.append(f"day {w.day}: field out of range")
         if w.source not in ("synthetic", "historical"):
             weather_violations.append(f"day {w.day}: unknown source")
+    # fire_integrity (011, R8): burn_state domain; burned → quantity 0
+    from app.db.models import WorldObject as _WO
+    fire_violations = []
+    fire_rows = session.query(_WO).filter_by(world_id=world_id).all()
+    for o in fire_rows:
+        if o.burn_state not in ("intact", "burning", "burned"):
+            fire_violations.append(f"object {o.id}: bad burn_state")
+        if o.burn_state == "burned" and o.quantity != 0:
+            fire_violations.append(f"object {o.id}: burned but quantity>0")
+    results.append({
+        "name": "fire_integrity",
+        "ok": len(fire_violations) == 0,
+        "details": (f"violations: {', '.join(fire_violations)}"
+                    if fire_violations else "ok")
+    })
+
     results.append({
         "name": "weather_integrity",
         "ok": len(weather_violations) == 0,

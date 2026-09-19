@@ -258,6 +258,20 @@ class WeatherConfig(BaseModel):
         SeasonProfile(base_temp=-12.0, amplitude=8.0, wetness=0.3),    # winter
     ])
 
+class FireConfig(BaseModel):
+    """011 (§72): probabilistic fire (no physics per spec)."""
+    enabled: bool = True
+    spontaneous_chance_per_day: float = 0.0  # default 0: П2 headless determinism
+    ignition_chance: float = 0.35  # per day, scaled by flammability
+    damage_per_day: float = 8.0  # health damage to characters on location
+    burnout_days: int = 2  # burning → burned after N days
+    flammable_types: list[str] = Field(default_factory=lambda: [
+        "wood_pile", "haystack", "shed", "furniture", "cloth", "food_stock",
+    ])
+    outdoor_types: list[str] = Field(default_factory=lambda: [
+        "island", "pier", "settlement", "well",
+    ])
+
 class AdminConfig(BaseModel):
     """M8 (§85/§27/§107): public alpha operations."""
     registration_enabled: bool = True
@@ -290,6 +304,7 @@ class Settings(BaseModel):
     external: ExternalConfig = Field(default_factory=ExternalConfig)
     admin: AdminConfig = Field(default_factory=AdminConfig)
     weather: WeatherConfig = Field(default_factory=WeatherConfig)
+    fire: FireConfig = Field(default_factory=FireConfig)
 
 def load_config(path: str) -> Settings:
     p = pathlib.Path(path)

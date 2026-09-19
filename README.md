@@ -166,3 +166,11 @@ uv run python -m app.simulation.cli serve --db data/world.db
 # включить реальную погоду Рейнеке (на сервере):
 weather: { source: historical }   # в config/default.yaml или env
 ```
+
+## M11: Огонь (011-fire, §72)
+
+Вероятностная модель горения (без физики, по спеке): у `world_objects` есть `flammability` и `burn_state` (intact→burning→burned). Горящий объект: (1) воспламеняет горючие соседи на той же локации (P = ignition_chance × flammability), (2) наносит `damage_per_day` урона персонажам на локации, (3) выгорает за `burnout_days` (quantity=0, изъят из инвентаря). События `OBJECT_BURNING`/`OBJECT_BURNED` (29/30), инвариант `fire_integrity`, API `GET /fire/active`.
+
+**Связка с погодой §71**: самовоспламенение горючих объектов на открытых локациях только в жаркий сухой день (t>28, осадки=0) — `fire.spontaneous_chance_per_day`. Default 0.0 → headless-миры детерминированы без пожаров (П2).
+
+Ручной поджог (гейминг/модерация): `POST /admin/fire/ignite {"object_id": N}` — admin/moderator, пишется в audit-журнал §86.
