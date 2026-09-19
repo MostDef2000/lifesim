@@ -1,0 +1,26 @@
+# /etc/systemd/system/lifesim.service
+# ВЛ1: Рейнеке — systemd unit (015-deploy-kit)
+[Unit]
+Description=Lifesim "VL1: Reineke" API + static UI
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=lifesim
+Group=lifesim
+WorkingDirectory=/opt/lifesim
+# Config file (LIFESIM_CONFIG) and all env flags come from here:
+EnvironmentFile=/opt/lifesim/.env
+ExecStart=/opt/lifesim/.venv/bin/uvicorn app.run:app --host 127.0.0.1 --port 8000 --workers 1
+Restart=on-failure
+RestartSec=5
+# Hardening
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ProtectHome=read-only
+ReadWritePaths=/opt/lifesim/data
+
+[Install]
+WantedBy=multi-user.target
