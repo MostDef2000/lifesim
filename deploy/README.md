@@ -17,10 +17,25 @@ sudo -u lifesim .venv/bin/pip install -e . uvicorn
 ```bash
 cp deploy/.env.example /opt/lifesim/.env
 sudo -u lifesim sh -c 'echo "VL1_SECRET=$(openssl rand -hex 32)" >> /opt/lifesim/.env'
+sed -i 's|^LIFESIM_CONFIG=.*|LIFESIM_CONFIG=config/production.yaml|' /opt/lifesim/.env
 chmod 600 /opt/lifesim/.env  # владелец lifesim
 ```
 
-## 3. systemd
+`LIFESIM_CONFIG` должен указывать на `config/production.yaml`: `load_config` читает
+только YAML — переменные вида `api__enabled` кодом не оцениваются (см. комментарий
+в шапке config/production.yaml).
+
+## 3. Инициализация мира (один раз, до старта сервиса)
+
+`vl1 serve`/`app.run` требуют существующий мир (AE6'''): БД создаёт только `vl1 simulate`.
+
+```bash
+cd /opt/lifesim
+sudo -u lifesim .venv/bin/vl1 simulate --days 0 --population 20 --seed 42 --config config/production.yaml
+# ожидание: JSON-отчёт с "invariants_ok": true; БД — data/lifesim.db
+```
+
+## 4. systemd
 
 ```bash
 sudo cp deploy/lifesim.service /etc/systemd/system/
@@ -29,7 +44,7 @@ sudo systemctl enable --now lifesim
 systemctl status lifesim
 ```
 
-## 4. Caddy
+## 5. Caddy
 
 ```bash
 sudo apt install caddy
@@ -38,32 +53,37 @@ sudo cp deploy/Caddyfile /etc/caddy/Caddyfile
 sudo systemctl reload caddy
 ```
 
-WS (websockets) проксируется автоматически.
+WS (websockets) проксируется автоматически. Сжатие — директива `encode gzip`
+внутри site-блока (глобальная опция `gzip` в Caddy 2.6 не существует).
 
-## 5. Проверка
+## 6. Проверка
 
 ```bash
-curl -s http://127.0.0.1:8000/health && echo
-curl -s http://127.0.0.1:8000/docs | head -1
-curl -s https://<домен>/ | head -1   # после настройки DNS
+curl -s -o /dev/null -w '%{http_code}\n' http://127.0.0.1:8000/docs   # 200
+curl -s http://127.0.0.1:8000/world && echo                          # мир
+curl -s https://<домен>/ | head -1                                   # после DNS
 ```
 
-UI — на `/`, OpenAPI — на `/docs`.
+UI — на `/`, OpenAPI — на `/docs`. Эндпоинт `/health` в приложении пока не
+реализован (включён в бэклог) — проверять по `/docs` и `/world`.
 
-## 6. Smoke-тест реальной погоды (опционально, Рейнеке)
+## 7. Smoke-тест реальной погоды (опционально, Рейнеке)
 
-По умолчанию погода детерминированная (`weather__source=synthetic`). Для реальной погоды острова Рейнеке (42.98N, 132.55E) год назад:
+По умолчанию погода детерминированная (`weather.source: synthetic`). Для реальной
+погоды острова Рейнеке (42.98N, 132.55E) год назад отредактируйте
+`config/production.yaml` (`weather.source: historical`) и перезапустите сервис:
 
 ```bash
-echo "weather__source=historical" >> /opt/lifesim/.env
+sudo -u lifesim sed -i 's/^  source: synthetic/  source: historical/' /opt/lifesim/config/production.yaml
 sudo systemctl restart lifesim
 curl -s -H "Authorization: Bearer <token>" http://127.0.0.1:8000/weather
 # ожидание: «(реальная YYYY-MM-DD)» в шапке UI; кэш-файлы в data/weather_cache/
 ```
 
 Офлайн/сбой Open-Meteo → автоматический фолбэк в synthetic (в логе — warning).
+Переменная `weather__source` из .env кодом не читается — менять только в YAML.
 
-## 7. Бэкап SQLite
+## 8. Бэкап SQLite
 
 ```bash
 sudo -u lifesim sqlite3 /opt/lifesim/data/lifesim.db ".backup '/opt/lifesim/backups/$(date +%F).db'"
@@ -71,7 +91,7 @@ sudo -u lifesim sqlite3 /opt/lifesim/data/lifesim.db ".backup '/opt/lifesim/back
 
 Крон-строка (пример, 03:15 ежедневно): `15 3 * * * sqlite3 /opt/lifesim/data/lifesim.db ".backup /opt/lifesim/backups/\$(date +\%F).db"`
 
-## 8. Обновление
+## 9. Обновление
 
 ```bash
 cd /opt/lifesim && sudo -u lifesim git pull
