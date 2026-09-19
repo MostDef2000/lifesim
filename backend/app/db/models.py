@@ -86,6 +86,9 @@ class Character(Base):
     alive = Column(Boolean, default=True, nullable=False)
     location_id = Column(Integer, ForeignKey("locations.id"), nullable=False)
     home_location_id = Column(Integer, ForeignKey("locations.id"), nullable=True)
+    # 014 (§27): optional self-description at creation
+    looks = Column(String(500), nullable=True)
+    biography = Column(Text, nullable=True)
     occupation_id = Column(Integer, ForeignKey("jobs.id"), nullable=True)
     created_at = Column(Integer, nullable=False)
     updated_at = Column(Integer, nullable=False)
@@ -572,7 +575,7 @@ def bootstrap(engine, settings: Settings, seed: int):
 
     with Session(engine) as session:
         # Schema meta
-        session.merge(SchemaMeta(key="version", value="0.11.0"))
+        session.merge(SchemaMeta(key="version", value="0.12.0"))
 
         # World
         world_id = settings.world.world_id

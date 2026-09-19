@@ -194,3 +194,9 @@ weather: { source: historical }   # в config/default.yaml или env
 **Память о поездках**: контекст диалога NPC включает последнюю поездку на материк (`npc_recent_trip`: цель, лечение); fallback-ответ упоминает её.
 
 **Письма/телефон**: `POST /messages {to_character_id, body}` (гвард: relationship или co-location, 403 на незнакомца), `GET /messages` (входящие, ?mark_read), `GET /messages/sent`. NPC отвечает детерминированным шаблоном по affection (MVP-упрощение: мгновенный ответ). Таблица `messages` (40-я), событие `MESSAGE_SENT` (35), инвариант `messages_integrity`. Schema 0.11.0.
+
+## M14: Player/UX — биография, внешность, портрет (014-player-ux, §27)
+
+**Создание персонажа**: опциональные поля «Внешность» (≤500) и «Биография» (≤2000) — сохраняются в `characters.looks`/`biography` (schema 0.12.0), возвращаются в POST /characters и GET /characters/by-user. Форма в UI — два textarea.
+
+**Портрет в UI**: блок «Портрет» в виде мира — при загрузке подтягивает canonical-портрет (M6 reuse), кнопка «Сгенерировать портрет» идёт через штатный POST /visual/portraits → GET /visual/assets/{id}/file (blob + Authorization → objectURL). При `visual.enabled=false` — graceful деградация (кнопка, статус ошибки). Повторная генерация переиспользует canonical (бэкенд).

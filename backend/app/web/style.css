@@ -70,3 +70,19 @@ table.inv td, table.inv th { padding: 4px 6px; border-bottom: 1px solid var(--li
 .muted { color: var(--dim); }
 .err-text { color: var(--warn); }
 .actions { display: flex; gap: 6px; flex-wrap: wrap; margin: 6px 0; }
+
+/* 014: portrait block */
+.portrait .portrait-img {
+  width: 100%;
+  border-radius: 8px;
+  margin: 8px 0;
+}
+.portrait .portrait-status {
+  min-height: 1em;
+  margin: 4px 0;
+}
+textarea {
+  width: 100%;
+  min-height: 56px;
+  resize: vertical;
+}

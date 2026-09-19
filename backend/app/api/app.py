@@ -158,6 +158,8 @@ def create_app(settings, session_factory: sessionmaker):
         name: str
         sex: str
         age: int = 18
+        looks: str | None = None  # 014 (§27): appearance, ≤500 chars
+        biography: str | None = None  # 014 (§27): backstory, ≤2000 chars
 
     class MeOut(BaseModel):
         id: int
@@ -247,6 +249,11 @@ def create_app(settings, session_factory: sessionmaker):
     ):
         from app.characters.player import create_player_character
 
+        looks = (body.looks or "").strip()
+        biography = (body.biography or "").strip()
+        if len(looks) > 500 or len(biography) > 2000:
+            raise HTTPException(
+                status_code=422, detail="looks ≤500, biography ≤2000")
         settings_ = state["settings"]
         world_id = settings_.world.world_id
         try:
@@ -254,6 +261,7 @@ def create_app(settings, session_factory: sessionmaker):
                 session, settings_, world_id, user,
                 name=body.name.strip(), sex=body.sex, age=body.age,
                 game_timestamp=0,
+                looks=looks or None, biography=biography or None,
             )
         except ValueError as exc:
             detail = str(exc)
@@ -261,7 +269,8 @@ def create_app(settings, session_factory: sessionmaker):
             raise HTTPException(status_code=status, detail=detail)
         session.commit()
         return {"id": character.id, "name": f"{character.first_name} {character.last_name}".strip(),
-                "control_mode": character.control_mode, "location_id": character.location_id}
+                "control_mode": character.control_mode, "location_id": character.location_id,
+                "looks": character.looks, "biography": character.biography}
 
     # ---------- Control modes (R4, §60-61) ----------
 
@@ -600,7 +609,8 @@ def create_app(settings, session_factory: sessionmaker):
         )
         return [
             {"id": c.id, "name": f"{c.first_name} {c.last_name}",
-             "alive": bool(c.alive), "control_mode": c.control_mode}
+             "alive": bool(c.alive), "control_mode": c.control_mode,
+             "looks": c.looks, "biography": c.biography}
             for c in rows
         ]
 
