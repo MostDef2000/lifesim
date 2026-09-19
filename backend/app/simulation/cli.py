@@ -219,9 +219,13 @@ def _run_backup(args) -> int:
     backup_dir = Path(args.backup_dir or settings.admin.backup_dir)
     backup_dir.mkdir(parents=True, exist_ok=True)
     stamp = _dt.utcnow().strftime("%Y%m%d_%H%M%S")
-    # collision-proof stamp (multiple backups within one second)
+    # collision-proof stamp (multiple backups within one second):
+    # both the DB file and the assets dir must not exist (m8 AE4 flake fix)
+    assets_src = Path("data/visual_assets")
     suffix = 0
-    while (backup_dir / f"world_{stamp}.db").exists():
+    while (backup_dir / f"world_{stamp}.db").exists() or (
+        assets_src.exists() and (backup_dir / f"assets_{stamp}").exists()
+    ):
         suffix += 1
         stamp = f"{_dt.utcnow().strftime('%Y%m%d_%H%M%S')}_{suffix}"
 
@@ -236,7 +240,6 @@ def _run_backup(args) -> int:
 
     # 2. visual assets (§87: images may be backed up less often, but a full
     #    copy per run keeps the snapshot self-contained)
-    assets_src = Path("data/visual_assets")
     if assets_src.exists():
         shutil.copytree(assets_src, backup_dir / f"assets_{stamp}")
 
