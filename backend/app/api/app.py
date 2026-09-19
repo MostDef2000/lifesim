@@ -18,6 +18,14 @@ def get_secret(settings) -> str:
     return secret
 
 
+
+def _schema_version(session):
+    """Current schema version from SchemaMeta (010: dynamic, was hardcoded)."""
+    from app.db.models import SchemaMeta
+
+    row = session.query(SchemaMeta).filter_by(key="version").first()
+    return row.value if row is not None else "unknown"
+
 def create_app(settings, session_factory: sessionmaker):
     """Build the FastAPI app bound to a sessionmaker and the given Settings."""
     from fastapi import Depends, FastAPI, HTTPException, Request, Response
@@ -866,7 +874,7 @@ def create_app(settings, session_factory: sessionmaker):
                 "is_paused": bool(clock.is_paused) if clock else False,
                 "time_scale": clock.time_scale if clock else 1.0,
             },
-            "schema_version": "0.8.0",
+            "schema_version": _schema_version(session),
             "uptime_sec": int(_time.time() - started) if started else 0,
             "ws_connections": getattr(app.state, "ws_connections", 0),
         }

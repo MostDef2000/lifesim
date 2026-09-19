@@ -330,6 +330,7 @@ def test_ae5_m1_regression():
         'PURCHASE': 70,
         'SALARY_PAID': 140,
         'SUPPLY_ARRIVED': 7,
+            'WEATHER_CHANGED': 8,
         'TASK_COMPLETED': 2249
     }
 

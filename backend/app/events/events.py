@@ -38,6 +38,7 @@ class EventType(Enum):
     TRAVEL_EXTERNAL_RETURNED = "TRAVEL_EXTERNAL_RETURNED"
     MEMORY_CREATED = "MEMORY_CREATED"
     MEMORY_CONSOLIDATED = "MEMORY_CONSOLIDATED"
+    WEATHER_CHANGED = "WEATHER_CHANGED"  # 010 (§71): daily weather record
 
 def log_event(
     session: Session,

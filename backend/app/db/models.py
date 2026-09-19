@@ -391,6 +391,24 @@ class User(Base):
     created_at = Column(Integer, nullable=False)
 
 
+# 010 (§71): daily weather state
+class WeatherState(Base):
+    __tablename__ = "weather_state"
+    __table_args__ = (
+        UniqueConstraint("world_id", "day", name="uq_weather_world_day"),
+    )
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    world_id = Column(String, nullable=False)
+    day = Column(Integer, nullable=False)
+    temperature = Column(Float, nullable=False)
+    wind = Column(Float, nullable=False)
+    precipitation = Column(Float, nullable=False)
+    cloudiness = Column(Float, nullable=False)
+    visibility = Column(Float, nullable=False)
+    source = Column(String, nullable=False, default="synthetic")
+    real_date = Column(String, nullable=True)
+
+
 # M8 (§86): administrative action audit
 class AdminAuditLog(Base):
     __tablename__ = "admin_audit_log"
@@ -516,7 +534,7 @@ def bootstrap(engine, settings: Settings, seed: int):
 
     with Session(engine) as session:
         # Schema meta
-        session.merge(SchemaMeta(key="version", value="0.8.0"))
+        session.merge(SchemaMeta(key="version", value="0.9.0"))
 
         # World
         world_id = settings.world.world_id
