@@ -1,10 +1,14 @@
 """015: uvicorn entrypoint (deploy/lifesim.service ExecStart target).
 
-Builds the FastAPI app from the config file named by LIFESIM_CONFIG
-(default config/default.yaml). Secrets come from the environment
-(VL1_SECRET, see .env.example / deploy/README.md).
+Mirrors `vl1 serve` (app.simulation.cli:_run_serve, SPEC §104): load config
+from LIFESIM_CONFIG (default config/default.yaml), build the engine +
+sessionmaker from settings.persistence, then create_app(settings,
+session_factory). Secrets come from the environment (VL1_SECRET, see
+.env.example / deploy/README.md).
 """
 import os
+
+from sqlalchemy.orm import sessionmaker
 
 from app.config.config import load_config
 
@@ -17,9 +21,18 @@ def _build():
     global _APP
     if _APP is None:
         settings = load_config(_CONFIG)
+        if not settings.api.enabled:
+            raise RuntimeError(
+                "api.enabled=false in config; "
+                "deploy config (e.g. config/production.yaml) must set api.enabled=true"
+            )
+        from app.db.models import create_engine_factory
+
+        engine = create_engine_factory(settings)
+        factory = sessionmaker(bind=engine, expire_on_commit=False)
         from app.api.app import create_app
 
-        _APP = create_app(settings)
+        _APP = create_app(settings, factory)
     return _APP
 
 
