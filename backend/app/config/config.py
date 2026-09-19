@@ -206,6 +206,22 @@ class ApiConfig(BaseModel):
     ws_interval_s: float = 1.0
     secret_env: str = "VL1_SECRET"  # HMAC secret; dev fallback with warning
 
+class CrimeConfig(BaseModel):
+    """016 (§32-35): crime/law/police. Off by default (П2 keystone)."""
+    enabled: bool = False
+    theft_hunger_threshold: float = 25.0
+    theft_money_threshold: int = 50
+    theft_chance: float = 0.15
+    vandalism_social_threshold: float = 15.0
+    vandalism_chance: float = 0.05
+    detection_base: float = 0.4
+    fine_theft: int = 200
+    fine_vandalism: int = 150
+    prison_days: int = 7
+    prison_needs_decay_multiplier: float = 0.3
+    police_starting_balance: int = 5000
+
+
 class VisualConfig(BaseModel):
     """M6 (SPEC §105/66-70): visual generation. Off by default (П2-аналог)."""
     enabled: bool = False
@@ -316,6 +332,7 @@ class Settings(BaseModel):
     llm: LlmConfig = Field(default_factory=LlmConfig)
     api: ApiConfig = Field(default_factory=ApiConfig)
     visual: VisualConfig = Field(default_factory=VisualConfig)
+    crime: CrimeConfig = Field(default_factory=CrimeConfig)
     external: ExternalConfig = Field(default_factory=ExternalConfig)
     admin: AdminConfig = Field(default_factory=AdminConfig)
     weather: WeatherConfig = Field(default_factory=WeatherConfig)

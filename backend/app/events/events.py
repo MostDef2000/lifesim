@@ -46,6 +46,11 @@ class EventType(Enum):
     CONSTRUCTED = "CONSTRUCTED"  # 012 (§75): new object built
     OBJECT_DESTROYED = "OBJECT_DESTROYED"  # 012 (§76): condition reached 0
     MESSAGE_SENT = "MESSAGE_SENT"  # 013: letters/phone via contacts
+    CRIME_COMMITED = "CRIME_COMMITED"  # 016 (§33): theft/vandalism act
+    CRIME_REPORTED = "CRIME_REPORTED"  # 016 (§34): witness report to police
+    FINE_PAID = "FINE_PAID"  # 016 (§35): fine via ledger
+    ARRESTED = "ARRESTED"  # 016 (§35): imprisonment starts
+    RELEASED = "RELEASED"  # 016 (§35): prison term over
 
 def log_event(
     session: Session,

@@ -89,6 +89,8 @@ class Character(Base):
     # 014 (§27): optional self-description at creation
     looks = Column(String(500), nullable=True)
     biography = Column(Text, nullable=True)
+    # 016 (§35): prison timer (game day of release; NULL = free)
+    prison_until_day = Column(Integer, nullable=True)
     occupation_id = Column(Integer, ForeignKey("jobs.id"), nullable=True)
     created_at = Column(Integer, nullable=False)
     updated_at = Column(Integer, nullable=False)
@@ -398,6 +400,24 @@ class User(Base):
     created_at = Column(Integer, nullable=False)
 
 
+# 016 (§33): crimes — theft/vandalism with witness reports and police resolution
+class Crime(Base):
+    __tablename__ = "crimes"
+    __table_args__ = (
+        Index("ix_crimes_world_status", "world_id", "status"),
+    )
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    world_id = Column(String, ForeignKey("worlds.id"), nullable=False)
+    crime_type = Column(String, nullable=False)  # theft|vandalism
+    actor_character_id = Column(String, ForeignKey("characters.id"), nullable=False)
+    location_id = Column(Integer, ForeignKey("locations.id"), nullable=False)
+    target_object_id = Column(Integer, ForeignKey("world_objects.id"), nullable=True)
+    day = Column(Integer, nullable=False)
+    status = Column(String, nullable=False, default="unreported")  # unreported|reported|resolved
+    resolution = Column(String, nullable=True)  # fine|prison
+    created_at = Column(Integer, nullable=False)
+
+
 # 013: letters/phone — contacts as a communication channel
 class Message(Base):
     __tablename__ = "messages"
@@ -575,7 +595,7 @@ def bootstrap(engine, settings: Settings, seed: int):
 
     with Session(engine) as session:
         # Schema meta
-        session.merge(SchemaMeta(key="version", value="0.12.0"))
+        session.merge(SchemaMeta(key="version", value="0.13.0"))
 
         # World
         world_id = settings.world.world_id
