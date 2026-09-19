@@ -67,6 +67,15 @@ class TestEnvExample:
         assert hexvals == []
         assert "openssl rand -hex 32" in env  # generation command documented
 
+    def test_no_redaction_artifacts(self):
+        # Фаза 4 инцидент: редактор секретов схлопнул $(openssl ...) в
+        # [redacted:...] — строка ушла в прод как «секрет». Докам запрещено
+        # содержать артефакты; шаблон — только CHANGE_ME-плейсхолдер.
+        for fname in (".env.example", "README.md", "lifesim.service", "Caddyfile"):
+            assert "[redacted:" not in read(fname), fname
+        assert ("VL1_SECRET=REPLACE" + "_ME_WITH_64_HEX_CHARS") in read(".env.example")
+        assert "openssl rand -hex 32" in read("README.md")
+
     def test_paths_consistent(self):
         env = read(".env.example")
         unit = read("lifesim.service")
