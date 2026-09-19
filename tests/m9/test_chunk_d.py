@@ -117,3 +117,57 @@ class TestExternalFormData:
         assert len(catalog) >= 3
         svc = catalog[0]["services"][0]
         assert {"id", "service_type"} <= set(svc.keys())
+
+
+class TestRateLimitScope:
+    """M8 limiter: strict bucket only for credential endpoints."""
+
+    def _env(self, tmp_path, auth_rpm=2):
+        settings = SETTINGS.model_copy(update={
+            "persistence": SETTINGS.persistence.model_copy(
+                update={"db_path": str(tmp_path / "w.db")}
+            ),
+            "admin": SETTINGS.admin.model_copy(update={
+                "rate_limit_enabled": True,
+                "auth_rpm": auth_rpm,
+                "global_rpm": 1000,
+            }),
+        })
+        engine = create_engine_factory(settings)
+        with sessionmaker(bind=engine)() as session:
+            bootstrap(engine, settings, seed=42)
+            seed_world(session, settings, settings.world.world_id)
+            session.add(User(
+                username="rluser", email="rl@x.com",
+                password_hash=hash_password("password123"),
+                role="player", age_confirmed=True, created_at=0,
+            ))
+            session.commit()
+        from app.api.app import create_app
+
+        return TestClient(create_app(settings, sessionmaker(
+            bind=engine, expire_on_commit=False)))
+
+    def test_login_strict_bucket(self, tmp_path):
+        client = self._env(tmp_path, auth_rpm=2)
+        # two failed logins fill the strict bucket (401), third is 429
+        assert client.post("/auth/login", json={
+            "username": "rluser", "password": "wrong"}).status_code == 401
+        assert client.post("/auth/login", json={
+            "username": "rluser", "password": "wrong"}).status_code == 401
+        assert client.post("/auth/login", json={
+            "username": "rluser", "password": "wrong"}).status_code == 429
+
+    def test_auth_me_not_in_strict_bucket(self, tmp_path):
+        client = self._env(tmp_path, auth_rpm=1)
+        # /auth/me without cookie -> 401, and NOT rate-limited by auth bucket
+        for _ in range(5):
+            assert client.get("/auth/me").status_code == 401
+
+    def test_legit_login_then_me(self, tmp_path):
+        client = self._env(tmp_path, auth_rpm=1)
+        r = client.post("/auth/login", json={
+            "username": "rluser", "password": "password123"})
+        assert r.status_code == 200
+        # /auth/me right after login must not trip the strict bucket
+        assert client.get("/auth/me").status_code == 200

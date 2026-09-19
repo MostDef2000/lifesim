@@ -64,9 +64,14 @@ def create_app(settings, session_factory: sessionmaker):
             ip = _client_ip(request)
             now = _time.time()
             window = settings.admin.rate_limit_window_sec
-            is_auth = request.url.path.startswith("/auth/")
-            scope = "auth" if is_auth else "global"
-            limit = settings.admin.auth_rpm if is_auth else settings.admin.global_rpm
+            # Strict bucket only for credential endpoints (brute-force
+            # surface). /auth/me & /auth/logout share the global bucket:
+            # a legit re-login after a secret reset must not lock the
+            # user out (phase-5 incident, lf.mostdef.ru).
+            path = request.url.path
+            strict_auth = path in ("/auth/login", "/auth/register")
+            scope = "auth" if strict_auth else "global"
+            limit = settings.admin.auth_rpm if strict_auth else settings.admin.global_rpm
             bucket = _hits.setdefault((ip, scope), collections.deque())
             while bucket and now - bucket[0] > window:
                 bucket.popleft()
