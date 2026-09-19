@@ -40,6 +40,13 @@ def client(tmp_path):
     return TestClient(create_app(settings, factory))
 
 
+class TestHealth:
+    def test_health_ok(self, client):
+        r = client.get("/health")
+        assert r.status_code == 200
+        assert r.json() == {"status": "ok"}
+
+
 class TestStatic:
     def test_index_served(self, client):
         r = client.get("/")

@@ -471,6 +471,13 @@ def create_app(settings, session_factory: sessionmaker):
             for g in goals
         ]
 
+    # ---------- Health (deploy runbook §6) ----------
+
+    @app.get("/health")
+    def health():
+        """Liveness for systemd/Caddy/uptime checks. No auth, no DB."""
+        return {"status": "ok"}
+
     # ---------- World / read endpoints (R8, §80) ----------
 
     @app.get("/world")
