@@ -981,6 +981,37 @@ def run_invariant_checks(session: Session, world_id: str, settings) -> List[Dict
                     if crime_violations else f"crimes: {len(crimes)}"),
     })
 
+    # consent_integrity (018, R5): romance category, valid permission,
+    # actor != target; worn wearables carry a slot.
+    from app.db.models import InteractionPermission as _IP
+    consent_violations = []
+    consents = session.query(_IP).filter_by(world_id=world_id).all()
+    for row in consents:
+        if row.interaction_category != "romance":
+            consent_violations.append(
+                f"consent {row.id}: bad category")
+        if row.permission not in ("requested", "granted", "declined"):
+            consent_violations.append(
+                f"consent {row.id}: bad permission")
+        if row.actor_character_id == row.target_character_id:
+            consent_violations.append(f"consent {row.id}: self pair")
+    worn_meta_violations = []
+    from app.db.models import WorldObject as _WO
+    from app.social.clothing import SLOT_MAP, _metadata
+    for wo in session.query(_WO).filter_by(world_id=world_id).all():
+        if wo.object_type in SLOT_MAP:
+            meta = _metadata(wo)
+            if meta.get("worn") and not meta.get("slot"):
+                worn_meta_violations.append(f"object {wo.id}: worn w/o slot")
+    consent_violations.extend(worn_meta_violations)
+    results.append({
+        "name": "consent_integrity",
+        "ok": len(consent_violations) == 0,
+        "details": (f"violations: {', '.join(consent_violations)}"
+                    if consent_violations
+                    else f"consents: {len(consents)}")
+    })
+
     # messages_integrity (013, R6): body domain; alive participants
     from app.db.models import Message as _Msg
     msg_violations = []

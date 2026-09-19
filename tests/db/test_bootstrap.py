@@ -36,7 +36,7 @@ def test_bootstrap_tables(tmp_path):
     # dialogue_turns in M4)
     cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'")
     tables = [row[0] for row in cursor.fetchall()]
-    assert len(tables) == 41, f"Expected 38 tables, found {len(tables)}: {tables}"
+    assert len(tables) == 42, f"Expected 38 tables, found {len(tables)}: {tables}"
 
     # Check basic rows
     cursor.execute("SELECT id, seed FROM worlds")
@@ -47,5 +47,9 @@ def test_bootstrap_tables(tmp_path):
     cursor.execute("SELECT game_timestamp FROM world_clock")
     clock = cursor.fetchone()
     assert clock[0] == 0
+
+    # 018 (R1): consent table bootstrapped
+    cursor.execute("SELECT COUNT(*) FROM interaction_permissions")
+    assert cursor.fetchone()[0] == 0
 
     conn.close()

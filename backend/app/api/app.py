@@ -1385,6 +1385,86 @@ def create_app(settings, session_factory: sessionmaker):
         return {"task_id": task.id, "object_type": object_type,
                 "ends_at": task.ends_at}
 
+    @app.post("/interactions/romantic")
+    def romantic_request_route(
+        payload: dict = None, session: Session = Depends(db),
+        user: User = Depends(current_user),
+    ):
+        """018 (§31): explicit romance request; deterministic NPC decision."""
+        from app.social.consent import ConsentError, request_romantic
+
+        data = payload or {}
+        char = session.query(Character).filter_by(
+            user_id=user.id,
+            world_id=state["settings"].world.world_id,
+        ).first()
+        if char is None:
+            raise HTTPException(status_code=409, detail="no character")
+        npc = session.query(Character).filter_by(
+            id=str(data.get("npc_id", "")),
+            world_id=state["settings"].world.world_id,
+        ).first()
+        if npc is None:
+            raise HTTPException(status_code=404, detail="npc_not_found")
+        try:
+            permission = request_romantic(
+                session, state["settings"].world.world_id,
+                _world_now(session), char, npc, state["settings"],
+            )
+        except ConsentError as exc:
+            session.rollback()
+            raise HTTPException(status_code=exc.status, detail=exc.code)
+        session.commit()
+        return {"npc_id": npc.id, "permission": permission}
+
+    @app.get("/interactions/permissions")
+    def permissions_route(
+        session: Session = Depends(db),
+        user: User = Depends(current_user),
+    ):
+        """018 (R3): consent rows where the player is actor or target."""
+        from app.social.consent import list_permissions
+
+        char = session.query(Character).filter_by(
+            user_id=user.id,
+            world_id=state["settings"].world.world_id,
+        ).first()
+        if char is None:
+            raise HTTPException(status_code=409, detail="no character")
+        rows = list_permissions(
+            session, state["settings"].world.world_id, char.id)
+        return {"permissions": rows}
+
+    @app.post("/wear")
+    def wear_route(
+        payload: dict = None, session: Session = Depends(db),
+        user: User = Depends(current_user),
+    ):
+        """018 (§28): toggle worn on own wearable item."""
+        from app.social.clothing import WearError, toggle_wear
+
+        data = payload or {}
+        char = session.query(Character).filter_by(
+            user_id=user.id,
+            world_id=state["settings"].world.world_id,
+        ).first()
+        if char is None:
+            raise HTTPException(status_code=409, detail="no character")
+        try:
+            object_id = int(data.get("object_id", 0))
+        except (TypeError, ValueError):
+            raise HTTPException(status_code=422, detail="bad_object_id")
+        try:
+            result = toggle_wear(
+                session, state["settings"].world.world_id, char.id,
+                object_id,
+            )
+        except WearError as exc:
+            session.rollback()
+            raise HTTPException(status_code=exc.status, detail=exc.code)
+        session.commit()
+        return result
+
     @app.post("/messages")
     def send_message_route(
         payload: dict = None, session: Session = Depends(db),

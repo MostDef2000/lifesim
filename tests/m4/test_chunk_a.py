@@ -39,7 +39,7 @@ def test_schema_050_tables_created(default_settings):
         __import__("sqlalchemy").text(
             "SELECT value FROM schema_meta WHERE key='version'")
     ).scalar()
-    assert version == "0.13.0"
+    assert version == "0.14.0"
     session.close()
 
 
