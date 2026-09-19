@@ -512,6 +512,63 @@ def create_app(settings, session_factory: sessionmaker):
             for e in events
         ]
 
+
+
+    @app.get("/weather")
+    def get_weather(session: Session = Depends(db), user: User = Depends(current_user)):
+        """010 (§71, R4): current-day weather for the caller's world."""
+        from app.db.models import WorldClock
+        from app.simulation.weather import (
+            describe_weather,
+            get_or_create_weather,
+        )
+
+        world_id = state["settings"].world.world_id
+        clock = session.query(WorldClock).filter_by(world_id=world_id).first()
+        current_day = clock.game_timestamp // 1440 if clock is not None else 0
+        row = get_or_create_weather(session, world_id, current_day, state["settings"])
+        session.commit()
+        if row is None:
+            return {"enabled": False}
+        return {
+            "enabled": True,
+            "day": row.day,
+            "temperature": row.temperature,
+            "wind": row.wind,
+            "precipitation": row.precipitation,
+            "cloudiness": row.cloudiness,
+            "visibility": row.visibility,
+            "source": row.source,
+            "real_date": row.real_date,
+            "description": describe_weather(row),
+        }
+
+    @app.get("/weather/history")
+    def get_weather_history(
+        days: int = 7, session: Session = Depends(db), user: User = Depends(current_user)
+    ):
+        """010 (R4): last N days (<=30), newest first."""
+        from app.db.models import WeatherState
+
+        world_id = state["settings"].world.world_id
+        days = max(1, min(days, 30))
+        rows = (
+            session.query(WeatherState)
+            .filter_by(world_id=world_id)
+            .order_by(WeatherState.day.desc())
+            .limit(days)
+            .all()
+        )
+        return [
+            {
+                "day": r.day, "temperature": r.temperature, "wind": r.wind,
+                "precipitation": r.precipitation, "cloudiness": r.cloudiness,
+                "visibility": r.visibility, "source": r.source,
+                "real_date": r.real_date,
+            }
+            for r in rows
+        ]
+
     @app.get("/locations")
     def list_locations(user: User = Depends(current_user), session: Session = Depends(db)):
         """M9 (§78): map — list of world locations for the client."""

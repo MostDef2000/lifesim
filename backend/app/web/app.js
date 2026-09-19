@@ -167,9 +167,15 @@ function topbar(active) {
   if (["admin", "developer", "moderator"].includes(S.user.role)) {
     tabs.push(["#/admin", "Админ"]);
   }
+  const weatherSpan = S.weather && S.weather.enabled
+    ? el("span", { id: "weather", class: "muted" },
+        "Погода: " + S.weather.description + (S.weather.source === "historical"
+          ? " (реальная " + S.weather.real_date + ")" : ""))
+    : null;
   return el("div", { class: "topbar" },
     el("h1", {}, "ВЛ1: Рейнеке"),
     el("span", { id: "clock", class: "muted" }, S.world ? dayTime(S.world.game_timestamp) : "…"),
+    weatherSpan,
     el("span", { class: "spacer" }),
     el("div", { class: "tabs" },
       tabs.map(([h, label]) => el("button", {
@@ -185,6 +191,7 @@ async function viewWorld() {
   app.replaceChildren(topbar("#/world"), el("div", { class: "muted" }, "Загрузка…"));
   try {
     S.world = await api("/world");
+    try { S.weather = await api("/weather"); } catch { S.weather = null; }
     const me = await api(`/characters/${S.character.id}`);
     S.character = { ...S.character, ...me };
     const locs = await api("/locations");

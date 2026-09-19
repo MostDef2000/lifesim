@@ -60,6 +60,24 @@ def build_scene_descriptor(
     if event is not None and event.world_id == world_id:
         event_part = {"type": event.event_type, "actor_id": event.actor_id}
 
+    # 010 (§71, R6): weather from the world's current day row; without a row
+    # the descriptor stays byte-identical to the pre-weather pin ('clear').
+    weather_str = "clear"
+    from app.db.models import WeatherState
+    from app.db.models import WorldClock as _WeatherClock
+
+    clock = session.query(_WeatherClock).filter_by(world_id=world_id).first()
+    if clock is not None:
+        wrow = (
+            session.query(WeatherState)
+            .filter_by(world_id=world_id, day=clock.game_timestamp // 1440)
+            .first()
+        )
+        if wrow is not None:
+            from app.simulation.weather import describe_weather
+
+            weather_str = describe_weather(wrow)
+
     return {
         "location": {"id": location.id, "name": location.name, "type": location.type},
         "characters": [
@@ -67,7 +85,7 @@ def build_scene_descriptor(
             for c in characters
         ],
         "objects": [{"id": o.id, "type": o.object_type} for o in objects],
-        "weather": "clear",
+        "weather": weather_str,
         "time": {"day": game_ts // 1440, "hour": (game_ts % 1440) // 60,
                  "time_of_day": _time_of_day((game_ts % 1440) // 60)},
         "camera": camera,
