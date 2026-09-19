@@ -14,7 +14,7 @@ from app.db.models import (
 )
 from app.economy import transfer as economy_transfer
 from app.events.events import EventType, log_event
-from app.inventory import adjust_resource, consume_object, create_object, transfer_object
+from app.inventory import adjust_resource, consume_object, transfer_object
 from app.world.seed_world import find_path
 
 
@@ -245,6 +245,8 @@ def complete_task(
             .filter_by(world_id=world_id, type="business")
             .first()
         )
+        from app.inventory import create_object  # noqa: F401 (branch scope)
+
         if business is not None and travel_cost > 0:
             business_acc = (
                 session.query(Account)
@@ -293,6 +295,66 @@ def complete_task(
             actor_id=character.id,
             payload={"purpose": purpose, "spent": spent, "items": items,
                      "healed": healed},
+        )
+
+    elif task_type == "CONSTRUCT":
+        # 012 (§75): construction — resources consumed at completion,
+        # new object created at the character's location (§75 pipeline).
+        from app.db.models import WorldObject
+        from app.inventory import create_object
+
+        object_type = params.get("object_type", "")
+        costs = settings.construction.costs.get(object_type)
+        if costs is None:
+            fail_task(session, world_id, character, task, game_timestamp,
+                      "unknown blueprint")
+            return
+        required = costs.get("required_items", {})
+        for item_type, qty in required.items():
+            owned = (
+                session.query(WorldObject)
+                .filter_by(
+                    world_id=world_id,
+                    owner_character_id=character.id,
+                    object_type=item_type,
+                )
+                .all()
+            )
+            if sum(o.quantity for o in owned) < qty:
+                fail_task(session, world_id, character, task,
+                          game_timestamp, "missing resources")
+                return
+        for item_type, qty in required.items():
+            left = qty
+            rows = (
+                session.query(WorldObject)
+                .filter_by(
+                    world_id=world_id,
+                    owner_character_id=character.id,
+                    object_type=item_type,
+                )
+                .order_by(WorldObject.id)
+                .all()
+            )
+            for row in rows:
+                if left <= 0:
+                    break
+                take = min(row.quantity, left)
+                row.quantity -= take
+                left -= take
+                if row.quantity <= 0:
+                    session.delete(row)
+        new_obj = create_object(
+            session, world_id, object_type,
+            location_id=character.location_id,
+            quantity=1, owner_character_id=character.id,
+            metadata={"constructed_day": game_timestamp // 1440},
+        )
+        log_event(
+            session, world_id, game_timestamp,
+            EventType.CONSTRUCTED, actor_id=character.id,
+            payload={"object_id": new_obj.id,
+                     "object_type": object_type},
         )
 
     elif task_type == "SOCIALIZE":

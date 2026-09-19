@@ -7,6 +7,7 @@ from sqlalchemy import (
     Column,
     Float,
     ForeignKey,
+    Index,
     Integer,
     String,
     Text,
@@ -394,6 +395,23 @@ class User(Base):
     created_at = Column(Integer, nullable=False)
 
 
+# 012 (§74): player-to-player market offers
+class MarketOffer(Base):
+    __tablename__ = "market_offers"
+    __table_args__ = (
+        Index("ix_market_world_status", "world_id", "status"),
+    )
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    world_id = Column(String, ForeignKey("worlds.id"), nullable=False)
+    seller_character_id = Column(String, ForeignKey("characters.id"), nullable=False)
+    object_id = Column(Integer, ForeignKey("world_objects.id"), nullable=False)
+    price = Column(Integer, nullable=False)
+    status = Column(String, nullable=False, default="active")  # active|sold|cancelled
+    buyer_character_id = Column(String, ForeignKey("characters.id"), nullable=True)
+    created_at = Column(Integer, nullable=False)
+    closed_at = Column(Integer, nullable=True)
+
+
 # 010 (§71): daily weather state
 class WeatherState(Base):
     __tablename__ = "weather_state"
@@ -537,7 +555,7 @@ def bootstrap(engine, settings: Settings, seed: int):
 
     with Session(engine) as session:
         # Schema meta
-        session.merge(SchemaMeta(key="version", value="0.9.0"))
+        session.merge(SchemaMeta(key="version", value="0.10.0"))
 
         # World
         world_id = settings.world.world_id

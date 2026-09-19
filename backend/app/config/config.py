@@ -64,6 +64,12 @@ class ActionsConfig(BaseModel):
             base_utility_weight=0.3,
         )
     )
+    CONSTRUCT: ActionParams = Field(
+        default_factory=lambda: ActionParams(
+            duration_minutes=2880, max_duration_minutes=5760,
+            base_utility_weight=0.0,
+        )
+    )
     TRAVEL_EXTERNAL: ActionParams = Field(
         default_factory=lambda: ActionParams(
             duration_minutes=480, max_duration_minutes=960,
@@ -258,6 +264,14 @@ class WeatherConfig(BaseModel):
         SeasonProfile(base_temp=-12.0, amplitude=8.0, wetness=0.3),    # winter
     ])
 
+class ConstructionConfig(BaseModel):
+    """012 (§75): player/NPC construction of new objects."""
+    enabled: bool = True
+    costs: dict = Field(default_factory=lambda: {
+        "shed": {"required_items": {"wood_pile": 2}, "days": 2},
+        "pier_extension": {"required_items": {"wood_pile": 3}, "days": 3},
+    })
+
 class FireConfig(BaseModel):
     """011 (§72): probabilistic fire (no physics per spec)."""
     enabled: bool = True
@@ -305,6 +319,8 @@ class Settings(BaseModel):
     admin: AdminConfig = Field(default_factory=AdminConfig)
     weather: WeatherConfig = Field(default_factory=WeatherConfig)
     fire: FireConfig = Field(default_factory=FireConfig)
+    construction: ConstructionConfig = Field(
+        default_factory=ConstructionConfig)
 
 def load_config(path: str) -> Settings:
     p = pathlib.Path(path)

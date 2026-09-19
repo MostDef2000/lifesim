@@ -160,7 +160,26 @@ def run_fire_phase(
             if r < p:
                 ignite_object(session, world_id, nb, day, settings)
 
-    # 3. spontaneous ignition on hot dry days (outdoor locations)
+    # 3. destruction (012 §76): condition<=0 → destroyed, event forever
+    destroyed_candidates = (
+        session.query(WorldObject)
+        .filter_by(world_id=world_id, burn_state="intact")
+        .filter(WorldObject.condition <= 0)
+        .all()
+    )
+    for obj in destroyed_candidates:
+        obj.quantity = 0
+        log_event(
+            session, world_id=world_id,
+            event_type=EventType.OBJECT_DESTROYED,
+            actor_id=None, location_id=obj.location_id,
+            payload={"object_id": obj.id, "object_type": obj.object_type,
+                     "day": day},
+            game_timestamp=day * 1440,
+        )
+        session.flush()
+
+    # 4. spontaneous ignition on hot dry days (outdoor locations)
     if hot_dry and fire_cfg.spontaneous_chance_per_day > 0.0:
         # open-air locations (Reineke map: island/pier/settlement/well...)
         outdoor = (

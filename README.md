@@ -174,3 +174,13 @@ weather: { source: historical }   # в config/default.yaml или env
 **Связка с погодой §71**: самовоспламенение горючих объектов на открытых локациях только в жаркий сухой день (t>28, осадки=0) — `fire.spontaneous_chance_per_day`. Default 0.0 → headless-миры детерминированы без пожаров (П2).
 
 Ручной поджог (гейминг/модерация): `POST /admin/fire/ignite {"object_id": N}` — admin/moderator, пишется в audit-журнал §86.
+
+## M12: Рынок, стройка, разрушение (012-market, §74-76)
+
+**Рынок персонажей (§74+)**: `POST /market/offers {object_id, price}` — выставить свой предмет; `GET /market/offers` — витрина; `POST /market/offers/{id}/buy` — покупка (деньги через штатный ledger `MARKET_SALE`, предмет через `transfer_object`, атомарно); `/cancel` — только продавец. Таблица `market_offers`, инвариант `market_integrity`.
+
+**Стройка (§75)**: `POST /build {object_type}` — задача CONSTRUCT (штатный конвейер задач M1): по чертежу из конфига (`construction.costs` — требуемые предметы + дни) ресурсы списываются при завершении, на локации персонажа создаётся новый объект, событие `CONSTRUCTED`. Провал (нет ресурсов) — `TASK_FAILED`, объект не создаётся.
+
+**Разрушение (§76)**: ежедневная проверка — объект с `condition<=0` уничтожается (quantity=0), событие `OBJECT_DESTROYED` сохраняется навсегда. Пожар (011) доводит объекты до сгорания.
+
+События 31-34 (MARKET_LISTED, MARKET_SOLD, CONSTRUCTED, OBJECT_DESTROYED), schema 0.10.0 (39 таблиц).
