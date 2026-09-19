@@ -290,3 +290,17 @@ construction:
       required_items:
         wood_pile: 2
       days: 2
+    generator:
+      required_items:
+        wood_pile: 3
+      days: 2
+
+electricity:
+  enabled: false
+  demand_per_occupant: 10.0
+  generator_capacity: 10.0
+  storm_wind_speed: 15.0
+  storm_precipitation: 5.0
+  outage_chance: 0.3
+  food_spoil_condition: 25
+  energy_drain: 10.0

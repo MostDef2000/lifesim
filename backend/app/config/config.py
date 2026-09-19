@@ -206,6 +206,18 @@ class ApiConfig(BaseModel):
     ws_interval_s: float = 1.0
     secret_env: str = "VL1_SECRET"  # HMAC secret; dev fallback with warning
 
+class ElectricityConfig(BaseModel):
+    """017 (§26): house electricity. Off by default (П2 keystone)."""
+    enabled: bool = False
+    demand_per_occupant: float = 10.0
+    generator_capacity: float = 10.0
+    storm_wind_speed: float = 15.0
+    storm_precipitation: float = 5.0
+    outage_chance: float = 0.3
+    food_spoil_condition: int = 25
+    energy_drain: float = 10.0
+
+
 class CrimeConfig(BaseModel):
     """016 (§32-35): crime/law/police. Off by default (П2 keystone)."""
     enabled: bool = False
@@ -333,6 +345,7 @@ class Settings(BaseModel):
     api: ApiConfig = Field(default_factory=ApiConfig)
     visual: VisualConfig = Field(default_factory=VisualConfig)
     crime: CrimeConfig = Field(default_factory=CrimeConfig)
+    electricity: ElectricityConfig = Field(default_factory=ElectricityConfig)
     external: ExternalConfig = Field(default_factory=ExternalConfig)
     admin: AdminConfig = Field(default_factory=AdminConfig)
     weather: WeatherConfig = Field(default_factory=WeatherConfig)
