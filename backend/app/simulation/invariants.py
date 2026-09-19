@@ -605,7 +605,7 @@ def run_invariant_checks(session: Session, world_id: str, settings) -> List[Dict
     else:
         treasury_violations = []
         allowed_in = {"Initial organization funds", "PURCHASE", "ORG_DUES",
-                      "LAW_FINE"}
+                      "LAW_FINE", "MARKET_SALE"}
         allowed_out = {"SALARY", "ORG_FEAST"}
         for o in session.query(Organization).filter(
                 Organization.world_id == world_id).all():
@@ -955,6 +955,31 @@ def run_invariant_checks(session: Session, world_id: str, settings) -> List[Dict
             weather_violations.append(f"day {w.day}: field out of range")
         if w.source not in ("synthetic", "historical"):
             weather_violations.append(f"day {w.day}: unknown source")
+    # market_integrity (012, R7): offers domain + sold closure
+    from app.db.models import MarketOffer as _MO
+    market_violations = []
+    active_objects: set[int] = set()
+    offers = session.query(_MO).filter_by(world_id=world_id).all()
+    for offer in offers:
+        if offer.price <= 0:
+            market_violations.append(f"offer {offer.id}: price<=0")
+        if offer.status == "active":
+            if offer.object_id in active_objects:
+                market_violations.append(
+                    f"offer {offer.id}: second active on object")
+            active_objects.add(offer.object_id)
+        if offer.status == "sold":
+            if offer.buyer_character_id is None:
+                market_violations.append(f"offer {offer.id}: sold w/o buyer")
+            if offer.closed_at is None:
+                market_violations.append(f"offer {offer.id}: sold w/o closed_at")
+    results.append({
+        "name": "market_integrity",
+        "ok": len(market_violations) == 0,
+        "details": (f"violations: {', '.join(market_violations)}"
+                    if market_violations else f"offers: {len(offers)}")
+    })
+
     # fire_integrity (011, R8): burn_state domain; burned → quantity 0
     from app.db.models import WorldObject as _WO
     fire_violations = []

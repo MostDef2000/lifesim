@@ -282,3 +282,11 @@ fire:
   ignition_chance: 0.35
   damage_per_day: 8.0
   burnout_days: 2
+
+construction:
+  enabled: true
+  costs:
+    shed:
+      required_items:
+        wood_pile: 2
+      days: 2

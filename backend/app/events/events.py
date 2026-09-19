@@ -41,6 +41,10 @@ class EventType(Enum):
     WEATHER_CHANGED = "WEATHER_CHANGED"  # 010 (§71): daily weather record
     OBJECT_BURNING = "OBJECT_BURNING"  # 011 (§72): object caught fire
     OBJECT_BURNED = "OBJECT_BURNED"  # 011 (§72): object fully burned
+    MARKET_LISTED = "MARKET_LISTED"  # 012 (§74): item offered for sale
+    MARKET_SOLD = "MARKET_SOLD"  # 012 (§74): offer bought via ledger
+    CONSTRUCTED = "CONSTRUCTED"  # 012 (§75): new object built
+    OBJECT_DESTROYED = "OBJECT_DESTROYED"  # 012 (§76): condition reached 0
 
 def log_event(
     session: Session,

@@ -1238,6 +1238,143 @@ def create_app(settings, session_factory: sessionmaker):
             })
         return out
 
+    @app.post("/market/offers")
+    def market_create_offer(
+        payload: dict = None, session: Session = Depends(db),
+        user: User = Depends(current_user),
+    ):
+        """012 (§74, R6): list an owned item for sale."""
+        from app.market.marketplace import MarketError, list_object
+
+        data = payload or {}
+        char = session.query(Character).filter_by(
+            user_id=user.id,
+            world_id=state["settings"].world.world_id,
+        ).first()
+        if char is None:
+            raise HTTPException(status_code=409, detail="no character")
+        try:
+            offer = list_object(
+                session, state["settings"].world.world_id,
+                _world_now(session), char,
+                int(data.get("object_id", 0)), int(data.get("price", 0)),
+            )
+        except MarketError as exc:
+            raise HTTPException(status_code=exc.status, detail=exc.code)
+        session.commit()
+        return {"offer_id": offer.id, "status": offer.status}
+
+    @app.get("/market/offers")
+    def market_list_offers(
+        status: str = "active", session: Session = Depends(db),
+        user: User = Depends(current_user),
+    ):
+        """012 (R6): browse offers."""
+        from app.db.models import MarketOffer
+
+        if status not in ("active", "sold", "cancelled"):
+            raise HTTPException(status_code=422, detail="bad status")
+        rows = (
+            session.query(MarketOffer)
+            .filter_by(world_id=state["settings"].world.world_id,
+                       status=status)
+            .order_by(MarketOffer.id.desc())
+            .limit(50)
+            .all()
+        )
+        return [
+            {"id": o.id, "object_id": o.object_id, "price": o.price,
+             "seller": o.seller_character_id, "status": o.status}
+            for o in rows
+        ]
+
+    @app.post("/market/offers/{offer_id}/buy")
+    def market_buy(
+        offer_id: int, session: Session = Depends(db),
+        user: User = Depends(current_user),
+    ):
+        """012 (§74, R2-R3): buy — ledger + ownership, atomic."""
+        from app.market.marketplace import MarketError, buy_offer
+
+        char = session.query(Character).filter_by(
+            user_id=user.id,
+            world_id=state["settings"].world.world_id,
+        ).first()
+        if char is None:
+            raise HTTPException(status_code=409, detail="no character")
+        try:
+            offer = buy_offer(
+                session, state["settings"].world.world_id,
+                _world_now(session), char, offer_id,
+            )
+        except MarketError as exc:
+            session.rollback()
+            raise HTTPException(status_code=exc.status, detail=exc.code)
+        session.commit()
+        return {"offer_id": offer.id, "status": offer.status}
+
+    @app.post("/market/offers/{offer_id}/cancel")
+    def market_cancel(
+        offer_id: int, session: Session = Depends(db),
+        user: User = Depends(current_user),
+    ):
+        """012 (AE3): cancel — seller only."""
+        from app.market.marketplace import MarketError, cancel_offer
+
+        char = session.query(Character).filter_by(
+            user_id=user.id,
+            world_id=state["settings"].world.world_id,
+        ).first()
+        if char is None:
+            raise HTTPException(status_code=409, detail="no character")
+        try:
+            cancel_offer(
+                session, state["settings"].world.world_id,
+                _world_now(session), char, offer_id,
+            )
+        except MarketError as exc:
+            raise HTTPException(status_code=exc.status, detail=exc.code)
+        session.commit()
+        return {"ok": True}
+
+    @app.post("/build")
+    def build_construct(
+        payload: dict = None, session: Session = Depends(db),
+        user: User = Depends(current_user),
+    ):
+        """012 (§75, R4): enqueue a CONSTRUCT task for the character."""
+        from app.db.models import CharacterTask
+
+        data = payload or {}
+        char = session.query(Character).filter_by(
+            user_id=user.id,
+            world_id=state["settings"].world.world_id,
+        ).first()
+        if char is None:
+            raise HTTPException(status_code=409, detail="no character")
+        object_type = data.get("object_type", "")
+        if object_type not in state["settings"].construction.costs:
+            raise HTTPException(status_code=422, detail="unknown blueprint")
+        costs = state["settings"].construction.costs[object_type]
+        days = int(costs.get("days", 2))
+        now = _world_now(session)
+        import json as _json
+
+        task = CharacterTask(
+            character_id=char.id, priority=5, task_type="CONSTRUCT",
+            target_id=None, status="planned", source="player",
+            parameters=_json.dumps({
+                "object_type": object_type,
+                "required_items": costs.get("required_items", {}),
+            }),
+            created_at=now, started_at=None,
+            ends_at=now + days * 1440,
+        )
+        session.add(task)
+        session.commit()
+        return {"task_id": task.id, "object_type": object_type,
+                "ends_at": task.ends_at}
+
     from fastapi.staticfiles import StaticFiles
 
     web_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "web")
