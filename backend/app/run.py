@@ -10,17 +10,17 @@ from app.config.config import load_config
 
 _CONFIG = os.getenv("LIFESIM_CONFIG", "config/default.yaml")
 
-app = None
+_APP = None
 
 
 def _build():
-    global app
-    if app is None:
+    global _APP
+    if _APP is None:
         settings = load_config(_CONFIG)
         from app.api.app import create_app
 
-        app = create_app(settings)
-    return app
+        _APP = create_app(settings)
+    return _APP
 
 
 # uvicorn app.run:app — module-level attribute access; defer build until
