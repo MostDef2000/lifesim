@@ -100,6 +100,24 @@ def seed_world(session: Session, settings, world_id: str) -> None:
 
     # 3. Organizations
     org_map = {} # {config_key: org_id}
+    # 016 (§35): police exists only when the crime system is enabled (П2)
+    if getattr(getattr(settings, "crime", None), "enabled", False):
+        police_loc = (
+            session.query(Location)
+            .filter_by(world_id=world_id, type="settlement")
+            .first()
+        )
+        police = Organization(
+            world_id=world_id, name="Полиция Рейнеке",
+            type="security", location_id=police_loc.id
+            if police_loc is not None else None,
+        )
+        session.add(police)
+        session.flush()
+        org_map["police"] = police.id
+        police_account = open_account(session, world_id, "organization", str(police.id))
+        mint(session, world_id, 0, police_account.id,
+             settings.crime.police_starting_balance, "Police funds")
     for org_key, params in settings.economy.organizations.items():
         loc_id = key_to_id.get(params["location"])
 
