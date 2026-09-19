@@ -1,0 +1,327 @@
+# Deploy config (015-deploy-kit). Derived from config/default.yaml with two
+# changes required for systemd deployment (deploy/lifesim.service):
+#   1. api.enabled: true          — the unit serves the web-api (AE6''')
+#   2. persistence.db_path: data/ — the unit may write only /opt/lifesim/data
+#                                    (ReadWritePaths) and runbook §7 backs up
+#                                    data/lifesim.db
+# load_config reads ONLY this file: env vars like api__enabled are not
+# evaluated by the code (Settings(**data) from YAML), so these overrides
+# must live here, pointed to by LIFESIM_CONFIG in .env.
+# П2-кейстоуны (П4): выключены так же, как в default.yaml.
+
+world:
+  world_id: "reineke_001"
+  initial_population: 20
+  start_real_timestamp: "2026-09-16T00:00:00Z"
+
+ticks:
+  time_scale: 1.0 # 1 real min = 1 game min for headless
+  persistence_commit_interval_game_minutes: 60
+  snapshot_interval_game_days: 1
+
+needs:
+  decay_rates:
+    hunger: 0.1 # per game minute
+    thirst: 0.15
+    energy: 0.05
+    social: 0.02
+  recovery_rates:
+    SLEEP: { energy: 2.0 }
+    EAT: { hunger: 5.0 }
+    DRINK: { thirst: 5.0 }
+    SOCIALIZE: { social: 0.5 }
+  critical_thresholds:
+    hunger: 20.0
+    thirst: 20.0
+    energy: 10.0
+  health_decay_rate: 0.01 # per minute when below threshold
+
+utility:
+  weights:
+    hunger: 1.5
+    thirst: 2.0
+    energy: 1.0
+    social: 0.5
+
+actions:
+  SLEEP:
+    duration_minutes: 480
+    max_duration_minutes: 480
+    base_utility_weight: 1.0
+  EAT:
+    duration_minutes: 15
+    max_duration_minutes: 30
+    base_utility_weight: 1.0
+  DRINK:
+    duration_minutes: 5
+    max_duration_minutes: 15
+    base_utility_weight: 1.0
+  WORK:
+    duration_minutes: 480
+    max_duration_minutes: 600
+    base_utility_weight: 0.8
+  MOVE:
+    duration_minutes: 10 # base, modified by location_links
+    max_duration_minutes: 120
+    base_utility_weight: 0.5
+  BUY_ITEM:
+    duration_minutes: 5
+    max_duration_minutes: 30
+    base_utility_weight: 0.7
+  SOCIALIZE:
+    duration_minutes: 30
+    max_duration_minutes: 60
+    base_utility_weight: 0.3
+  IDLE:
+    duration_minutes: 1
+    max_duration_minutes: 60
+    base_utility_weight: 0.1
+  TRAVEL_EXTERNAL:
+    duration_minutes: 480
+    max_duration_minutes: 960
+    base_utility_weight: 0.0
+
+economy:
+  starting_balance: 1000
+  default_salary_day: 50
+  shop_price_multiplier: 1.0
+  prices:
+    food_bread: 2
+    food_canned: 5
+    water_bottle: 1
+    jacket: 120
+    boots: 80
+    hat: 40
+  shop_stock:
+    food_bread: 100
+    food_canned: 50
+    water_bottle: 200
+    jacket: 10
+    boots: 10
+    hat: 10
+  kitchen_stock:
+    food_bread: 20
+    food_canned: 10
+  water_daily_supply_amount: 100.0
+  water_per_drink: 0.5
+  water_initial_quantity: 1000.0
+  salaries:
+    farmer: 40
+    fisher: 40
+    crafter: 50
+    storekeeper: 45
+  organizations:
+    community:
+      name: "Community Council"
+      type: "community"
+      location: "settlement"
+      starting_balance: 5000
+      leader_titles: ["Farmer", "Fisher"]
+    shop:
+      name: "General Store"
+      type: "business"
+      location: "shop"
+      starting_balance: 5000
+      leader_titles: ["Storekeeper"]
+
+movement:
+  default_travel_minutes: 10
+  max_capacity_default: 100
+  edges:
+    - { from: "island", to: "settlement", travel_minutes: 30 }
+    - { from: "settlement", to: "home", travel_minutes: 5 }
+    - { from: "settlement", to: "shop", travel_minutes: 5 }
+    - { from: "settlement", to: "workshop", travel_minutes: 5 }
+    - { from: "settlement", to: "storage", travel_minutes: 5 }
+    - { from: "settlement", to: "well", travel_minutes: 5 }
+    - { from: "settlement", to: "pier", travel_minutes: 5 }
+    - { from: "settlement", to: "kitchen", travel_minutes: 5 }
+
+population:
+  min_age: 18
+  max_age: 80
+  first_names: ["Ivan", "Anna", "Dmitry", "Elena", "Sergei", "Olga", "Alexei", "Maria", "Pavel", "Natalia"]
+  last_names: ["Ivanov", "Petrov", "Sidorov", "Kuznetsov", "Popov", "Vasilyev", "Sokolov", "Mikhailov", "Novikov", "Fedorov"]
+  trait_keys: ["sociability", "discipline", "risk_tolerance"]
+  jobs:
+    - { title: "Farmer", salary: 40, schedule: { start_hour: 6, end_hour: 18 } }
+    - { title: "Fisher", salary: 40, schedule: { start_hour: 5, end_hour: 17 } }
+    - { title: "Crafter", salary: 50, schedule: { start_hour: 8, end_hour: 16 } }
+    - { title: "Storekeeper", salary: 45, schedule: { start_hour: 9, end_hour: 17 } }
+
+persistence:
+  db_path: "data/lifesim.db"
+  wal_mode: true
+  synchronous: "NORMAL"
+  snapshot_dir: "data/snapshots"
+
+invariants:
+  max_duration_minutes: 1440
+  min_balance: 0
+  health_range: [0, 100]
+  needs_range: [0, 100]
+  max_death_rate_per_day: 0.1
+
+generation:
+  trait_range: [-100, 100]
+  initial_items: ["clothing_basic"]
+
+# ... (existing config)
+locations:
+  houses_count: 24
+  locations:
+    island: { name: "Reineke Island", type: "island", parent: null, capacity: 1000 }
+    settlement: { name: "Main Settlement", type: "settlement", parent: "island", capacity: 200 }
+    home: { name: "Residential House", type: "house", parent: "settlement", capacity: 1 }
+    shop: { name: "General Store", type: "shop", parent: "settlement", capacity: 4 }
+    workshop: { name: "Workshop", type: "workshop", parent: "settlement", capacity: 4 }
+    storage: { name: "Community Storage", type: "storage", parent: "settlement", capacity: 10 }
+    well: { name: "Water Well", type: "well", parent: "settlement", capacity: 10 }
+    pier: { name: "Main Pier", type: "pier", parent: "settlement", capacity: 20 }
+    kitchen: { name: "Community Kitchen", type: "kitchen", parent: "settlement", capacity: 6 }
+
+social:
+  enabled: false
+  interaction_minutes: 30
+  social_recovery_per_minute: 0.5
+  social_action_threshold: 40.0
+  refusal_threshold: -60.0
+  initial_affection: 0.0
+  initial_conflicts: 2
+  hub_location_types: ["kitchen", "settlement"]
+
+org:
+  enabled: false
+  election_interval_days: 7
+  dues_per_day: 1
+  feast_interval_days: 14
+  feast_cost: 30
+  feast_social_boost: 20.0
+  reconciliation:
+    enabled: true
+    target_affection: -30.0
+  laws:
+    enabled: true
+    catalog:
+      no_conflict:
+        fine: 5
+        enact_traits: { discipline: 1, sociability: 0, risk_tolerance: -1 }
+      night_home:
+        fine: 2
+        enact_traits: { discipline: 1, sociability: -1, risk_tolerance: 1 }
+
+llm:
+  enabled: false
+  transport: stub
+  base_url: http://localhost:11434
+  model_tier1: qwen3:4b
+  model_tier2: qwen3:14b
+  timeout_sec: 30
+  retry: 1
+  budgets:
+    max_per_day: 40
+    per_task:
+      decide: 10
+      classify: 20
+      dialogue: 10
+      summarize: 10
+  memory:
+    top_k: 5
+    witnesses: true
+
+api:
+  enabled: true
+  host: 127.0.0.1
+  port: 8000
+  session_ttl_min: 720
+  cookie_name: vl1_session
+  ws_interval_s: 1.0
+  secret_env: VL1_SECRET
+
+visual:
+  enabled: false
+  transport: stub
+  base_url: http://127.0.0.1:7860
+  model: flux.1-schnell
+  lora: ""
+  storage_dir: data/visual_assets
+  image_size: "512x512"
+  timeout_sec: 30.0
+  default_weather: clear
+
+external:
+  enabled: true
+  travel_minutes: 480
+  travel_cost: 50
+  npc_utility: false
+  contact_probability: 0.5
+  locations:
+    - name: "Vladivostok City Hospital"
+      ext_type: "hospital"
+      description: "Regional hospital on Svetlanskaya street"
+      services:
+        - { service_type: "treatment", price: 120, heal_amount: 60, duration_minutes: 180 }
+    - name: "Golden Bridge Supermarket"
+      ext_type: "supermarket"
+      description: "Large grocery store in the city center"
+      services:
+        - { service_type: "purchase", item_type: "food_groceries", price: 25, duration_minutes: 20 }
+    - name: "City Hardware Store"
+      ext_type: "hardware_store"
+      description: "Tools and construction materials"
+      services:
+        - { service_type: "purchase", item_type: "tool_kit", price: 90, duration_minutes: 25 }
+
+admin:
+  registration_enabled: true
+  max_players: 0
+  rate_limit_enabled: true
+  global_rpm: 600
+  auth_rpm: 10
+  rate_limit_window_sec: 60
+  backup_dir: backups
+  backup_keep: 7
+
+weather:
+  enabled: true
+  source: synthetic
+  latitude: 42.98
+  longitude: 132.55
+  year_lag: 1
+  fetch_timeout_s: 5.0
+  cache_dir: data/weather_cache
+  seed_offset: 0
+  cold_need_multiplier: 1.15
+
+fire:
+  enabled: true
+  spontaneous_chance_per_day: 0.0
+  ignition_chance: 0.35
+  damage_per_day: 8.0
+  burnout_days: 2
+
+construction:
+  enabled: true
+  costs:
+    shed:
+      required_items:
+        wood_pile: 2
+      days: 2
+    generator:
+      required_items:
+        wood_pile: 3
+      days: 2
+
+electricity:
+  enabled: false
+  demand_per_occupant: 10.0
+  generator_capacity: 10.0
+  storm_wind_speed: 15.0
+  storm_precipitation: 5.0
+  outage_chance: 0.3
+  food_spoil_condition: 25
+  energy_drain: 10.0
+
+romance:
+  enabled: false
+  affection_grant_threshold: 40.0
