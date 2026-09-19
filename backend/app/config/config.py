@@ -235,6 +235,29 @@ class ExternalConfig(BaseModel):
     contact_probability: float = 0.5  # second contact per NPC
     locations: List[ExternalLocationSpec] = Field(default_factory=list)
 
+class SeasonProfile(BaseModel):
+    base_temp: float = 8.0
+    amplitude: float = 10.0
+    wetness: float = 0.4
+
+class WeatherConfig(BaseModel):
+    """010 (§71): weather system. source: synthetic|historical."""
+    enabled: bool = True
+    source: str = "synthetic"  # synthetic (default, П2) | historical (Open-Meteo ERA5)
+    latitude: float = 42.98   # Reineke island, Peter the Great Gulf
+    longitude: float = 132.55
+    year_lag: int = 1  # real weather from N years ago for the same calendar day
+    fetch_timeout_s: float = 5.0
+    cache_dir: str = "data/weather_cache"
+    seed_offset: int = 0
+    cold_need_multiplier: float = 1.15
+    seasonal_profile: list[SeasonProfile] = Field(default_factory=lambda: [
+        SeasonProfile(base_temp=8.0, amplitude=10.0, wetness=0.45),    # spring
+        SeasonProfile(base_temp=20.0, amplitude=6.0, wetness=0.55),    # summer
+        SeasonProfile(base_temp=9.0, amplitude=9.0, wetness=0.5),      # autumn
+        SeasonProfile(base_temp=-12.0, amplitude=8.0, wetness=0.3),    # winter
+    ])
+
 class AdminConfig(BaseModel):
     """M8 (§85/§27/§107): public alpha operations."""
     registration_enabled: bool = True
@@ -266,6 +289,7 @@ class Settings(BaseModel):
     visual: VisualConfig = Field(default_factory=VisualConfig)
     external: ExternalConfig = Field(default_factory=ExternalConfig)
     admin: AdminConfig = Field(default_factory=AdminConfig)
+    weather: WeatherConfig = Field(default_factory=WeatherConfig)
 
 def load_config(path: str) -> Settings:
     p = pathlib.Path(path)

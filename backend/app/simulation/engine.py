@@ -65,6 +65,16 @@ class Engine:
             if db_clock is not None:
                 db_clock.game_timestamp = timestamp
 
+        # 0. Weather ensure (010 §71): one row per crossed day
+        if session is not None and world_id is not None and settings is not None:
+            from app.simulation.weather import get_or_create_weather
+
+            day = timestamp // 1440
+            self.scheduler.run_phase(
+                "weather",
+                lambda: get_or_create_weather(session, world_id, day, settings)
+            )
+
         # 1. Needs tick: apply decay for the whole window
         self.scheduler.run_phase(
             "needs",

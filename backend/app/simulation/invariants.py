@@ -940,6 +940,28 @@ def run_invariant_checks(session: Session, world_id: str, settings) -> List[Dict
             )
             if live > 0:
                 admin_violations.append(f"user {u.id}: disabled with live tasks")
+    # weather_integrity (010, R8): one row per (world, day); valid ranges
+    from app.db.models import WeatherState as _WS
+    weather_violations = []
+    weather_rows = session.query(_WS).filter_by(world_id=world_id).all()
+    seen_days = set()
+    for w in weather_rows:
+        if w.day in seen_days:
+            weather_violations.append(f"day {w.day}: duplicate row")
+        seen_days.add(w.day)
+        if not (-60 <= w.temperature <= 45):
+            weather_violations.append(f"day {w.day}: temperature out of range")
+        if not (0 <= w.cloudiness <= 1) or w.visibility < 0 or w.wind < 0:
+            weather_violations.append(f"day {w.day}: field out of range")
+        if w.source not in ("synthetic", "historical"):
+            weather_violations.append(f"day {w.day}: unknown source")
+    results.append({
+        "name": "weather_integrity",
+        "ok": len(weather_violations) == 0,
+        "details": (f"violations: {', '.join(weather_violations)}"
+                    if weather_violations else f"days: {len(weather_rows)}")
+    })
+
     results.append({
         "name": "admin_integrity",
         "ok": len(admin_violations) == 0,

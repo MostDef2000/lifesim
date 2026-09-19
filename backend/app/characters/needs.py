@@ -32,13 +32,30 @@ def apply_needs_decay(
     # Get decay rates from config
     rates = settings.needs.decay_rates
 
+    # 010 (§71, R5): cold weather accelerates hunger/energy decay
+    weather_mult = 1.0
+    if getattr(settings.weather, "enabled", False):
+        from app.db.models import WeatherState
+        from app.simulation.weather import need_decay_multiplier
+
+        row = (
+            session.query(WeatherState)
+            .filter_by(world_id=world_id, day=game_timestamp // 1440)
+            .first()
+        )
+        weather_mult = need_decay_multiplier(row, settings.weather)
+
     for char in characters:
         needs = session.query(CharacterNeeds).filter_by(character_id=char.id).one()
 
-        # Decay dynamic needs
-        needs.hunger = max(0.0, needs.hunger - rates.hunger * minutes)
+        # Decay dynamic needs (hunger/energy: ×cold multiplier on frost days)
+        needs.hunger = max(
+            0.0, needs.hunger - rates.hunger * minutes * weather_mult
+        )
         needs.thirst = max(0.0, needs.thirst - rates.thirst * minutes)
-        needs.energy = max(0.0, needs.energy - rates.energy * minutes)
+        needs.energy = max(
+            0.0, needs.energy - rates.energy * minutes * weather_mult
+        )
         needs.social = max(0.0, needs.social - rates.social * minutes)
 
         needs.updated_at = game_timestamp

@@ -153,3 +153,16 @@ uv run python -m app.simulation.cli serve --db data/world.db
 ```
 
 Ручной смоук-чеклист: регистрация → персонаж создан → needs-бары живые → клик по локации = MOVE → кнопка WORK → событие в ленте → чат с NPC (3 подсказки) → инвентарь пуст → админ-вкладка скрыта для user-роли, видна admin'у → TRAVEL_EXTERNAL из мира (порт обязателен).
+
+## M10: Погода (010-weather, §71)
+
+Мир имеет погоду: на каждый игровой день — запись `weather_state` (temperature/wind/precipitation/cloudiness/visibility + `source`/`real_date`), событие `WEATHER_CHANGED`, инвариант `weather_integrity`, API `GET /weather` и `/weather/history?days=N` (auth), погода в шапке UI и в Flux-дескрипторе сцены. Холодные дни (t<0) ускоряют голод/энергию ×1.15.
+
+Два источника (`weather.source` в конфиге):
+- **synthetic** (default) — детерминированная генерация по seed+день (§71 «искусственная генерация»), headless-тесты не зависят от сети.
+- **historical** — **реальная погода острова Рейнеке (42.98°N, 132.55°E) год назад** за календарный день, соответствующий игровому: день N → реальная дата `start_real_timestamp + N·1440/time_scale минут` − 1 год. Данные — Open-Meteo Historical Weather API (ERA5-архив, бесплатно, без ключа, tz Asia/Vladivostok). Кэш-ответы в `data/weather_cache/`; офлайн → фолбэк на synthetic; `real_date` в ответе API показывает, за какой день взята реальная погода.
+
+```bash
+# включить реальную погоду Рейнеке (на сервере):
+weather: { source: historical }   # в config/default.yaml или env
+```

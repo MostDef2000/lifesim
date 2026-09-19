@@ -264,3 +264,14 @@ admin:
   rate_limit_window_sec: 60
   backup_dir: backups
   backup_keep: 7
+
+weather:
+  enabled: true
+  source: synthetic
+  latitude: 42.98
+  longitude: 132.55
+  year_lag: 1
+  fetch_timeout_s: 5.0
+  cache_dir: data/weather_cache
+  seed_offset: 0
+  cold_need_multiplier: 1.15
