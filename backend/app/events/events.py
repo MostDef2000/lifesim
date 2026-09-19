@@ -51,6 +51,7 @@ class EventType(Enum):
     FINE_PAID = "FINE_PAID"  # 016 (§35): fine via ledger
     ARRESTED = "ARRESTED"  # 016 (§35): imprisonment starts
     RELEASED = "RELEASED"  # 016 (§35): prison term over
+    POWER_OUTAGE = "POWER_OUTAGE"  # 017 (§26): electricity deficit
 
 def log_event(
     session: Session,

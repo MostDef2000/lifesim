@@ -214,7 +214,7 @@ def test_settings_validation():
 
 def test_event_type_count():
     # 13 (M2) + 6 (M3) + 3 (M4) = 24
-    assert len(EventType) == 40
+    assert len(EventType) == 41
     assert "SOCIAL_INTERACTION" in EventType.__members__
     assert "RELATIONSHIP_CHANGED" in EventType.__members__
     assert "CONFLICT" in EventType.__members__

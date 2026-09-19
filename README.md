@@ -212,3 +212,7 @@ weather: { source: historical }   # в config/default.yaml или env
 **Преступления (§33)**: NPC при голоде<25 и нищете (баланс<50) может украсть еду (P=0.15/день); при социальном голоде — vandal (P=0.05, condition-30). Таблица `crimes` (41-я), событие `CRIME_COMMITED`. **Свидетели (§34)**: NPC на локации замечают с P=0.4 (детерминированный rng) → Memory (importance 8) + донос `CRIME_REPORTED`; без свидетелей дело не заводится.
 
 **Закон (§32)**: санкции в конфиге — штраф (theft 200₽, vandalism 150₽) или тюрьма 7 дней. **Полиция (§35)**: org «Полиция Рейнеке» сеется только при включённом флаге; daily-резолвер от имени офицера: платёжеспособный вор платит через ledger (`FINE_PAID`), неплатёжеспособный — арест (`ARRESTED`, `characters.prison_until_day`, пин в полиции, декей нужд ×0.3 — «кормёжка») и `RELEASED` в день освобождения. Инвариант `crime_integrity`. Schema 0.13.0, 40 событий.
+
+## M17: Электричество (017-electricity, §26)
+
+Флаг `electricity.enabled` (**default false** — П2). Дома (type=house) потребляют `demand_per_occupant × жильцы`; генераторы (`WorldObject` type=generator, **чертёж в стройке 012**: 3×wood_pile, 2 дня) дают `capacity × condition/100`. Шторм (погода 010: ветер ≥15 м/с или осадки ≥5 мм) → P=0.3 полного нуля supply. Дефицит → событие `POWER_OUTAGE` (41), порча еды дома (condition −25, канал §76) и energy −10 жильцам. Stateless-расчёт — без новых таблиц; schema 0.13.0.

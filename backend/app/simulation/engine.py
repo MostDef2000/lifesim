@@ -107,6 +107,14 @@ class Engine:
                 lambda: run_police_phase(
                     session, world_id, day, timestamp, settings)
             )
+            # 017 (§26): house electricity supply/demand (flag-gated)
+            from app.simulation.electricity import run_electricity_phase
+
+            self.scheduler.run_phase(
+                "electricity",
+                lambda: run_electricity_phase(
+                    session, world_id, day, timestamp, settings)
+            )
 
         # 1. Needs tick: apply decay for the whole window
         self.scheduler.run_phase(
