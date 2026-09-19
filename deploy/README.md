@@ -16,7 +16,9 @@ sudo -u lifesim .venv/bin/pip install -e . uvicorn
 
 ```bash
 cp deploy/.env.example /opt/lifesim/.env
-sudo -u lifesim sh -c 'echo "VL1_SECRET=$(openssl rand -hex 32)" >> /opt/lifesim/.env'
+# Секрет сессий генерируется ТОЛЬКО на сервере и вписывается вручную:
+sudo -u lifesim openssl rand -hex 32    # вывод — 64 hex-символа
+sudo -u lifesim nano /opt/lifesim/.env  # строка VL1_SECRET= -> 64 hex
 sed -i 's|^LIFESIM_CONFIG=.*|LIFESIM_CONFIG=config/production.yaml|' /opt/lifesim/.env
 chmod 600 /opt/lifesim/.env  # владелец lifesim
 ```
@@ -77,6 +79,15 @@ UI — на `/`, OpenAPI — на `/docs`, liveness — на `/health`.
 sudo -u lifesim sed -i 's/^  source: synthetic/  source: historical/' /opt/lifesim/config/production.yaml
 sudo systemctl restart lifesim
 curl -s -H "Authorization: Bearer <token>" http://127.0.0.1:8000/weather
+
+ВНИМАНИЕ: `get_or_create_weather` идемпотентен — уже созданные дни НЕ
+перегенерируются при смене источника. Очистите погоду перед переключением
+(мир не страдает — погода детерминирована от даты):
+
+```bash
+sudo -u lifesim .venv/bin/python -c "import sqlite3; c = sqlite3.connect('/opt/lifesim/data/lifesim.db'); c.execute('DELETE FROM weather_state'); c.commit()"
+sudo systemctl restart lifesim
+```
 # ожидание: «(реальная YYYY-MM-DD)» в шапке UI; кэш-файлы в data/weather_cache/
 ```
 
