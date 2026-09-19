@@ -206,6 +206,12 @@ class ApiConfig(BaseModel):
     ws_interval_s: float = 1.0
     secret_env: str = "VL1_SECRET"  # HMAC secret; dev fallback with warning
 
+class RomanceConfig(BaseModel):
+    """018 (§31): explicit consent for romance. Off by default (П4 gate)."""
+    enabled: bool = False
+    affection_grant_threshold: float = 40.0
+
+
 class ElectricityConfig(BaseModel):
     """017 (§26): house electricity. Off by default (П2 keystone)."""
     enabled: bool = False
@@ -346,6 +352,7 @@ class Settings(BaseModel):
     visual: VisualConfig = Field(default_factory=VisualConfig)
     crime: CrimeConfig = Field(default_factory=CrimeConfig)
     electricity: ElectricityConfig = Field(default_factory=ElectricityConfig)
+    romance: RomanceConfig = Field(default_factory=RomanceConfig)
     external: ExternalConfig = Field(default_factory=ExternalConfig)
     admin: AdminConfig = Field(default_factory=AdminConfig)
     weather: WeatherConfig = Field(default_factory=WeatherConfig)

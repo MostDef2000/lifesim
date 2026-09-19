@@ -216,3 +216,7 @@ weather: { source: historical }   # в config/default.yaml или env
 ## M17: Электричество (017-electricity, §26)
 
 Флаг `electricity.enabled` (**default false** — П2). Дома (type=house) потребляют `demand_per_occupant × жильцы`; генераторы (`WorldObject` type=generator, **чертёж в стройке 012**: 3×wood_pile, 2 дня) дают `capacity × condition/100`. Шторм (погода 010: ветер ≥15 м/с или осадки ≥5 мм) → P=0.3 полного нуля supply. Дефицит → событие `POWER_OUTAGE` (41), порча еды дома (condition −25, канал §76) и energy −10 жильцам. Stateless-расчёт — без новых таблиц; schema 0.13.0.
+
+## M18: Consent State и одежда (018-consent-clothing, §31/§28)
+
+Флаг `romance.enabled` (**default false** — П4). **Consent (§31)**: таблица `interaction_permissions` (42-я, unique пара+категория, CHECK actor≠target) — явное разрешение на романтику, никогда не выводится из LLM-текста (П1). POST `/interactions/romantic` {npc_id} (403 при флаге off; deterministic NPC-решение: affection ≥ 40 → granted, иначе declined; повтор — без дублей), GET `/interactions/permissions` — входящие+исходящие. **Одежда (§28)**: jacket/boots/hat в лавке; `object_metadata` JSON {"slot", "worn"}; POST `/wear` toggle (только свои предметы). Портретный промпт добавляет `wearing: [...]` только при worn-предметах — без них байт-идентичность. Событий не добавлено (41), schema 0.14.0.

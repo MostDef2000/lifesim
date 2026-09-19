@@ -433,6 +433,29 @@ class Message(Base):
     read_at = Column(Integer, nullable=True)
 
 
+# 018 (§31): explicit consent for romantic interactions (П1: not LLM-derived)
+class InteractionPermission(Base):
+    __tablename__ = "interaction_permissions"
+    __table_args__ = (
+        UniqueConstraint(
+            "actor_character_id", "target_character_id",
+            "interaction_category", name="uq_consent_pair_category",
+        ),
+        CheckConstraint(
+            "actor_character_id != target_character_id",
+            name="ck_consent_not_self",
+        ),
+    )
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    world_id = Column(String, ForeignKey("worlds.id"), nullable=False)
+    actor_character_id = Column(String, ForeignKey("characters.id"), nullable=False)
+    target_character_id = Column(String, ForeignKey("characters.id"), nullable=False)
+    interaction_category = Column(String, nullable=False)
+    permission = Column(String, nullable=False)
+    created_at = Column(Integer, nullable=False)
+    updated_at = Column(Integer, nullable=False)
+
+
 # 012 (§74): player-to-player market offers
 class MarketOffer(Base):
     __tablename__ = "market_offers"
@@ -595,7 +618,7 @@ def bootstrap(engine, settings: Settings, seed: int):
 
     with Session(engine) as session:
         # Schema meta
-        session.merge(SchemaMeta(key="version", value="0.13.0"))
+        session.merge(SchemaMeta(key="version", value="0.14.0"))
 
         # World
         world_id = settings.world.world_id

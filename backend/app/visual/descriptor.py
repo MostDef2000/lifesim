@@ -98,7 +98,10 @@ def build_portrait_descriptor(session: Session, world_id: str, character_id: str
     character = session.get(Character, character_id)
     if character is None or character.world_id != world_id:
         raise LookupError(f"character not found: {character_id}")
-    return {
+    # 018 (§28): worn clothing -> "wearing" list (empty -> byte-identical)
+    from app.social.clothing import wearing_phrases
+
+    descriptor = {
         "location": None,
         "characters": [{"id": character.id, "name": f"{character.first_name} {character.last_name}",
                         "sex": character.sex, "age": character.age}],
@@ -109,16 +112,25 @@ def build_portrait_descriptor(session: Session, world_id: str, character_id: str
         "event": None,
         "references": [],
     }
+    wearing = wearing_phrases(session, world_id, character_id)
+    if wearing:
+        descriptor["wearing"] = wearing
+    return descriptor
 
 
 def build_prompt(descriptor: dict, visual_config_weather: str = "clear") -> str:
     """Deterministic descriptor -> prompt (R3). Same descriptor -> same prompt bytes."""
     if descriptor.get("camera") == "portrait":
         char = descriptor["characters"][0]
-        return (
+        base = (
             f"Portrait of {char['name']}, {char['age']}-year-old {char['sex']} "
             f"adult fictional character, clean background, detailed face"
         )
+        # 018 (§28): wearing fragment only when worn items exist
+        wearing = descriptor.get("wearing") or []
+        if wearing:
+            base += f", wearing: {wearing}"
+        return base
     loc = descriptor["location"]
     parts = [
         f"{loc['type']} {loc['name']}",

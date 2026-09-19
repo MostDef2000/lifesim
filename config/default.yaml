@@ -78,10 +78,16 @@ economy:
     food_bread: 2
     food_canned: 5
     water_bottle: 1
+    jacket: 120
+    boots: 80
+    hat: 40
   shop_stock:
     food_bread: 100
     food_canned: 50
     water_bottle: 200
+    jacket: 10
+    boots: 10
+    hat: 10
   kitchen_stock:
     food_bread: 20
     food_canned: 10
@@ -304,3 +310,7 @@ electricity:
   outage_chance: 0.3
   food_spoil_condition: 25
   energy_drain: 10.0
+
+romance:
+  enabled: false
+  affection_grant_threshold: 40.0
