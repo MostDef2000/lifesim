@@ -395,6 +395,21 @@ class User(Base):
     created_at = Column(Integer, nullable=False)
 
 
+# 013: letters/phone — contacts as a communication channel
+class Message(Base):
+    __tablename__ = "messages"
+    __table_args__ = (
+        Index("ix_messages_world_to", "world_id", "to_character_id"),
+    )
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    world_id = Column(String, ForeignKey("worlds.id"), nullable=False)
+    from_character_id = Column(String, ForeignKey("characters.id"), nullable=False)
+    to_character_id = Column(String, ForeignKey("characters.id"), nullable=False)
+    body = Column(Text, nullable=False)
+    created_at = Column(Integer, nullable=False)
+    read_at = Column(Integer, nullable=True)
+
+
 # 012 (§74): player-to-player market offers
 class MarketOffer(Base):
     __tablename__ = "market_offers"
@@ -520,6 +535,8 @@ class ExternalService(Base):
     price = Column(Integer, nullable=False, default=0)
     heal_amount = Column(Float, nullable=True)  # for treatment
     duration_minutes = Column(Integer, nullable=False, default=30)
+    # 013: supply/demand multiplier (default 1.0 — keystone П2)
+    price_multiplier = Column(Float, nullable=False, default=1.0)
 
 
 class ExternalContact(Base):
@@ -555,7 +572,7 @@ def bootstrap(engine, settings: Settings, seed: int):
 
     with Session(engine) as session:
         # Schema meta
-        session.merge(SchemaMeta(key="version", value="0.10.0"))
+        session.merge(SchemaMeta(key="version", value="0.11.0"))
 
         # World
         world_id = settings.world.world_id

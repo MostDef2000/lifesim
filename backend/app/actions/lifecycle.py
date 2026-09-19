@@ -214,6 +214,11 @@ def complete_task(
         travel_cost = int(params.get("travel_cost", 0))
         basket_cost = int(params.get("basket_cost", 0))
         items = params.get("items") or {}
+        # 013: supply/demand — final price = base × live multiplier
+        if service is not None and basket_cost > 0:
+            basket_cost = int(
+                round(basket_cost * getattr(service, "price_multiplier", 1.0))
+            )
 
         if service is None or service.world_id != world_id:
             fail_task(session, world_id, character, task, game_timestamp, "service gone")

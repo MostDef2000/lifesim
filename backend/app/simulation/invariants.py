@@ -955,6 +955,29 @@ def run_invariant_checks(session: Session, world_id: str, settings) -> List[Dict
             weather_violations.append(f"day {w.day}: field out of range")
         if w.source not in ("synthetic", "historical"):
             weather_violations.append(f"day {w.day}: unknown source")
+    # messages_integrity (013, R6): body domain; alive participants
+    from app.db.models import Message as _Msg
+    msg_violations = []
+    msgs = session.query(_Msg).filter_by(world_id=world_id).all()
+    alive_ids = {
+        c.id for c in session.query(Character)
+        .filter_by(world_id=world_id).all()
+        if getattr(c, "alive", True)
+    }
+    for m in msgs:
+        if not m.body or len(m.body) > 2000:
+            msg_violations.append(f"message {m.id}: bad body length")
+        if m.from_character_id not in alive_ids:
+            msg_violations.append(f"message {m.id}: unknown/dead sender")
+        if m.to_character_id not in alive_ids:
+            msg_violations.append(f"message {m.id}: unknown/dead recipient")
+    results.append({
+        "name": "messages_integrity",
+        "ok": len(msg_violations) == 0,
+        "details": (f"violations: {', '.join(msg_violations)}"
+                    if msg_violations else f"messages: {len(msgs)}")
+    })
+
     # market_integrity (012, R7): offers domain + sold closure
     from app.db.models import MarketOffer as _MO
     market_violations = []
