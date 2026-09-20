@@ -123,6 +123,39 @@ HMAC-подписи (VL1_SECRET), а не в памяти; мир возобно
 идут в глобальный бакет — легитимный перелогин после смены секрета не
 блокируется.
 
+## 10. Визуальный канал (worker, туннель, flux/pony)
+
+Фаза 6 (issue #39). Цепь: `API (VPS) → 127.0.0.1:7860 (reverse-туннель)
+→ адаптер (GPU-воркер sea-speed-worker) → ComfyUI :8188 → PNG`.
+
+- Адаптер: `deploy/comfy_adapter.py` (stdlib, в репо; на воркере
+  `~/lifesim/deploy/comfy_adapter.py`, sha256 сверять при обновлении).
+  Контракт — `POST /generate {prompt, seed, size, model, lora}` → PNG.
+  Модельный роутинг: `flux` → flux1-dev-fp8.safetensors,
+  `pony` → ponyDiffusionV6XL.safetensors; pony получает booru-теги
+  (score_9/8/7) в адаптере. LoRA safe-list: только
+  `flux1-uncensored.safetensors`.
+- Туннель: user-level юнит `lifesim-tunnel-flux` на воркере
+  (ssh -R 127.0.0.1:7860 → VPS :8443, ключ tunnel_flux,
+  `restrict,permitlisten` в authorized_keys VPS). Юниты:
+  `lifesim-comfy-adapter`, `lifesim-tunnel-flux`
+  (`systemctl --user`, linger включён).
+- **Первичная модель: `flux` + `flux1-uncensored`** (реализм, решение
+  владельца). Замер 512×512 (09.2026): warm 16–29 с, **VRAM 93.5%** —
+  впритык. Рабочий размер приложения — 512×512 (`image_size`);
+  для 768+ использовать pony.
+- **Сбой → pony одной строкой** (коммит в репо, НЕ ручная правка на
+  сервере): `visual.model: pony`, `visual.lora: ""`. Pony: ~3 с, низкий
+  VRAM. Триггеры: 502/OOM на генерациях, деградация VRAM.
+- **YOLO (sea-speed-worker-control)**: при текущем профиле (~162 MiB)
+  трогать не нужно. При VRAM-конфликте — `systemctl stop
+  sea-speed-worker-control` (root = владелец), после потока
+  генераций — `start`.
+- **Семантика переиспользования (§70)**: переиспользуется ТОЛЬКО
+  canonical-портрет (`POST /visual/assets/{id}/canonical`). Без canonical
+  каждый `POST /visual/portraits/{cid}` — новая платная генерация.
+  Клиент обязан пинить canonical после первой генерации.
+
 ## П4-напоминание
 
 Регистрация в бэкенде требует 18+ и `age_confirmed` — не отключайте.
