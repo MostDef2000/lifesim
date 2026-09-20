@@ -239,14 +239,14 @@ api:
   secret_env: VL1_SECRET
 
 visual:
-  enabled: false
-  transport: stub
+  enabled: true
+  transport: http
   base_url: http://127.0.0.1:7860
-  model: flux.1-schnell
-  lora: ""
+  model: flux
+  lora: flux1-uncensored.safetensors
   storage_dir: data/visual_assets
   image_size: "512x512"
-  timeout_sec: 30.0
+  timeout_sec: 300.0
   default_weather: clear
 
 external:
