@@ -211,12 +211,12 @@ org:
         enact_traits: { discipline: 1, sociability: -1, risk_tolerance: 1 }
 
 llm:
-  enabled: false
-  transport: stub
+  enabled: true
+  transport: ollama
   base_url: http://localhost:11434
   model_tier1: qwen3:4b
   model_tier2: qwen3:14b
-  timeout_sec: 30
+  timeout_sec: 120
   retry: 1
   budgets:
     max_per_day: 40
