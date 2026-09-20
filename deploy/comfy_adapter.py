@@ -34,7 +34,7 @@ MODEL_MAP = {
     "pony": "ponyDiffusionV6XL.safetensors",
     "ponydiffusionv6xl.safetensors": "ponyDiffusionV6XL.safetensors",
 }
-KNOWN_LORAS = {"flux1-uncensored.safetensors", "valery23.safetensors"}
+KNOWN_LORAS = {"flux1-uncensored.safetensors"}
 
 NEGATIVE = "lowres, bad anatomy, bad hands, watermark, blurry"
 PONY_POSITIVE_PREFIX = "score_9, score_8, score_7, "
