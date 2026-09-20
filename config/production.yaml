@@ -284,7 +284,7 @@ admin:
 
 weather:
   enabled: true
-  source: synthetic
+  source: historical  # фаза 4: smoke пройден,live на сервере с фазы 4
   latitude: 42.98
   longitude: 132.55
   year_lag: 1
