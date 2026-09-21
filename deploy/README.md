@@ -156,6 +156,29 @@ HMAC-подписи (VL1_SECRET), а не в памяти; мир возобно
   каждый `POST /visual/portraits/{cid}` — новая платная генерация.
   Клиент обязан пинить canonical после первой генерации.
 
+## 11. LLM-канал (домашний ПК, ollama, туннель)
+
+Фаза 7 (issue #47). Цепь: `API (VPS, llm.transport=ollama, base_url
+localhost:11434) → reverse-туннель (home-pc:11434 → VPS:11434, ключ
+tunnel_llm, restrict,port-forwarding,permitlisten) → ollama (Windows,
+qwen3:14b Q4_K_M ~9.3GB на G:\ollama\models, 4070 Ti 12GB)`.
+
+- **Туннель поднимается вручную** (решение владельца): клик
+  `C:\Users\mostd\lifesim\tunnel_llm.bat` (ssh -N -R, луп с
+  перезапуском через 10с). Автозагрузки нет.
+- **Перед сессией с LLM проверить**: на VPS
+  `curl -s http://127.0.0.1:11434/api/tags` → qwen3:14b в списке.
+- **Туннель down = LLM-функции не работают** (диалоги без ответа, AI-фаза
+  пропускает запросы), мир не повреждается (гейт R1, бюджеты max_per_day 40).
+- Контекст: `OLLAMA_CONTEXT_LENGTH=8192` (User-переменная на ПК).
+- Live smoke 21.09.2026: реплика диалога 14.2с, timeout 120с, без
+  `<thinking>` (format=json — грамматическая заграда).
+- Диагностика падения: (1) ollama на ПК (tray, `ollama list`),
+  (2) окно tunnel_llm.bat (нет ли Permission denied),
+  (3) `curl 127.0.0.1:11434/api/tags` с VPS.
+- Смена модели/кванта — только `ollama pull <модель>` + значение
+  `model_tier2` в production.yaml коммитом в репо (не ручная правка).
+
 ## П4-напоминание
 
 Регистрация в бэкенде требует 18+ и `age_confirmed` — не отключайте.
