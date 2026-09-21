@@ -5,7 +5,7 @@
 const app = document.getElementById("app");
 const toastEl = document.getElementById("toast");
 const S = { user: null, character: null, world: null, ws: null, wsTries: 0,
-  feed: [], cursor: 0, pollTimer: null };
+  feed: [], cursor: 0, pollTimer: null, canonicalPortraitId: null };
 
 /* ---------- helpers ---------- */
 
@@ -165,20 +165,34 @@ function viewCreateCharacter() {
   ));
 }
 
-/* ---------- portrait (014, M6 visual pipeline) ---------- */
+/* ---------- portrait + scene (014, M6 visual pipeline) ---------- */
 
 async function fetchPortraitBlob(path) {
-  const token = S.token || localStorage.getItem("token");
-  const r = await fetch(path, { headers: { Authorization: `Bearer ${token}` } });
+  // Same-origin cookie auth (same as api()); the client holds no bearer token,
+  // so a Bearer header would 401. img src cannot carry auth → fetch blob, objectURL.
+  const r = await fetch(path, { credentials: "same-origin" });
   if (!r.ok) throw new Error(`HTTP ${r.status}`);
   return await r.blob();
 }
 
-async function generatePortrait(container) {
+async function generatePortrait(container, force) {
   const status = container.querySelector(".portrait-status");
   if (status) status.textContent = "Генерация…";
   try {
+    // Force-regenerate: unpin the current canonical so a fresh asset is created.
+    if (force && S.canonicalPortraitId) {
+      try {
+        await api(`/visual/assets/${S.canonicalPortraitId}/canonical`,
+          { method: "POST", body: { canonical: false } });
+      } catch (e) { /* best effort */ }
+    }
     const r = await api(`/visual/portraits/${S.character.id}`, { method: "POST" });
+    // Pin the new asset canonical: persists across reloads and feeds §70 scene refs.
+    try {
+      await api(`/visual/assets/${r.asset.id}/canonical`,
+        { method: "POST", body: { canonical: true } });
+      S.canonicalPortraitId = r.asset.id;
+    } catch (e) { /* best effort */ }
     const blob = await fetchPortraitBlob(`/visual/assets/${r.asset.id}/file`);
     const url = URL.createObjectURL(blob);
     const img = el("img", { class: "portrait-img", src: url, alt: "Портрет" });
@@ -191,20 +205,51 @@ async function generatePortrait(container) {
   }
 }
 
-async function portraitBlock() {
+function portraitBlock() {
+  // Synchronous box (a real DOM node, not a Promise) so renderWorld can embed it
+  // directly; the canonical portrait loads asynchronously and fills in when ready.
   const status = el("div", { class: "portrait-status muted" });
-  const btn = el("button", { onclick: () => generatePortrait(box) }, "Сгенерировать портрет");
-  const box = el("div", { class: "panel portrait" },
-    el("h2", {}, "Портрет"), status, btn);
-  // show canonical portrait when it already exists (reuse, M6)
+  const box = el("div", { class: "panel portrait" }, el("h2", {}, "Портрет"), status);
+  (async () => {
+    let hasCanonical = false;
+    try {
+      const asset = await api(`/visual/characters/${S.character.id}/portrait`);
+      S.canonicalPortraitId = asset.id;
+      const blob = await fetchPortraitBlob(`/visual/assets/${asset.id}/file`);
+      const url = URL.createObjectURL(blob);
+      box.insertBefore(
+        el("img", { class: "portrait-img", src: url, alt: "Портрет" }), status);
+      hasCanonical = true;
+    } catch { /* no portrait yet — keep button */ }
+    box.append(el("button", {
+      onclick: () => generatePortrait(box, hasCanonical),
+    }, hasCanonical ? "Сгенерировать заново" : "Сгенерировать портрет"));
+  })();
+  return box;
+}
+
+async function generateScene(container) {
+  const status = container.querySelector(".scene-status");
+  if (status) status.textContent = "Генерация сцены…";
   try {
-    const asset = await api(`/visual/characters/${S.character.id}/portrait`);
-    const blob = await fetchPortraitBlob(`/visual/assets/${asset.id}/file`);
+    const r = await api("/visual/scenes", { method: "POST",
+      body: { location_id: S.character.location_id } });
+    const blob = await fetchPortraitBlob(`/visual/assets/${r.asset.id}/file`);
     const url = URL.createObjectURL(blob);
-    box.insertBefore(
-      el("img", { class: "portrait-img", src: url, alt: "Портрет" }), status);
-    btn.textContent = "Сгенерировать заново";
-  } catch { /* no portrait yet — keep button */ }
+    const img = el("img", { class: "portrait-img", src: url, alt: "Сцена" });
+    const old = container.querySelector(".portrait-img");
+    if (old) old.remove();
+    container.insertBefore(img, status);
+    if (status) status.textContent = "";
+  } catch (e) {
+    if (status) status.textContent = String(e.detail || e.message || "Ошибка сцены");
+  }
+}
+
+function sceneBlock() {
+  const status = el("div", { class: "scene-status muted" });
+  const box = el("div", { class: "panel portrait" }, el("h2", {}, "Сцена"), status);
+  box.append(el("button", { onclick: () => generateScene(box) }, "Сгенерировать сцену"));
   return box;
 }
 
@@ -270,6 +315,7 @@ function renderWorld(locs) {
   const tasks = (ch.tasks || []).map((t) => el("div", { class: "task" },
     el("span", { class: "status" }, t.status), el("span", {}, t.action_type || t.task_type || "")));
   const portraitBox = portraitBlock();
+  const sceneBox = sceneBlock();
   app.replaceChildren(
     topbar("#/world"),
     el("div", { class: "grid" },
@@ -297,6 +343,7 @@ function renderWorld(locs) {
           el("h2", {}, "Задачи"),
           tasks.length ? tasks : el("div", { class: "muted" }, "Нет активных задач")),
         portraitBox,
+        sceneBox,
         feed)));
 }
 
@@ -457,13 +504,22 @@ async function viewChat() {
     const loc = await api(`/locations/${S.character.location_id}`);
     const npcs = (loc.characters_here || []).filter((id) => id.startsWith("npc_"));
     S.chatNpcs = npcs;
+    // Resolve nearby NPC names for the select (bounded to NPCs present here).
+    const names = {};
+    await Promise.all(npcs.slice(0, 15).map(async (id) => {
+      try { const c = await api(`/characters/${id}`); names[id] = c.name || id; }
+      catch (e) { names[id] = id; }
+    }));
+    S.chatNpcNames = names;
     renderChat(null);
   } catch (e) { toast(e.message, true); }
 }
 
 function renderChat(session) {
   const npcSel = el("select", {},
-    ...S.chatNpcs.map((id) => el("option", { value: id }, id)));
+    ...S.chatNpcs.map((id) => el("option", { value: id },
+      (S.chatNpcNames && S.chatNpcNames[id])
+        ? `${S.chatNpcNames[id]} (${id})` : id)));
   const log = el("div", { class: "chatlog" });
   const input = el("input", { placeholder: "Сообщение…" });
   const sugg = el("div", {});

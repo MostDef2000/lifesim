@@ -42,8 +42,12 @@ class TestPortraitFlow:
         js = load_js()
         assert "URL.createObjectURL(blob)" in js
         assert "fetchPortraitBlob" in js
-        # Authorization header is sent (img src cannot carry headers)
-        assert "Authorization: `Bearer ${token}`" in js
+        # img src cannot carry auth, and the client holds no bearer token —
+        # the blob fetch uses the same httpOnly session cookie as the rest of
+        # the app (a Bearer header would 401 since S.token is never set).
+        assert 'fetch(path, { credentials: "same-origin" })' in js
+        # The old bearer-token path must not be present.
+        assert "Authorization: `Bearer ${token}`" not in js
 
     def test_graceful_degradation(self):
         js = load_js()
@@ -57,8 +61,36 @@ class TestPortraitFlow:
         assert "const portraitBox = portraitBlock();" in js
         assert "portraitBox," in js
 
+    def test_portrait_block_is_synchronous(self):
+        # Regression: an async portraitBlock returned a Promise, which el()
+        # stringified into "[object Promise]" in the world view.
+        js = load_js()
+        assert "function portraitBlock()" in js
+        assert "async function portraitBlock()" not in js
+
+    def test_portrait_canonicalization(self):
+        # Generated portrait is pinned canonical so it persists across
+        # reloads and feeds scene references; "заново" unpins first.
+        js = load_js()
+        assert "body: { canonical: true }" in js
+        assert "body: { canonical: false }" in js
+        assert "S.canonicalPortraitId" in js
+
+
     def test_css_rules(self):
         with open(STYLE_CSS, encoding="utf-8") as fh:
             css = fh.read()
         assert ".portrait .portrait-img" in css
         assert "textarea" in css
+
+
+class TestSceneFlow:
+    def test_scene_calls_visual_api(self):
+        js = load_js()
+        assert 'api("/visual/scenes", { method: "POST",' in js
+        assert "body: { location_id: S.character.location_id }" in js
+
+    def test_world_view_embeds_scene(self):
+        js = load_js()
+        assert "const sceneBox = sceneBlock();" in js
+        assert "sceneBox," in js
