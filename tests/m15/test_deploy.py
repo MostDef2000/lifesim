@@ -89,7 +89,7 @@ class TestRunbook:
         rb = read("README.md")
         for section in ("Установка", ".env", "systemd", "Caddy",
                         "Проверка", "Smoke-тест реальной погоды",
-                        "Бэкап SQLite", "Обновление", "Визуальный канал"):
+                        "Бэкап SQLite", "Обновление", "Визуальный канал", "LLM-канал"):
             assert section in rb, section
 
     def test_weather_smoke_mentions_reineke(self):
