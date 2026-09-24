@@ -1140,9 +1140,9 @@ Living Map проектируется так, чтобы визуальная н
 
 Утверждённый composite mockup:
 
-![Approved alpha screen set v1](https://raw.githubusercontent.com/MostDef2000/lifesim/main/docs/752d2b42-f13a-4569-9f97-9dfd87a9eb2e.png)
+![Approved alpha screen set v1](design/approved/alpha-screen-set-v1.png)
 
-Repository asset: [`docs/752d2b42-f13a-4569-9f97-9dfd87a9eb2e.png`](https://github.com/MostDef2000/lifesim/blob/main/docs/752d2b42-f13a-4569-9f97-9dfd87a9eb2e.png)
+Repository asset: [`docs/design/approved/alpha-screen-set-v1.png`](design/approved/alpha-screen-set-v1.png)
 
 Этот PNG является главным визуальным reference для первого implementation-pass экранов. Текстовые требования ниже уточняют поведение и границы, но не заменяют визуальную композицию.
 
