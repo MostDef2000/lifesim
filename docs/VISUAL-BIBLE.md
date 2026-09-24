@@ -876,6 +876,17 @@ Rich map отвечает за навигацию и постоянное ощу
 
 ## 35. Approved Living Map reference
 
+### Canonical visual reference
+
+Утверждённый Living Map concept:
+
+![Reineke Living Map visual bible](https://raw.githubusercontent.com/MostDef2000/lifesim/main/docs/%D0%92%D0%B8%D0%B7%D1%83%D0%B0%D0%BB%D1%8C%D0%BD%D0%B0%D1%8F%20%D0%B1%D0%B8%D0%B1%D0%BB%D0%B8%D1%8F%20Reineke_%20%D0%B6%D0%B8%D0%B2%D0%B0%D1%8F%20%D0%BA%D0%B0%D1%80%D1%82%D0%B0%20%D0%BE%D1%81%D1%82%D1%80%D0%BE%D0%B2%D0%B0.png)
+
+Repository asset: [`docs/Визуальная библия Reineke_ живая карта острова.png`](https://github.com/MostDef2000/lifesim/blob/main/docs/%D0%92%D0%B8%D0%B7%D1%83%D0%B0%D0%BB%D1%8C%D0%BD%D0%B0%D1%8F%20%D0%B1%D0%B8%D0%B1%D0%BB%D0%B8%D1%8F%20Reineke_%20%D0%B6%D0%B8%D0%B2%D0%B0%D1%8F%20%D0%BA%D0%B0%D1%80%D1%82%D0%B0%20%D0%BE%D1%81%D1%82%D1%80%D0%BE%D0%B2%D0%B0.png)
+
+Этот PNG является главным визуальным reference для Rich top-down geographic map, zoom/LOD, ambient motion и общего ощущения «живого острова». Текстовые правила разделов 28–41 уточняют поведение, performance и границы, но не заменяют этот визуальный ориентир.
+
+
 Статус: **APPROVED — 2026-09-23**
 
 В качестве референсного направления утверждён concept frame **“LIFESIM: REINEKE — Living Map / Rich Top-Down”** из дизайн-сессии 2026-09-23.
