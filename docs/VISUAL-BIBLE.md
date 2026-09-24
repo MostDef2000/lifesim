@@ -1136,6 +1136,17 @@ Living Map проектируется так, чтобы визуальная н
 
 ## 42. Approved Alpha UI reference
 
+### Approved visual artifact
+
+Canonical implementation reference:
+
+![Approved alpha screen set](design/approved/alpha-screen-set-v1.png)
+
+Repository asset: `docs/design/approved/alpha-screen-set-v1.png`
+
+Этот mockup является главным визуальным reference для первого прохода alpha UI. Текстовые правила ниже уточняют поведение и границы, но не заменяют изображение.
+
+
 Статус: **APPROVED — 2026-09-24**
 
 Утверждён composite concept screen из дизайн-сессии 2026-09-24 как **implementation target для первого визуального прохода alpha UI**.
