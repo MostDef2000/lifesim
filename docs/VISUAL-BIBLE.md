@@ -1147,16 +1147,6 @@ Repository asset: [`docs/design/approved/alpha-screen-set-v1.png`](design/approv
 Этот PNG является главным визуальным reference для первого implementation-pass экранов. Текстовые требования ниже уточняют поведение и границы, но не заменяют визуальную композицию.
 
 
-### Approved visual artifact
-
-Canonical implementation reference:
-
-![Approved alpha screen set](design/approved/alpha-screen-set-v1.png)
-
-Repository asset: `docs/design/approved/alpha-screen-set-v1.png`
-
-Этот mockup является главным визуальным reference для первого прохода alpha UI. Текстовые правила ниже уточняют поведение и границы, но не заменяют изображение.
-
 
 Статус: **APPROVED — 2026-09-24**
 
