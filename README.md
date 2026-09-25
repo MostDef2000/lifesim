@@ -390,10 +390,9 @@ backend/app/web/
 - admin.
 
 World view показывает:
-
 - игровое время;
 - текущую погоду;
-- локации;
+- карту острова (interactive map card с anchors/player marker, click-to-move, external-trip badge; fallback на список локаций, если координаты не заданы; coords appear after fresh reseed);
 - needs;
 - задачи;
 - события;
@@ -401,6 +400,7 @@ World view показывает:
 - scene generation;
 - действия персонажа;
 - поездку во Владивосток.
+
 
 В чате ближайшие NPC отображаются по имени, а не только по внутреннему `npc_id`.
 

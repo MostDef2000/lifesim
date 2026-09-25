@@ -320,6 +320,24 @@ function needBar(label, value) {
 function renderWorld(locs, tasksData) {
   const ch = S.character;
   const needs = ch.needs || {};
+  
+  // LOD1: if ANY keyed POI has x === null (pre-coords DB) → fallback to the
+  // old location list. "home" is excluded: its Location type is "house"
+  // (name "Residential House"), so type/name matching would never hit it;
+  // it still renders as a labeled anchor when it has coords.
+  const keyedPois = ["settlement", "shop", "workshop", "kitchen", "storage", "well", "pier"];
+  const poiMap = {};
+  locs.forEach(l => {
+    // Match by type first, then by name
+    for (const k of keyedPois) {
+      if (l.type === k || (l.name && l.name.toLowerCase().includes(k))) {
+        poiMap[k] = l;
+      }
+    }
+  });
+  
+  const mapReady = keyedPois.every(k => poiMap[k] && poiMap[k].x !== null);
+  
   const feed = el("div", { class: "panel feed", id: "feed" },
     el("h2", {}, "События"),
     ...S.feed.slice(-40).reverse().map(feedRow));
@@ -342,18 +360,58 @@ function renderWorld(locs, tasksData) {
   
   const portraitBox = portraitBlock();
   const sceneBox = sceneBlock();
+  
+  // Map Card implementation
+  const mapCard = el("div", { class: "map-card" },
+    el("img", { class: "map-base", src: "/static/map/base.jpg", alt: "" }),
+    el("div", { class: "map-anchors", id: "map-anchors" },
+      ...locs.filter(l => l.x !== null && l.type !== "island").map(l => {
+        const isHere = l.id === ch.location_id;
+        return el("button", { 
+          class: `anchor ${isHere ? "here" : ""}`, 
+          style: `left:${l.x}%; top:${l.y}%`,
+          dataset: { locId: l.id },
+          onclick: () => moveTo(l) 
+        }, 
+          el("span", { class: "dot" }),
+          (!/^House \d+$/.test(l.name) ? el("span", { class: "map-label" }, l.name) : null),
+          (l.occupants_count > 0 ? el("span", { class: "dot npc" }) : null)
+        );
+      }),
+
+      // Player marker
+      el("span", { 
+        class: "anchor player", 
+        id: "player-marker",
+        style: "left:50%; top:50%" // corrected below from ch.location_id
+      }, el("span", { class: "dot" }))
+    ),
+    // External trip badge
+    el("div", { id: "map-badge", class: "map-badge hidden" }, "")
+  );
+
+  // Update player marker pos based on current location immediately
+  const currentLoc = locs.find(l => l.id === ch.location_id);
+  if (currentLoc && currentLoc.x !== null) {
+    const marker = mapCard.querySelector("#player-marker");
+    if (marker) marker.style.left = `${currentLoc.x}%`;
+    if (marker) marker.style.top = `${currentLoc.y}%`;
+  }
+
+  const locsPanel = el("div", { class: "panel" },
+    el("h2", {}, "Карта"),
+    mapReady ? mapCard : el("div", { class: "locs" },
+      ...locs.map((loc) => el("div", {
+        class: `loc ${loc.id === ch.location_id ? "here" : ""}`,
+        onclick: () => moveTo(loc),
+      }, el("span", {}, loc.name || `#${loc.id}`),
+         el("span", { class: "muted" }, loc.type || "")))),);
+
   app.replaceChildren(
     topbar("#/world"),
     el("div", { class: "grid" },
       el("div", {},
-        el("div", { class: "panel" },
-          el("h2", {}, "Карта"),
-          el("div", { class: "locs" },
-            ...locs.map((loc) => el("div", {
-              class: `loc ${loc.id === ch.location_id ? "here" : ""}`,
-              onclick: () => moveTo(loc),
-            }, el("span", {}, loc.name || `#${loc.id}`),
-               el("span", { class: "muted" }, loc.type || "")))),),
+        locsPanel,
         el("div", { class: "panel" },
           el("h2", {}, "Персонаж"),
           el("div", {}, `${ch.name || `${ch.first_name || ""} ${ch.last_name || ""}`}`),
@@ -487,6 +545,69 @@ async function pollEvents() {
       if (feedBox) {
         feedBox.replaceChildren(el("h2", {}, "События"),
           ...S.feed.slice(-40).reverse().map(feedRow));
+      }
+    }
+    
+    // LOD1 Living Map: update marker and anchors
+    const character = await api(`/characters/${S.character.id}`);
+    const world = await api("/world");
+    const locs = await api("/locations");
+    
+    const marker = document.getElementById("player-marker");
+    const badge = document.getElementById("map-badge");
+    const anchors = document.querySelectorAll(".anchor");
+    
+    if (marker) {
+      const currentLoc = locs.find(l => l.id === character.location_id);
+      if (currentLoc && currentLoc.x !== null) {
+        marker.style.left = `${currentLoc.x}%`;
+        marker.style.top = `${currentLoc.y}%`;
+      }
+    }
+    
+    if (anchors.length) {
+      anchors.forEach(a => {
+        const locId = a.dataset.locId;
+        if (!locId) return;
+        const loc = locs.find(l => l.id == locId);
+        if (loc) {
+          a.className = `anchor ${loc.id === character.location_id ? "here" : ""}`;
+        }
+      });
+    }
+
+    // Handle Tasks (MOVE and TRAVEL_EXTERNAL)
+    if (S.character.is_owner) {
+      const tasks = await api(`/characters/${S.character.id}/tasks`);
+      const active = tasks.active && tasks.active[0];
+      
+      if (active && active.task_type === "MOVE") {
+        const params = active.parameters || {};
+        // Real MOVE params: {path: [..locIds], total_minutes, from}
+        const targetId = (params.path && params.path.length)
+          ? params.path[params.path.length - 1] : params.location_id;
+        const targetLoc = locs.find(l => l.id == targetId);
+        const startLoc = locs.find(l => l.id == character.location_id);
+        
+        if (targetLoc && startLoc) {
+          const f = Math.max(0, Math.min(1, (world.game_timestamp - active.started_at) / (active.ends_at - active.started_at)));
+          const curX = startLoc.x + (targetLoc.x - startLoc.x) * f;
+          const curY = startLoc.y + (targetLoc.y - startLoc.y) * f;
+          if (marker) {
+            marker.style.left = `${curX}%`;
+            marker.style.top = `${curY}%`;
+          }
+        }
+      } else if (active && active.task_type === "TRAVEL_EXTERNAL") {
+        if (badge) {
+          const remaining = active.ends_at - world.game_timestamp;
+          const h = Math.floor(remaining / 60);
+          const m = Math.floor(remaining % 60);
+          badge.textContent = `В рейсе — вернётся через ${h}ч ${m}м`;
+          badge.classList.remove("hidden");
+        }
+      } else {
+        if (badge) badge.classList.add("hidden");
       }
     }
   } catch (e) { /* silent */ }

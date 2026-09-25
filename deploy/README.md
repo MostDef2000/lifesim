@@ -65,6 +65,7 @@ curl -s http://127.0.0.1:8000/health && echo                         # {"status"
 curl -s -o /dev/null -w '%{http_code}\n' http://127.0.0.1:8000/docs   # 200
 curl -s http://127.0.0.1:8000/world && echo                          # мир
 curl -s https://<домен>/ | head -1                                   # после DNS
+curl -s http://127.0.0.1:8000/static/app.js | head -c 100            # статика под /static/
 ```
 
 UI — на `/`, OpenAPI — на `/docs`, liveness — на `/health`.

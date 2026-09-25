@@ -18,29 +18,50 @@ def seed_world(session: Session, settings, world_id: str) -> None:
     key_to_id = {}
 
     # Create locations in the order they appear in the config.
+    coords = settings.locations.coords
     for loc_key, params in settings.locations.locations.items():
         parent_id = key_to_id.get(params.parent)
+
+        x, y = None, None
+        if coords:
+            coord = getattr(coords, loc_key, None)
+            if coord:
+                x, y = coord.x, coord.y
 
         loc = Location(
             world_id=world_id,
             type=params.type,
             name=params.name,
             parent_id=parent_id,
-            capacity=params.capacity
+            capacity=params.capacity,
+            x=x,
+            y=y
         )
         session.add(loc)
         session.flush()
         key_to_id[loc_key] = loc.id
 
     # Now create the N houses
+    origin = None
+    if settings.locations.coords and settings.locations.coords.houses:
+        origin = settings.locations.coords.houses.origin
+
     for i in range(settings.locations.houses_count):
         parent_id = key_to_id.get("settlement")
+
+        x, y = None, None
+        if origin:
+            x = origin.x + ((i * 13) % 20) * 0.45
+            y = origin.y - ((i * 7) % 10) * 0.5
+
         house = Location(
             world_id=world_id,
             type="house",
             name=f"House {i+1}",
             parent_id=parent_id,
-            capacity=1
+            capacity=1,
+            x=x,
+            y=y
         )
         session.add(house)
         session.flush()
