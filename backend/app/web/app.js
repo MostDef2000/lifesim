@@ -289,19 +289,35 @@ async function viewWorld() {
     const me = await api(`/characters/${S.character.id}`);
     S.character = { ...S.character, ...me };
     const locs = await api("/locations");
-    renderWorld(locs);
+    
+    // Fetch tasks if owner
+    let tasksData = null;
+    if (me.is_owner) {
+      try {
+        tasksData = await api(`/characters/${S.character.id}/tasks`);
+      } catch (e) {
+        console.error("Tasks fetch failed", e);
+      }
+    }
+    
+    renderWorld(locs, tasksData);
     startFeed();
   } catch (e) { toast(e.message, true); }
 }
 
 function needBar(label, value) {
+  if (value === null || value === undefined) {
+    return el("div", { class: "need" },
+      el("div", { class: "row" }, el("span", {}, label), el("span", {}, "—")),
+      el("div", { class: "bar" }, el("div", { style: `width:0%` })));
+  }
   const v = Math.max(0, Math.min(100, Math.round(value)));
   return el("div", { class: `need ${v < 30 ? "low" : ""}` },
     el("div", { class: "row" }, el("span", {}, label), el("span", {}, `${v}`)),
     el("div", { class: "bar" }, el("div", { style: `width:${v}%` })));
 }
 
-function renderWorld(locs) {
+function renderWorld(locs, tasksData) {
   const ch = S.character;
   const needs = ch.needs || {};
   const feed = el("div", { class: "panel feed", id: "feed" },
@@ -312,8 +328,18 @@ function renderWorld(locs) {
       el("button", { onclick: () => doAction(a) }, a)));
   const extBtn = el("button", { onclick: () => viewExternal() },
     "Поездка во Владивосток");
-  const tasks = (ch.tasks || []).map((t) => el("div", { class: "task" },
-    el("span", { class: "status" }, t.status), el("span", {}, t.action_type || t.task_type || "")));
+  
+  const taskRows = [];
+  if (tasksData) {
+    const planned = tasksData.planned || [];
+    const active = tasksData.active || [];
+    [...planned, ...active].forEach(t => {
+      taskRows.push(el("div", { class: "task" },
+        el("span", { class: "status" }, t.status), 
+        el("span", {}, t.task_type || "")));
+    });
+  }
+  
   const portraitBox = portraitBlock();
   const sceneBox = sceneBlock();
   app.replaceChildren(
@@ -327,25 +353,26 @@ function renderWorld(locs) {
               class: `loc ${loc.id === ch.location_id ? "here" : ""}`,
               onclick: () => moveTo(loc),
             }, el("span", {}, loc.name || `#${loc.id}`),
-               el("span", { class: "muted" }, loc.type || ""))))),
+               el("span", { class: "muted" }, loc.type || "")))),),
         el("div", { class: "panel" },
           el("h2", {}, "Персонаж"),
           el("div", {}, `${ch.name || `${ch.first_name || ""} ${ch.last_name || ""}`}`),
           el("div", { class: "muted" }, `Деньги: ${ch.money ?? ch.balance ?? "—"} ₽`),
-          needBar("Сытость", needs.hunger ?? 100),
-          needBar("Вода", needs.thirst ?? 100),
-          needBar("Энергия", needs.energy ?? 100),
-          needBar("Общение", needs.social ?? 100),
+          needBar("Сытость", needs.hunger),
+          needBar("Вода", needs.thirst),
+          needBar("Энергия", needs.energy),
+          needBar("Общение", needs.social),
           actions,
           el("div", { style: "margin-top:6px" }, extBtn))),
       el("div", {},
         el("div", { class: "panel" },
           el("h2", {}, "Задачи"),
-          tasks.length ? tasks : el("div", { class: "muted" }, "Нет активных задач")),
+          taskRows.length ? taskRows : el("div", { class: "muted" }, "Нет активных задач")),
         portraitBox,
         sceneBox,
         feed)));
 }
+
 
 async function doAction(actionType, params = {}) {
   try {
@@ -515,11 +542,27 @@ async function viewChat() {
   } catch (e) { toast(e.message, true); }
 }
 
-function renderChat(session) {
+async function renderChat(session) {
   const npcSel = el("select", {},
     ...S.chatNpcs.map((id) => el("option", { value: id },
       (S.chatNpcNames && S.chatNpcNames[id])
         ? `${S.chatNpcNames[id]} (${id})` : id)));
+  
+  // Relationship line in header
+  let relLine = null;
+  if (S.character) {
+    try {
+      const rels = await api(`/characters/${S.character.id}/relationships`);
+      const rel = rels.find(r => r.other_id === npcSel.value);
+      if (rel) {
+        const affection = rel.affection;
+        const label = affection > 20 ? "тёплые" : (affection < -20 ? "холодные" : "нейтральные");
+        relLine = el("div", { class: "muted", style: "font-size:0.85em; margin-bottom:8px" },
+          `Отношения: ${label} (симпатия ${Math.round(affection)}, доверие ${Math.round(rel.trust)})`);
+      }
+    } catch (e) { console.error("Rel fetch failed", e); }
+  }
+
   const log = el("div", { class: "chatlog" });
   const input = el("input", { placeholder: "Сообщение…" });
   const sugg = el("div", {});
@@ -555,6 +598,7 @@ function renderChat(session) {
       el("div", { class: "panel" },
         el("h2", {}, "Диалог"),
         el("label", {}, "NPC на этой локации"), npcSel,
+        relLine,
         el("div", { style: "margin-top:8px" }, log),
         sugg,
         el("div", { style: "display:flex;gap:6px;margin-top:8px" }, input, sendBtn)),
@@ -570,10 +614,15 @@ async function viewInventory() {
   try {
     const inv = await api(`/characters/${S.character.id}/inventory`);
     const items = Array.isArray(inv) ? inv : (inv.items || []);
-    const rows = items.map((it) => el("tr", {},
-      el("td", {}, it.object_type || it.type || ""),
-      el("td", {}, it.quantity ?? ""),
-      el("td", { class: "muted" }, `#${it.id}`)));
+    const rows = items.map((it) => {
+      const badge = (it.worn === true) 
+        ? el("span", { class: "badge worn" }, `надето ${it.slot || ""}`) 
+        : null;
+      return el("tr", {},
+        el("td", {}, it.object_type || it.type || "", badge),
+        el("td", {}, it.quantity ?? ""),
+        el("td", { class: "muted" }, `#${it.id}`));
+    });
     app.replaceChildren(topbar("#/inventory"),
       el("div", { class: "panel" },
         el("h2", {}, "Инвентарь"),
@@ -585,6 +634,7 @@ async function viewInventory() {
           "Использование предметов выполняется игровыми действиями (EAT/DRINK).")));
   } catch (e) { toast(e.message, true); }
 }
+
 
 /* ---------- profile (§77) ---------- */
 
