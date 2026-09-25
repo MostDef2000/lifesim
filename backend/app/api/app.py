@@ -294,6 +294,85 @@ def create_app(settings, session_factory: sessionmaker):
             raise HTTPException(status_code=403, detail="not your character")
         return character
 
+    @app.get("/characters/{cid}/tasks")
+    def get_character_tasks(
+        cid: str, user: User = Depends(current_user), session: Session = Depends(db)
+    ):
+        from app.db.models import CharacterTask
+
+        _owned_character(session, user, cid)
+
+        planned = (
+            session.query(CharacterTask)
+            .filter(CharacterTask.character_id == cid, CharacterTask.status == "planned")
+            .order_by(CharacterTask.created_at.asc())
+            .all()
+        )
+        active = (
+            session.query(CharacterTask)
+            .filter(
+                CharacterTask.character_id == cid,
+                CharacterTask.status.in_(["active", "queued", "STARTED"]),
+            )
+            .order_by(CharacterTask.created_at.asc())
+            .all()
+        )
+        terminal = (
+            session.query(CharacterTask)
+            .filter(CharacterTask.character_id == cid, CharacterTask.completed_at.isnot(None))
+            .order_by(CharacterTask.completed_at.desc())
+            .limit(10)
+            .all()
+        )
+
+        def task_to_dict(t):
+            return {
+                "id": t.id, "task_type": t.task_type, "status": t.status,
+                "target_id": t.target_id, "source": t.source,
+                "created_at": t.created_at, "started_at": t.started_at,
+                "ends_at": t.ends_at, "completed_at": t.completed_at,
+            }
+
+        return {
+            "planned": [task_to_dict(t) for t in planned],
+            "active": [task_to_dict(t) for t in active],
+            "recent_terminal": [task_to_dict(t) for t in terminal],
+        }
+
+    @app.get("/characters/{cid}/relationships")
+    def get_character_relationships(
+        cid: str, user: User = Depends(current_user), session: Session = Depends(db)
+    ):
+        from sqlalchemy import or_
+
+        from app.db.models import Character, Relationship
+
+        character = _owned_character(session, user, cid)
+        rels = (
+            session.query(Relationship)
+            .filter(Relationship.world_id == character.world_id,
+                    or_(Relationship.character_a == cid, Relationship.character_b == cid))
+            .order_by(Relationship.updated_at.desc())
+            .all()
+        )
+
+        out = []
+        for r in rels:
+            other_id = r.character_b if r.character_a == cid else r.character_a
+            other = session.get(Character, other_id)
+            other_name = (
+                f"{other.first_name} {other.last_name}".strip()
+                if other else other_id
+            )
+            out.append({
+                "other_id": other_id,
+                "other_name": other_name,
+                "trust": r.trust, "affection": r.affection, "familiarity": r.familiarity,
+                "romantic_interest": r.romantic_interest, "updated_at": r.updated_at,
+            })
+        return out
+
+
     @app.post("/characters/{cid}/control")
     def set_control(
         cid: str, body: ControlIn,
@@ -645,7 +724,7 @@ def create_app(settings, session_factory: sessionmaker):
 
     @app.get("/characters/{cid}")
     def get_character(cid: str, user: User = Depends(current_user), session: Session = Depends(db)):
-        from app.db.models import CharacterJob, CharacterNeeds, Job
+        from app.db.models import Account, CharacterJob, CharacterNeeds, Job
 
         character = (
             session.query(Character)
@@ -665,6 +744,12 @@ def create_app(settings, session_factory: sessionmaker):
             "is_owner": is_owner,
         }
         if is_owner:
+            acc = (
+                session.query(Account)
+                .filter_by(owner_type="character", owner_id=cid)
+                .first()
+            )
+            out["balance"] = acc.balance if acc else 0
             needs = (
                 session.query(CharacterNeeds).filter_by(character_id=cid).first()
             )
@@ -682,8 +767,11 @@ def create_app(settings, session_factory: sessionmaker):
             out["job"] = job[1].title if job else None
         return out
 
+
     @app.get("/characters/{cid}/inventory")
     def get_inventory(cid: str, user: User = Depends(current_user), session: Session = Depends(db)):
+        import json as _json
+
         from app.db.models import WorldObject
 
         character = (
@@ -701,13 +789,25 @@ def create_app(settings, session_factory: sessionmaker):
             .order_by(WorldObject.id)
             .all()
         )
-        return [
-            {
+
+        out = []
+        for o in items:
+            meta = {}
+            try:
+                meta = _json.loads(o.object_metadata)
+                if not isinstance(meta, dict):
+                    meta = {}
+            except (ValueError, TypeError):
+                meta = {}
+
+            out.append({
                 "id": o.id, "object_type": o.object_type,
                 "quantity": o.quantity, "location_id": o.location_id,
-            }
-            for o in items
-        ]
+                "worn": meta.get("worn") is True,
+                "slot": meta.get("slot") if isinstance(meta.get("slot"), str) else None,
+            })
+        return out
+
 
     # ---------- Dialogue / chat (R7, §63-65) ----------
 
