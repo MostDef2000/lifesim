@@ -127,7 +127,26 @@ class LocationParams(BaseModel):
     parent: Optional[str] = None
     capacity: Optional[int] = None
 
+class MapCoord(BaseModel):
+    x: float
+    y: float
+
+class HousesScatter(BaseModel):
+    origin: MapCoord
+
+class MapCoords(BaseModel):
+    settlement: Optional[MapCoord] = None
+    shop: Optional[MapCoord] = None
+    workshop: Optional[MapCoord] = None
+    kitchen: Optional[MapCoord] = None
+    storage: Optional[MapCoord] = None
+    well: Optional[MapCoord] = None
+    pier: Optional[MapCoord] = None
+    home: Optional[MapCoord] = None
+    houses: Optional[HousesScatter] = None
+
 class LocationsConfig(BaseModel):
+    coords: Optional[MapCoords] = None
     locations: Dict[str, LocationParams]
     houses_count: int = 24
 

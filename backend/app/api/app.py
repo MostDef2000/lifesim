@@ -326,11 +326,17 @@ def create_app(settings, session_factory: sessionmaker):
         )
 
         def task_to_dict(t):
+            import json as _json
+            try:
+                params = _json.loads(t.parameters) if t.parameters else {}
+            except (ValueError, TypeError):
+                params = {}
             return {
                 "id": t.id, "task_type": t.task_type, "status": t.status,
                 "target_id": t.target_id, "source": t.source,
                 "created_at": t.created_at, "started_at": t.started_at,
                 "ends_at": t.ends_at, "completed_at": t.completed_at,
+                "parameters": params,
             }
 
         return {
@@ -583,6 +589,8 @@ def create_app(settings, session_factory: sessionmaker):
             "game_timestamp": clock.game_timestamp if clock else 0,
             "day": (clock.game_timestamp // 1440) if clock else 0,
             "population": population,
+            "time_scale": clock.time_scale if clock else 1.0,
+            "is_paused": bool(clock.is_paused) if clock else False,
         }
 
     @app.get("/world/events")
@@ -672,7 +680,7 @@ def create_app(settings, session_factory: sessionmaker):
     @app.get("/locations")
     def list_locations(user: User = Depends(current_user), session: Session = Depends(db)):
         """M9 (§78): map — list of world locations for the client."""
-        from app.db.models import Location
+        from app.db.models import Character, Location
 
         locs = (
             session.query(Location)
@@ -680,8 +688,21 @@ def create_app(settings, session_factory: sessionmaker):
             .order_by(Location.id)
             .all()
         )
+
+        # Group active characters by location to get occupants_count
+        active_chars = session.query(Character.location_id).filter_by(
+            world_id=state["settings"].world.world_id, alive=True
+        ).all()
+        counts = {}
+        for lid, in active_chars:
+            counts[lid] = counts.get(lid, 0) + 1
+
         return [
-            {"id": loc.id, "type": loc.type, "name": loc.name}
+            {
+                "id": loc.id, "type": loc.type, "name": loc.name,
+                "x": loc.x, "y": loc.y, "parent_id": loc.parent_id,
+                "occupants_count": counts.get(loc.id, 0)
+            }
             for loc in locs
         ]
 
