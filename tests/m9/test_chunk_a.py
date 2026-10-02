@@ -64,7 +64,7 @@ class TestStatic:
         assert "textContent" in js.text  # XSS-hygiene primitive present
         assert "Остров живёт, даже когда тебя нет." in js.text
         assert "Начать жизнь на Рейнеке" in js.text
-        assert '"/static/map/base.jpg"' in js.text
+        assert '"/static/static/map/base.jpg"' in js.text
         assert 'api("/auth/register"' in js.text
         assert 'api("/auth/login"' in js.text
         assert "--bg" in css.text
