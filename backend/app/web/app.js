@@ -70,6 +70,7 @@ async function route() {
     try { S.user = await api("/auth/me"); } catch (e) { S.user = null; }
   }
   if (!S.user) return viewAuth();
+  document.body.classList.remove("landing-mode");
   if (!S.character) {
     try {
       const chars = await api(`/characters/by-user/${S.user.id}`);
@@ -85,6 +86,7 @@ async function route() {
 
 function viewAuth() {
   location.hash = "#/login";
+  document.body.classList.add("landing-mode");
   const mode = S.authMode === "register" ? "register" : "login";
   const isReg = mode === "register";
   const showAuth = !!S.authPanel;
