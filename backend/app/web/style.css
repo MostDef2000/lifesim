@@ -172,7 +172,7 @@ body.landing-mode {
   overflow-x: hidden;
   background:
     radial-gradient(circle at 78% 18%, rgba(127, 157, 136, 0.16), transparent 34rem),
-    linear-gradient(180deg, #0b1512 0%, #10211b 48%, #e9e5d8 48%, #f4f0e6 100%);
+    linear-gradient(160deg, #09130f 0%, #10231b 58%, #132820 100%);
   color: #f4f0e6;
 }
 
