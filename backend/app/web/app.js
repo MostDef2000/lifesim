@@ -24,7 +24,11 @@ async function api(path, opts = {}) {
     ...opts,
     body: opts.body ? JSON.stringify(opts.body) : undefined,
   });
-  if (res.status === 401) { S.user = null; route(); throw new Error("unauthorized"); }
+  if (res.status === 401) {
+    S.user = null;
+    if (path !== "/auth/me") route();
+    throw new Error("unauthorized");
+  }
   let data = null;
   try { data = await res.json(); } catch (e) { data = null; }
   if (!res.ok) {
