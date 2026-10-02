@@ -64,7 +64,7 @@ def test_locations_endpoint(world):
     assert island["x"] is None
 
     settlement = next(item for item in locs if item["type"] == "settlement")
-    assert settlement["x"] == 50.0
+    assert settlement["x"] == 57.6
     assert "y" in settlement
     assert "parent_id" in settlement
     assert "occupants_count" in settlement
@@ -97,6 +97,22 @@ def test_house_coord_determinism(tmp_path):
     assert len(coords1) == 25  # 1 config house + 24 generated
     assert coords1 == coords2
     assert all(x is not None and y is not None for x, y in coords1)
+    # Pin the sparse RNG-free town grid: first the config-defined "home",
+    # then 24 generated houses in row-major seed order from origin (42.0, 6.6).
+    # 8x4 grid (3.9%/4.6% steps): 7 POI cells + 1 pier-clearance cell skipped.
+    expected = [
+        (45.9, 15.8),
+        (42.0, 6.6), (45.9, 6.6), (49.8, 6.6), (53.7, 6.6),
+        (57.6, 6.6), (65.4, 6.6), (69.3, 6.6),
+        (42.0, 11.2), (45.9, 11.2), (49.8, 11.2), (53.7, 11.2),
+        (61.5, 11.2), (65.4, 11.2), (69.3, 11.2),
+        (42.0, 15.8), (49.8, 15.8), (65.4, 15.8), (69.3, 15.8),
+        (42.0, 20.4), (45.9, 20.4), (53.7, 20.4), (57.6, 20.4),
+        (65.4, 20.4), (69.3, 20.4),
+    ]
+    flat = [v for pair in coords1 for v in pair]
+    expected_flat = [v for pair in expected for v in pair]
+    assert flat == pytest.approx(expected_flat)
 
 
 def test_production_config_mirrors_map_coords():
@@ -140,19 +156,50 @@ def test_world_clock_fields(world):
 def test_js_css_pins():
     with open("backend/app/web/app.js", "r") as f:
         js = f.read()
-    assert "/static/map/base.jpg" in js
+    assert "/static/map/world-island.jpg" in js
     assert "map-card" in js
     assert "map-badge" in js
     assert "time_scale" in js
+    # anchors expose the location name to assistive tech (visible "House N"
+    # labels stay suppressed, so houses rely on this aria-label)
+    assert '"aria-label": l.name' in js
+    # bottom-row anchors get the "above" class so their label flips
+    assert '? "above" : ""' in js
 
     with open("backend/app/web/style.css", "r") as f:
         css = f.read()
     assert ".map-card" in css
     assert ".anchor.player" in css
+    # labels hidden by default; revealed on hover/focus/current location
+    label_rule = css.split(".anchor .map-label {", 1)[1].split("}", 1)[0]
+    assert "display: none" in label_rule
+    assert ".anchor:hover .map-label" in css
+    assert ".anchor:focus-visible .map-label" in css
+    assert ".anchor.here .map-label" in css
+    # round-2 vision review: responsive single-column grid + compact anchors
+    assert "@media (max-width: 880px)" in css
+    grid_media = css.split("@media (max-width: 880px) {", 1)[1].split("\n}", 1)[0]
+    assert ".grid { grid-template-columns: 1fr" in grid_media
+    assert "@media (max-width: 520px)" in css
+    small_media = css.split("@media (max-width: 520px) {", 1)[1].split("\n}", 1)[0]
+    assert ".anchor .dot" in small_media
+    assert "width: 7px" in small_media
+    assert ".anchor .map-label" in small_media
+    assert "font-size: 9px" in small_media
+    # active/current anchor paints above the later-sibling house dots
+    assert ".anchor.here {\n  z-index: 3;\n}" in css
+    player_rule = css.split(".anchor.player {", 1)[1].split("}", 1)[0]
+    assert "z-index: 1" in player_rule
+    assert "pointer-events: none" in player_rule
+    assert "cursor: default" in player_rule
+    # labels for low anchors flip above the dot
+    above_rule = css.split(".anchor.above .map-label {", 1)[1].split("}", 1)[0]
+    assert "top: auto" in above_rule
+    assert "bottom: 10px" in above_rule
 
 
 def test_map_asset_exists():
-    assert os.path.exists("backend/app/web/static/map/base.jpg")
-    assert os.path.getsize("backend/app/web/static/map/base.jpg") < 1_000_000
+    assert os.path.exists("backend/app/web/static/map/world-island.jpg")
+    assert os.path.getsize("backend/app/web/static/map/world-island.jpg") < 1_000_000
     assert os.path.exists("backend/app/web/static/map/landing-island.jpg")
     assert os.path.getsize("backend/app/web/static/map/landing-island.jpg") < 1_000_000
