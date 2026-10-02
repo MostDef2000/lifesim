@@ -71,6 +71,7 @@ class TestStatic:
         assert '"/static/static/map/base.jpg"' in js.text
         assert 'api("/auth/register"' in js.text
         assert 'api("/auth/login"' in js.text
+        assert 'path !== "/auth/me"' in js.text
         assert "--bg" in css.text
         assert ".landing-shell" in css.text
         assert "@media (prefers-reduced-motion: reduce)" in css.text
