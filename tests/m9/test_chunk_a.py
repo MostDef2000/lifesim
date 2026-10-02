@@ -77,6 +77,8 @@ class TestStatic:
         assert 'api("/auth/login"' in js.text
         assert 'path !== "/auth/me"' in js.text
         assert "--bg" in css.text
+        assert "scale(1.02)" not in css.text
+        assert "object-fit: contain" in css.text
         assert ".landing-shell" in css.text
         assert "@media (prefers-reduced-motion: reduce)" in css.text
 
