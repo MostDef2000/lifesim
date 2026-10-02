@@ -59,8 +59,10 @@ class TestStatic:
     def test_static_assets(self, client):
         js = client.get("/static/app.js")
         css = client.get("/static/style.css")
+        landing_map = client.get("/static/static/map/base.jpg")
         assert js.status_code == 200
         assert css.status_code == 200
+        assert landing_map.status_code == 200
         assert "textContent" in js.text  # XSS-hygiene primitive present
         assert "Остров живёт, даже когда тебя нет." in js.text
         assert "Начать жизнь на Рейнеке" in js.text
