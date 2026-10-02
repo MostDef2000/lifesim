@@ -1,5 +1,7 @@
 """M9 Chunk A tests (SPEC 009-web, T3): static serving + API not shadowed."""
 import os
+import shutil
+import subprocess
 import sys
 
 import pytest
@@ -72,6 +74,20 @@ class TestStatic:
         assert "--bg" in css.text
         assert ".landing-shell" in css.text
         assert "@media (prefers-reduced-motion: reduce)" in css.text
+
+    def test_app_js_syntax(self):
+        node = shutil.which("node")
+        if node is None:
+            pytest.skip("node is not installed")
+        app_js = os.path.abspath(os.path.join(
+            os.path.dirname(__file__), "../../backend/app/web/app.js"
+        ))
+        subprocess.run(
+            [node, "--check", app_js],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
 
     def test_missing_static_404(self, client):
         assert client.get("/static/nope.js").status_code == 404
