@@ -1,5 +1,7 @@
 """M9 Chunk A tests (SPEC 009-web, T3): static serving + API not shadowed."""
 import os
+import shutil
+import subprocess
 import sys
 
 import pytest
@@ -52,15 +54,41 @@ class TestStatic:
         r = client.get("/")
         assert r.status_code == 200
         assert "ВЛ1: Рейнеке" in r.text
+        assert "живой остров" in r.text
+        assert "name=\"description\"" in r.text
         assert "/static/app.js" in r.text
 
     def test_static_assets(self, client):
         js = client.get("/static/app.js")
         css = client.get("/static/style.css")
+        landing_map = client.get("/static/static/map/base.jpg")
         assert js.status_code == 200
         assert css.status_code == 200
+        assert landing_map.status_code == 200
         assert "textContent" in js.text  # XSS-hygiene primitive present
+        assert "Остров живёт, даже когда тебя нет." in js.text
+        assert "Начать жизнь на Рейнеке" in js.text
+        assert '"/static/static/map/base.jpg"' in js.text
+        assert 'api("/auth/register"' in js.text
+        assert 'api("/auth/login"' in js.text
+        assert 'path !== "/auth/me"' in js.text
         assert "--bg" in css.text
+        assert ".landing-shell" in css.text
+        assert "@media (prefers-reduced-motion: reduce)" in css.text
+
+    def test_app_js_syntax(self):
+        node = shutil.which("node")
+        if node is None:
+            pytest.skip("node is not installed")
+        app_js = os.path.abspath(os.path.join(
+            os.path.dirname(__file__), "../../backend/app/web/app.js"
+        ))
+        subprocess.run(
+            [node, "--check", app_js],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
 
     def test_missing_static_404(self, client):
         assert client.get("/static/nope.js").status_code == 404
