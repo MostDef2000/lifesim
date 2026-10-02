@@ -99,6 +99,14 @@ def test_house_coord_determinism(tmp_path):
     assert all(x is not None and y is not None for x, y in coords1)
 
 
+def test_production_config_mirrors_map_coords():
+    """Prod config must carry default.yaml map coords: load_config reads only
+    the given YAML (no merge), a missing block silently seeds all x/y NULL."""
+    prod = load_config("config/production.yaml")
+    assert prod.locations.coords is not None
+    assert prod.locations.coords == SETTINGS.locations.coords
+
+
 def test_tasks_parameters(world):
     settings, factory, client = world
     with sessionmaker(bind=create_engine_factory(settings))() as session:
