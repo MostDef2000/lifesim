@@ -87,17 +87,90 @@ function viewAuth() {
   location.hash = "#/login";
   const mode = S.authMode === "register" ? "register" : "login";
   const isReg = mode === "register";
-  const err = el("div", { class: "err-text" });
-  const username = el("input", { autocomplete: "username" });
-  const password = el("input", { type: "password", autocomplete: "current-password" });
-  const email = el("input", { type: "email", placeholder: "you@example.com" });
-  const age = el("input", { type: "checkbox", style: "width:auto" });
-  const submit = el("button", {
-    class: "primary", onclick: async () => {
+  const showAuth = !!S.authPanel;
+
+  function openAuth(nextMode) {
+    S.authMode = nextMode;
+    S.authPanel = true;
+    viewAuth();
+  }
+
+  function closeAuth() {
+    S.authPanel = false;
+    viewAuth();
+  }
+
+  const top = el("header", { class: "landing-nav" },
+    el("a", { class: "landing-brand", href: "#/login", onclick: (ev) => {
+      ev.preventDefault();
+      closeAuth();
+    } },
+    el("span", { class: "landing-brand-mark", "aria-hidden": "true" }, "Р"),
+    el("span", {}, "ВЛ1: Рейнеке")),
+    el("div", { class: "landing-nav-actions" },
+      el("span", { class: "landing-alpha" }, "Ранняя alpha · 18+"),
+      el("button", { class: "landing-link-button", type: "button", onclick: () => openAuth("login") }, "Войти")));
+
+  const heroCopy = el("div", { class: "landing-copy" },
+    el("p", { class: "landing-kicker" }, "Persistent life-sim · остров Рейнеке"),
+    el("h1", { class: "landing-title" }, "Остров живёт, даже когда тебя нет."),
+    el("p", { class: "landing-lede" },
+      "Небольшое общество автономных жителей живёт в едином мире: работает, перемещается, общается, запоминает встречи и реагирует на происходящее."),
+    el("div", { class: "landing-hero-actions" },
+      el("button", { class: "landing-cta", type: "button", onclick: () => openAuth("register") }, "Начать жизнь на Рейнеке"),
+      el("button", { class: "landing-secondary", type: "button", onclick: () => openAuth("login") }, "У меня уже есть персонаж")),
+    el("p", { class: "landing-note" }, "Ранняя публичная alpha. Мир и интерфейс продолжают развиваться."));
+
+  const mapVisual = el("div", { class: "landing-map-card", "aria-label": "Карта острова Рейнеке" },
+    el("img", { src: "/static/map/base.jpg", alt: "Карта острова Рейнеке", class: "landing-map-image" }),
+    el("div", { class: "landing-map-vignette", "aria-hidden": "true" }),
+    el("div", { class: "landing-map-caption" },
+      el("span", { class: "landing-map-dot", "aria-hidden": "true" }),
+      el("span", {}, "Reineke Island · живой мир")));
+
+  const features = el("section", { class: "landing-features", "aria-label": "Что уже есть в игре" },
+    el("article", { class: "landing-feature" },
+      el("span", { class: "landing-feature-index" }, "01"),
+      el("h2", {}, "Живой остров"),
+      el("p", {}, "Жители работают, перемещаются, покупают вещи и продолжают жить внутри общей симуляции.")),
+    el("article", { class: "landing-feature" },
+      el("span", { class: "landing-feature-index" }, "02"),
+      el("h2", {}, "Люди, которые помнят"),
+      el("p", {}, "У NPC есть отношения, память и свободный диалог. С ними можно говорить своими словами.")),
+    el("article", { class: "landing-feature" },
+      el("span", { class: "landing-feature-index" }, "03"),
+      el("h2", {}, "Твоя жизнь на Рейнеке"),
+      el("p", {}, "Создай персонажа, исследуй остров, работай, общайся и выбирай режим управления своей жизнью.")));
+
+  const bottomCta = el("section", { class: "landing-bottom-cta" },
+    el("div", {},
+      el("p", { class: "landing-kicker" }, "Первый день начинается здесь"),
+      el("h2", {}, "Поселись на Рейнеке.")),
+    el("button", { class: "landing-cta", type: "button", onclick: () => openAuth("register") }, "Создать персонажа"));
+
+  const landing = el("main", { class: "landing-shell" },
+    top,
+    el("section", { class: "landing-hero" }, heroCopy, mapVisual),
+    features,
+    bottomCta,
+    el("footer", { class: "landing-footer" },
+      el("span", {}, "ВЛ1: Рейнеке"),
+      el("span", {}, "18+ · ранняя публичная alpha")));
+
+  if (showAuth) {
+    const err = el("div", { class: "err-text landing-auth-error", role: "alert" });
+    const username = el("input", { id: "auth-username", name: "username", autocomplete: "username", required: "required" });
+    const password = el("input", { id: "auth-password", name: "password", type: "password",
+      autocomplete: isReg ? "new-password" : "current-password", required: "required" });
+    const email = el("input", { id: "auth-email", name: "email", type: "email", autocomplete: "email", placeholder: "you@example.com" });
+    const age = el("input", { id: "auth-age", name: "age_confirmed", type: "checkbox", class: "landing-checkbox" });
+
+    const form = el("form", { class: "landing-auth-form", onsubmit: async (ev) => {
+      ev.preventDefault();
       err.textContent = "";
       try {
         if (isReg) {
-          if (!age.checked) { err.textContent = "Подтвердите 18+"; return; }
+          if (!age.checked) { err.textContent = "Подтвердите, что вам 18 лет или больше."; return; }
           await api("/auth/register", { method: "POST", body: {
             username: username.value, email: email.value,
             password: password.value, age_confirmed: true } });
@@ -106,29 +179,39 @@ function viewAuth() {
           username: username.value, password: password.value } });
         S.user = await api("/auth/me");
         S.character = null;
+        S.authPanel = false;
         location.hash = "#/world";
         route();
       } catch (e) { err.textContent = e.message; }
-    },
-  }, isReg ? "Создать аккаунт" : "Войти");
-  app.replaceChildren(el("div", { class: "authbox panel" },
-    el("h1", {}, "ВЛ1: Рейнеке"),
-    el("p", { class: "muted" }, "Симулятор жизни на острове Рейнеке. 18+"),
-    el("label", {}, "Имя пользователя"), username,
-    isReg && el("label", {}, "Email"), isReg && email,
-    el("label", {}, "Пароль"), password,
-    isReg && el("label", { style: "display:flex;gap:6px;align-items:center" },
-      age, "Мне 18 лет и больше"),
-    el("div", { style: "margin-top:10px" }, submit),
-    err,
-    el("p", {}, el("a", {
-      href: "#", onclick: (ev) => {
-        ev.preventDefault();
-        S.authMode = isReg ? "login" : "register";
-        viewAuth();
-      },
-    }, isReg ? "У меня уже есть аккаунт" : "Регистрация")),
-  ));
+    } },
+      el("div", { class: "landing-auth-heading" },
+        el("div", {},
+          el("p", { class: "landing-kicker" }, isReg ? "Новый житель" : "Возвращение на остров"),
+          el("h2", {}, isReg ? "Начать жизнь на Рейнеке" : "Войти в Рейнеке")),
+        el("button", { class: "landing-auth-close", type: "button", "aria-label": "Закрыть", onclick: closeAuth }, "×")),
+      el("p", { class: "landing-auth-intro" },
+        isReg ? "Создайте аккаунт. После входа вы сможете создать своего персонажа." : "Войдите в существующий аккаунт и вернитесь к своему персонажу."),
+      el("label", { for: "auth-username" }, "Имя пользователя"), username,
+      isReg && el("label", { for: "auth-email" }, "Email"), isReg && email,
+      el("label", { for: "auth-password" }, "Пароль"), password,
+      isReg && el("label", { class: "landing-age-row", for: "auth-age" }, age,
+        el("span", {}, "Мне 18 лет или больше")),
+      el("button", { class: "landing-cta landing-auth-submit", type: "submit" },
+        isReg ? "Создать аккаунт" : "Войти"),
+      err,
+      el("button", { class: "landing-auth-switch", type: "button", onclick: () => openAuth(isReg ? "login" : "register") },
+        isReg ? "У меня уже есть аккаунт" : "Нет аккаунта? Зарегистрироваться"));
+
+    const dialog = el("section", { class: "landing-auth-panel", role: "dialog", "aria-modal": "true",
+      "aria-label": isReg ? "Регистрация" : "Вход" }, form);
+    const backdrop = el("div", { class: "landing-auth-backdrop", onclick: (ev) => {
+      if (ev.target === ev.currentTarget) closeAuth();
+    } }, dialog);
+    landing.append(backdrop);
+    setTimeout(() => username.focus(), 0);
+  }
+
+  app.replaceChildren(landing);
 }
 
 /* ---------- character creation ---------- */
