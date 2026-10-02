@@ -69,8 +69,10 @@ class TestStatic:
         assert "Остров живёт, даже когда тебя нет." in js.text
         assert "Начать жизнь на Рейнеке" in js.text
         assert '"/static/static/map/base.jpg"' in js.text
-        assert '"/static/map/base.jpg"' not in js.text   # broken pre-mount URL must not exist (quoted form is unambiguous: correct URL contains broken one as substring, never right after a quote)
-        assert js.text.count('"/static/static/map/base.jpg"') >= 2   # landing + authenticated map card both use the served URL
+        # quoted broken URL must not exist; quoting makes the pin unambiguous
+        assert '"/static/map/base.jpg"' not in js.text
+        # landing + authenticated map card both use the served URL
+        assert js.text.count('"/static/static/map/base.jpg"') >= 2
         assert 'api("/auth/register"' in js.text
         assert 'api("/auth/login"' in js.text
         assert 'path !== "/auth/me"' in js.text
