@@ -41,7 +41,22 @@ def seed_world(session: Session, settings, world_id: str) -> None:
         session.flush()
         key_to_id[loc_key] = loc.id
 
-    # Now create the N houses
+    # Now create the N houses.
+    # Sparse town grid: 8 columns (3.9% ≈ 16.5px) × 4 rows (4.6% ≈ 16.1px),
+    # anchored at the config origin (42.0, 6.6). Houses are assigned to the
+    # free cells in the explicit row-major list below — deterministic, no RNG.
+    # Seven cells hold POIs and one cell (col 5, row 0 → 61.5, 6.6) stays
+    # clear for the pier, leaving exactly 24 free cells for 24 houses.
+    col_step = 3.9
+    row_step = 4.6
+    house_cells = [
+        (0, 0), (1, 0), (2, 0), (3, 0), (4, 0), (6, 0), (7, 0),
+        (0, 1), (1, 1), (2, 1), (3, 1), (5, 1), (6, 1), (7, 1),
+        (0, 2), (2, 2), (6, 2), (7, 2),
+        (0, 3), (1, 3), (3, 3), (4, 3), (6, 3), (7, 3),
+    ]
+    # Occupied/skipped cells: (4,1)=settlement, (1,2)=home, (3,2)=kitchen,
+    # (4,2)=well, (5,2)=storage, (2,3)=workshop, (5,3)=shop, (5,0)=pier gap.
     origin = None
     if settings.locations.coords and settings.locations.coords.houses:
         origin = settings.locations.coords.houses.origin
@@ -51,8 +66,9 @@ def seed_world(session: Session, settings, world_id: str) -> None:
 
         x, y = None, None
         if origin:
-            x = origin.x + ((i * 13) % 20) * 0.45
-            y = origin.y - ((i * 7) % 10) * 0.5
+            col, row = house_cells[i % len(house_cells)]
+            x = origin.x + col * col_step
+            y = origin.y + row * row_step
 
         house = Location(
             world_id=world_id,

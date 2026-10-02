@@ -89,7 +89,7 @@ textarea {
 
 .map-card {
   position: relative;
-  aspect-ratio: 16/9;
+  aspect-ratio: 742 / 616;
   border-radius: 10px;
   overflow: hidden;
   border: 1px solid var(--line);
@@ -121,8 +121,10 @@ textarea {
   border-radius: 50%;
   border: 2px solid #fff;
   background: var(--panel);
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.55);
 }
 .anchor .map-label {
+  display: none;
   position: absolute;
   top: 10px;
   left: 50%;
@@ -133,16 +135,36 @@ textarea {
   color: #fff;
   text-shadow: 0 1px 2px #000;
 }
+.anchor:hover .map-label,
+.anchor:focus-visible .map-label,
+.anchor.here .map-label {
+  display: block;
+}
+.anchor.above .map-label {
+  top: auto;
+  bottom: 10px;
+}
 .anchor.here .dot {
   width: 12px;
   height: 12px;
   background: var(--ok);
+}
+.anchor:hover,
+.anchor:focus-visible,
+.anchor.here {
+  z-index: 3;
 }
 .anchor.player .dot {
   width: 10px;
   height: 10px;
   background: #d33;
   border: 2px solid #fff;
+  box-shadow: 0 0 0 3px var(--panel), 0 0 0 5px var(--ok);
+}
+.anchor.player {
+  z-index: 1;
+  pointer-events: none;
+  cursor: default;
 }
 .dot.npc {
   position: absolute;
@@ -621,6 +643,15 @@ body.landing-mode #app {
 .landing-shell a:focus-visible {
   outline: 3px solid rgba(229, 214, 182, 0.58);
   outline-offset: 3px;
+}
+
+@media (max-width: 880px) {
+  .grid { grid-template-columns: 1fr; }
+}
+
+@media (max-width: 520px) {
+  .anchor .dot { width: 7px; height: 7px; }
+  .anchor .map-label { font-size: 9px; }
 }
 
 @media (max-width: 960px) {

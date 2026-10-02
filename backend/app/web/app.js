@@ -452,13 +452,14 @@ function renderWorld(locs, tasksData) {
   
   // Map Card implementation
   const mapCard = el("div", { class: "map-card" },
-    el("img", { class: "map-base", src: "/static/static/map/base.jpg", alt: "" }),
+    el("img", { class: "map-base", src: "/static/static/map/world-island.jpg", alt: "" }),
     el("div", { class: "map-anchors", id: "map-anchors" },
       ...locs.filter(l => l.x !== null && l.type !== "island").map(l => {
         const isHere = l.id === ch.location_id;
         return el("button", { 
-          class: `anchor ${isHere ? "here" : ""}`, 
+          class: `anchor ${isHere ? "here" : ""} ${l.y >= 20 ? "above" : ""}`, 
           style: `left:${l.x}%; top:${l.y}%`,
+          "aria-label": l.name,
           dataset: { locId: l.id },
           onclick: () => moveTo(l) 
         }, 

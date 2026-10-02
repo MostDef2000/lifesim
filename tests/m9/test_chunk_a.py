@@ -61,18 +61,21 @@ class TestStatic:
     def test_static_assets(self, client):
         js = client.get("/static/app.js")
         css = client.get("/static/style.css")
-        landing_map = client.get("/static/static/map/base.jpg")
+        world_map = client.get("/static/static/map/world-island.jpg")
         assert js.status_code == 200
         assert css.status_code == 200
-        assert landing_map.status_code == 200
+        assert world_map.status_code == 200
         assert "textContent" in js.text  # XSS-hygiene primitive present
         assert "Остров живёт, даже когда тебя нет." in js.text
         assert "Начать жизнь на Рейнеке" in js.text
-        assert '"/static/static/map/base.jpg"' in js.text
-        # quoted broken URL must not exist; quoting makes the pin unambiguous
+        assert '"/static/static/map/world-island.jpg"' in js.text
+        # quoted broken URLs must not exist; quoting makes the pin unambiguous
+        assert '"/static/map/world-island.jpg"' not in js.text
+        assert '"/static/static/map/base.jpg"' not in js.text
         assert '"/static/map/base.jpg"' not in js.text
-        # only the authenticated map card now uses the served base URL
-        assert js.text.count('"/static/static/map/base.jpg"') == 1
+        # only the authenticated map card now uses the served world URL
+        assert js.text.count('"/static/static/map/world-island.jpg"') == 1
+        assert js.text.count('"/static/static/map/base.jpg"') == 0
         # landing hero island asset
         assert '"/static/static/map/landing-island.jpg"' in js.text
         assert 'api("/auth/register"' in js.text
