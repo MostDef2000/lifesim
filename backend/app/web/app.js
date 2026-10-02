@@ -128,7 +128,7 @@ function viewAuth() {
     el("p", { class: "landing-note" }, "Ранняя публичная alpha. Мир и интерфейс продолжают развиваться."));
 
   const mapVisual = el("div", { class: "landing-map-card", "aria-label": "Карта острова Рейнеке" },
-    el("img", { src: "/static/static/map/base.jpg", alt: "Карта острова Рейнеке", class: "landing-map-image" }),
+    el("img", { src: "/static/static/map/landing-island.jpg", alt: "Карта острова Рейнеке", class: "landing-map-image" }),
     el("div", { class: "landing-map-vignette", "aria-hidden": "true" }),
     el("div", { class: "landing-map-caption" },
       el("span", { class: "landing-map-dot", "aria-hidden": "true" }),

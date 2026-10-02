@@ -71,8 +71,10 @@ class TestStatic:
         assert '"/static/static/map/base.jpg"' in js.text
         # quoted broken URL must not exist; quoting makes the pin unambiguous
         assert '"/static/map/base.jpg"' not in js.text
-        # landing + authenticated map card both use the served URL
-        assert js.text.count('"/static/static/map/base.jpg"') >= 2
+        # only the authenticated map card now uses the served base URL
+        assert js.text.count('"/static/static/map/base.jpg"') == 1
+        # landing hero island asset
+        assert '"/static/static/map/landing-island.jpg"' in js.text
         assert 'api("/auth/register"' in js.text
         assert 'api("/auth/login"' in js.text
         assert 'path !== "/auth/me"' in js.text
