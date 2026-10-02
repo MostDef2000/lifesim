@@ -154,3 +154,5 @@ def test_js_css_pins():
 def test_map_asset_exists():
     assert os.path.exists("backend/app/web/static/map/base.jpg")
     assert os.path.getsize("backend/app/web/static/map/base.jpg") < 1_000_000
+    assert os.path.exists("backend/app/web/static/map/landing-island.jpg")
+    assert os.path.getsize("backend/app/web/static/map/landing-island.jpg") < 1_000_000
