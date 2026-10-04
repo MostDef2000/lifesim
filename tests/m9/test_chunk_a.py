@@ -57,17 +57,22 @@ class TestStatic:
         assert "живой остров" in r.text
         assert "name=\"description\"" in r.text
         assert "/static/app.js" in r.text
+        assert 'content="#F5EBD9"' in r.text
 
     def test_static_assets(self, client):
         js = client.get("/static/app.js")
         css = client.get("/static/style.css")
         world_map = client.get("/static/static/map/world-island.jpg")
+        hero = client.get("/static/static/landing/concierge-cat-hero.webp")
         assert js.status_code == 200
         assert css.status_code == 200
         assert world_map.status_code == 200
+        assert hero.status_code == 200
         assert "textContent" in js.text  # XSS-hygiene primitive present
         assert "Остров живёт, даже когда тебя нет." in js.text
         assert "Начать жизнь на Рейнеке" in js.text
+        assert "Кошка-консьержка" in js.text
+        assert "Добро пожаловать на Рейнеке" in js.text
         assert '"/static/static/map/world-island.jpg"' in js.text
         # quoted broken URLs must not exist; quoting makes the pin unambiguous
         assert '"/static/map/world-island.jpg"' not in js.text
@@ -76,15 +81,18 @@ class TestStatic:
         # only the authenticated map card now uses the served world URL
         assert js.text.count('"/static/static/map/world-island.jpg"') == 1
         assert js.text.count('"/static/static/map/base.jpg"') == 0
-        # landing hero island asset
-        assert '"/static/static/map/landing-island.jpg"' in js.text
+        # landing hero asset (webp); the retired island map is gone
+        assert '"/static/static/landing/concierge-cat-hero.webp"' in js.text
+        assert '"/static/map/landing-island.jpg"' not in js.text
+        assert '"/static/static/map/landing-island.jpg"' not in js.text
         assert 'api("/auth/register"' in js.text
         assert 'api("/auth/login"' in js.text
         assert 'path !== "/auth/me"' in js.text
         assert "--bg" in css.text
         assert "scale(1.02)" not in css.text
-        assert "object-fit: contain" in css.text
         assert ".landing-shell" in css.text
+        assert ".landing-scrim" in css.text
+        assert "object-position" in css.text
         assert "@media (prefers-reduced-motion: reduce)" in css.text
 
     def test_app_js_syntax(self):
