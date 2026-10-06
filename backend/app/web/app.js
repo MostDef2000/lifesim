@@ -5,7 +5,10 @@
 const app = document.getElementById("app");
 const toastEl = document.getElementById("toast");
 const S = { user: null, character: null, world: null, ws: null, wsTries: 0,
-  feed: [], cursor: 0, pollTimer: null, canonicalPortraitId: null };
+  feed: [], cursor: 0, pollTimer: null, canonicalPortraitId: null,
+  mapLod: "island", mapQuality: "balanced",
+  mapReducedMotion: window.matchMedia("(prefers-reduced-motion: reduce)").matches,
+  mapFocusLocationId: null, mapLocations: [] };
 
 /* ---------- helpers ---------- */
 
@@ -343,7 +346,7 @@ async function generateScene(container) {
 
 function sceneBlock() {
   const status = el("div", { class: "scene-status muted" });
-  const box = el("div", { class: "panel portrait" }, el("h2", {}, "Сцена"), status);
+  const box = el("div", { class: "panel portrait", id: "scene-view" }, el("h2", {}, "Сцена"), status);
   box.append(el("button", { onclick: () => generateScene(box) }, "Сгенерировать сцену"));
   return box;
 }
@@ -412,27 +415,231 @@ function needBar(label, value) {
     el("div", { class: "bar" }, el("div", { style: `width:${v}%` })));
 }
 
+const MAP_LOW_MARKER_BUDGET = 120;
+
+function mapTimePhase(gameTimestamp) {
+  const minute = ((gameTimestamp || 0) % 1440 + 1440) % 1440;
+  if (minute < 360 || minute >= 1200) return "night";
+  if (minute < 480) return "dawn";
+  if (minute >= 1020) return "dusk";
+  return "day";
+}
+
+function mapDistance(a, b) {
+  if (!a || !b || a.x === null || a.y === null || b.x === null || b.y === null) return Infinity;
+  return Math.hypot(a.x - b.x, a.y - b.y);
+}
+
+function visibleMapLocations(locs, focus) {
+  const positioned = locs.filter(l => l.x !== null && l.y !== null && l.type !== "island");
+  if (S.mapLod === "island") return positioned.filter(l => l.type !== "house");
+  if (!focus || focus.x === null || focus.y === null) return positioned;
+  const radius = S.mapLod === "region" ? 28 : 14;
+  return positioned.filter(l => mapDistance(l, focus) <= radius);
+}
+
+function mapNpcMarkers(visibleLocs) {
+  const markers = [];
+  for (const loc of visibleLocs) {
+    const npcs = (loc.occupants || []).filter(o => o.kind === "npc");
+    if (!npcs.length) continue;
+
+    if (S.mapLod !== "local" || S.mapQuality === "low-mobile") {
+      markers.push(el("span", {
+        class: "map-dynamic-marker npc-cluster",
+        style: `left:${loc.x}%; top:${loc.y}%`,
+        "data-location-id": String(loc.id),
+        title: `${npcs.length} NPC · ${loc.name}`,
+      }, String(npcs.length)));
+      continue;
+    }
+
+    npcs.forEach((npc, index) => {
+      // Presentation-only screen offset. Authoritative position remains location_id.
+      const angle = (index * 137.5) * Math.PI / 180;
+      const radius = 10 + Math.floor(index / 6) * 5;
+      const dx = Math.round(Math.cos(angle) * radius);
+      const dy = Math.round(Math.sin(angle) * radius);
+      markers.push(el("span", {
+        class: "map-dynamic-marker npc-person",
+        style: `left:${loc.x}%; top:${loc.y}%; --npc-dx:${dx}px; --npc-dy:${dy}px`,
+        "data-character-id": npc.id,
+        "data-location-id": String(loc.id),
+        title: `${npc.name} · ${loc.name}`,
+      }, el("span", { class: "npc-glyph", "aria-hidden": "true" })));
+    });
+  }
+  return markers;
+}
+
+function mapEventMarkers(visibleLocs) {
+  const visibleIds = new Set(visibleLocs.map(l => l.id));
+  const locations = new Map(visibleLocs.map(l => [l.id, l]));
+  const maxEvents = S.mapQuality === "low-mobile" ? 6 : (S.mapLod === "local" ? 16 : 10);
+  const recent = S.feed.filter(ev => ev.location_id && visibleIds.has(ev.location_id)).slice(-maxEvents);
+  const grouped = new Map();
+  for (const ev of recent) {
+    const list = grouped.get(ev.location_id) || [];
+    list.push(ev);
+    grouped.set(ev.location_id, list);
+  }
+  return [...grouped.entries()].map(([locationId, events]) => {
+    const loc = locations.get(locationId);
+    const last = events[events.length - 1];
+    return el("span", {
+      class: "map-dynamic-marker event-marker",
+      style: `left:${loc.x}%; top:${loc.y}%`,
+      "data-location-id": String(locationId),
+      title: `${last.event_type || "Событие"} · ${loc.name}`,
+    }, events.length > 1 ? String(events.length) : "!");
+  });
+}
+
+function buildLivingMap(locs) {
+  S.mapLocations = locs;
+  const ch = S.character;
+  const currentLoc = locs.find(l => l.id === ch.location_id);
+  if (!S.mapFocusLocationId && currentLoc) S.mapFocusLocationId = currentLoc.id;
+  const focus = locs.find(l => l.id === S.mapFocusLocationId) || currentLoc;
+  const visibleLocs = visibleMapLocations(locs, focus);
+  const timePhase = mapTimePhase(S.world && S.world.game_timestamp);
+  const raining = !!(S.weather && S.weather.enabled && S.weather.precipitation > 0.5);
+  const foggy = !!(S.weather && S.weather.enabled && S.weather.visibility < 1.0);
+  const night = timePhase === "night";
+  const reduced = S.mapReducedMotion ? "reduced-motion" : "";
+  const qualityClass = `quality-${S.mapQuality}`;
+
+  const locationAnchors = visibleLocs.map(l => {
+    const isHere = l.id === ch.location_id;
+    return el("button", {
+      class: `anchor location-anchor ${isHere ? "here" : ""} ${l.y >= 20 ? "above" : ""}`,
+      style: `left:${l.x}%; top:${l.y}%`,
+      "aria-label": l.name,
+      "data-loc-id": String(l.id),
+      onclick: () => moveTo(l),
+    },
+      el("span", { class: "dot" }),
+      (!/^House \d+$/.test(l.name) ? el("span", { class: "map-label" }, l.name) : null),
+    );
+  });
+
+  const dynamicMarkers = [...mapNpcMarkers(visibleLocs), ...mapEventMarkers(visibleLocs)];
+  const markerCount = locationAnchors.length + dynamicMarkers.length + (currentLoc ? 1 : 0);
+
+  const focusStyle = focus && focus.x !== null
+    ? `--map-focus-x:${focus.x}%; --map-focus-y:${focus.y}%`
+    : "--map-focus-x:50%; --map-focus-y:50%";
+
+  const mapCard = el("div", {
+    class: `map-card lod-${S.mapLod} time-${timePhase} ${raining ? "is-rain" : ""} ${foggy ? "is-fog" : ""} ${night ? "is-night" : ""} ${qualityClass} ${reduced}`,
+    style: focusStyle,
+    "data-profile-markers": String(markerCount),
+    "data-profile-budget": String(MAP_LOW_MARKER_BUDGET),
+  },
+    el("div", { class: "map-stage" },
+      el("img", { class: "map-base", src: "/static/static/map/world-island.jpg", alt: "" }),
+      el("div", { class: "map-time-tint", "aria-hidden": "true" }),
+      el("div", { class: "map-night-lights", "aria-hidden": "true" }),
+      el("div", { class: "map-rain", "aria-hidden": "true" }),
+      el("div", { class: "map-fog", "aria-hidden": "true" }),
+      el("div", { class: "map-anchors", id: "map-anchors" },
+        ...locationAnchors,
+        ...dynamicMarkers,
+        currentLoc && currentLoc.x !== null ? el("span", {
+          class: "anchor player",
+          id: "player-marker",
+          style: `left:${currentLoc.x}%; top:${currentLoc.y}%`,
+          "data-location-id": String(currentLoc.id),
+          title: "Вы здесь",
+        }, el("span", { class: "dot" })) : null,
+      ),
+    ),
+    el("div", { id: "map-badge", class: "map-badge hidden" }, ""),
+  );
+
+  const lodButtons = [
+    ["island", "Остров"],
+    ["region", "Район"],
+    ["local", "Локально"],
+  ].map(([value, label]) => el("button", {
+    class: S.mapLod === value ? "active" : "",
+    onclick: () => setMapLod(value),
+  }, label));
+
+  const qualityButtons = [
+    ["high", "High"],
+    ["balanced", "Balanced"],
+    ["low-mobile", "Low-Mobile"],
+  ].map(([value, label]) => el("button", {
+    class: S.mapQuality === value ? "active" : "",
+    onclick: () => setMapQuality(value),
+  }, label));
+
+  const reducedToggle = el("label", { class: "map-reduced-toggle" },
+    el("input", {
+      type: "checkbox",
+      ...(S.mapReducedMotion ? { checked: "checked" } : {}),
+      onchange: (event) => setMapReducedMotion(event.target.checked),
+    }),
+    "Reduced Motion",
+  );
+
+  const sceneHandoff = S.mapLod === "local" ? el("button", {
+    onclick: () => {
+      const scene = document.getElementById("scene-view");
+      if (scene) scene.scrollIntoView({ behavior: S.mapReducedMotion ? "auto" : "smooth", block: "start" });
+    },
+  }, "Открыть Scene") : null;
+
+  return el("div", { class: "living-map" },
+    el("div", { class: "map-toolbar", "aria-label": "Масштаб карты" }, ...lodButtons, sceneHandoff),
+    el("div", { class: "map-toolbar map-quality", "aria-label": "Качество карты" },
+      ...qualityButtons, reducedToggle),
+    mapCard,
+    el("div", { class: "map-status muted" },
+      `${S.mapLod === "island" ? "Остров" : S.mapLod === "region" ? "Район" : "Локально"} · ${dayTime((S.world && S.world.game_timestamp) || 0)}`,
+      S.weather && S.weather.enabled ? ` · ${S.weather.description}` : "",
+      S.mapQuality === "low-mobile" ? ` · markers ${markerCount}/${MAP_LOW_MARKER_BUDGET}` : ""),
+  );
+}
+
+function rerenderLivingMap() {
+  const host = document.getElementById("living-map-host");
+  if (host && S.mapLocations.length) host.replaceChildren(buildLivingMap(S.mapLocations));
+}
+
+function setMapLod(lod) {
+  if (!["island", "region", "local"].includes(lod)) return;
+  S.mapLod = lod;
+  if (S.character) S.mapFocusLocationId = S.character.location_id;
+  rerenderLivingMap();
+}
+
+function setMapQuality(quality) {
+  if (!["high", "balanced", "low-mobile"].includes(quality)) return;
+  S.mapQuality = quality;
+  rerenderLivingMap();
+}
+
+function setMapReducedMotion(enabled) {
+  S.mapReducedMotion = !!enabled;
+  rerenderLivingMap();
+}
+
 function renderWorld(locs, tasksData) {
   const ch = S.character;
   const needs = ch.needs || {};
-  
-  // LOD1: if ANY keyed POI has x === null (pre-coords DB) → fallback to the
-  // old location list. "home" is excluded: its Location type is "house"
-  // (name "Residential House"), so type/name matching would never hit it;
-  // it still renders as a labeled anchor when it has coords.
+
+  // Keep the A1 fallback when canonical map coordinates are unavailable.
   const keyedPois = ["settlement", "shop", "workshop", "kitchen", "storage", "well", "pier"];
   const poiMap = {};
   locs.forEach(l => {
-    // Match by type first, then by name
     for (const k of keyedPois) {
-      if (l.type === k || (l.name && l.name.toLowerCase().includes(k))) {
-        poiMap[k] = l;
-      }
+      if (l.type === k || (l.name && l.name.toLowerCase().includes(k))) poiMap[k] = l;
     }
   });
-  
   const mapReady = keyedPois.every(k => poiMap[k] && poiMap[k].x !== null);
-  
+
   const feed = el("div", { class: "panel feed", id: "feed" },
     el("h2", {}, "События"),
     ...S.feed.slice(-40).reverse().map(feedRow));
@@ -441,62 +648,25 @@ function renderWorld(locs, tasksData) {
       el("button", { onclick: () => doAction(a) }, a)));
   const extBtn = el("button", { onclick: () => viewExternal() },
     "Поездка во Владивосток");
-  
+
   const taskRows = [];
   if (tasksData) {
     const planned = tasksData.planned || [];
     const active = tasksData.active || [];
     [...planned, ...active].forEach(t => {
       taskRows.push(el("div", { class: "task" },
-        el("span", { class: "status" }, t.status), 
+        el("span", { class: "status" }, t.status),
         el("span", {}, t.task_type || "")));
     });
   }
-  
+
   const portraitBox = portraitBlock();
   const sceneBox = sceneBlock();
-  
-  // Map Card implementation
-  const mapCard = el("div", { class: "map-card" },
-    el("img", { class: "map-base", src: "/static/static/map/world-island.jpg", alt: "" }),
-    el("div", { class: "map-anchors", id: "map-anchors" },
-      ...locs.filter(l => l.x !== null && l.type !== "island").map(l => {
-        const isHere = l.id === ch.location_id;
-        return el("button", { 
-          class: `anchor ${isHere ? "here" : ""} ${l.y >= 20 ? "above" : ""}`, 
-          style: `left:${l.x}%; top:${l.y}%`,
-          "aria-label": l.name,
-          dataset: { locId: l.id },
-          onclick: () => moveTo(l) 
-        }, 
-          el("span", { class: "dot" }),
-          (!/^House \d+$/.test(l.name) ? el("span", { class: "map-label" }, l.name) : null),
-          (l.occupants_count > 0 ? el("span", { class: "dot npc" }) : null)
-        );
-      }),
-
-      // Player marker
-      el("span", { 
-        class: "anchor player", 
-        id: "player-marker",
-        style: "left:50%; top:50%" // corrected below from ch.location_id
-      }, el("span", { class: "dot" }))
-    ),
-    // External trip badge
-    el("div", { id: "map-badge", class: "map-badge hidden" }, "")
-  );
-
-  // Update player marker pos based on current location immediately
-  const currentLoc = locs.find(l => l.id === ch.location_id);
-  if (currentLoc && currentLoc.x !== null) {
-    const marker = mapCard.querySelector("#player-marker");
-    if (marker) marker.style.left = `${currentLoc.x}%`;
-    if (marker) marker.style.top = `${currentLoc.y}%`;
-  }
+  S.mapLocations = locs;
 
   const locsPanel = el("div", { class: "panel" },
     el("h2", {}, "Карта"),
-    mapReady ? mapCard : el("div", { class: "locs" },
+    mapReady ? el("div", { id: "living-map-host" }, buildLivingMap(locs)) : el("div", { class: "locs" },
       ...locs.map((loc) => el("div", {
         class: `loc ${loc.id === ch.location_id ? "here" : ""}`,
         onclick: () => moveTo(loc),
@@ -526,7 +696,6 @@ function renderWorld(locs, tasksData) {
         sceneBox,
         feed)));
 }
-
 
 async function doAction(actionType, params = {}) {
   try {
@@ -644,33 +813,23 @@ async function pollEvents() {
       }
     }
     
-    // LOD1 Living Map: update marker and anchors
+    // A2 Living Map: refresh authoritative read state, then rebuild presentation.
+    const previousDay = S.world ? S.world.day : null;
     const character = await api(`/characters/${S.character.id}`);
     const world = await api("/world");
     const locs = await api("/locations");
-    
+    if (previousDay !== world.day) {
+      try { S.weather = await api("/weather"); } catch { /* keep last readable weather */ }
+    }
+    S.character = { ...S.character, ...character };
+    S.world = world;
+    S.mapLocations = locs;
+    const clock = document.getElementById("clock");
+    if (clock) clock.textContent = dayTime(world.game_timestamp);
+    rerenderLivingMap();
+
     const marker = document.getElementById("player-marker");
     const badge = document.getElementById("map-badge");
-    const anchors = document.querySelectorAll(".anchor");
-    
-    if (marker) {
-      const currentLoc = locs.find(l => l.id === character.location_id);
-      if (currentLoc && currentLoc.x !== null) {
-        marker.style.left = `${currentLoc.x}%`;
-        marker.style.top = `${currentLoc.y}%`;
-      }
-    }
-    
-    if (anchors.length) {
-      anchors.forEach(a => {
-        const locId = a.dataset.locId;
-        if (!locId) return;
-        const loc = locs.find(l => l.id == locId);
-        if (loc) {
-          a.className = `anchor ${loc.id === character.location_id ? "here" : ""}`;
-        }
-      });
-    }
 
     // Handle Tasks (MOVE and TRAVEL_EXTERNAL)
     if (S.character.is_owner) {
