@@ -1,5 +1,6 @@
 """A2 Living Map Slice 2 (issue #85) — authoritative markers, LOD and presets."""
 import os
+import subprocess
 import sys
 
 import pytest
@@ -90,6 +91,16 @@ def test_low_mobile_seeded_marker_budget(world):
     )
     conservative_upper_bound = len(positioned) + npc_locations + 6 + 1
     assert conservative_upper_bound <= LOW_MARKER_BUDGET
+
+
+def test_app_js_syntax_with_node():
+    result = subprocess.run(
+        ["node", "--check", "backend/app/web/app.js"],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr
 
 
 def test_a2_frontend_contract_pins():
