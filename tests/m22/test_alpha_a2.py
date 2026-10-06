@@ -11,7 +11,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../../.."))
 
 from app.api.app import create_app
 from app.config.config import load_config
-from app.db.models import bootstrap, create_engine_factory
+from app.db.models import Character, Location, bootstrap, create_engine_factory
 from app.world.seed_world import seed_world
 
 SETTINGS = None
@@ -34,6 +34,31 @@ def world(tmp_path):
     with sessionmaker(bind=engine)() as session:
         bootstrap(engine, settings, seed=42)
         seed_world(session, settings, settings.world.world_id)
+        marker_location = (
+            session.query(Location)
+            .filter(
+                Location.world_id == settings.world.world_id,
+                Location.type != "island",
+            )
+            .order_by(Location.id)
+            .first()
+        )
+        assert marker_location is not None
+        session.add(Character(
+            id="npc_a2_marker",
+            world_id=settings.world.world_id,
+            type="npc",
+            first_name="Map",
+            last_name="Resident",
+            birth_date="2000-01-01",
+            age=26,
+            sex="F",
+            alive=True,
+            location_id=marker_location.id,
+            created_at=0,
+            updated_at=0,
+            control_mode="AUTONOMOUS",
+        ))
         session.commit()
 
     factory = sessionmaker(bind=engine, expire_on_commit=False)
