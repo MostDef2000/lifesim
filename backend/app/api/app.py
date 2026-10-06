@@ -689,19 +689,28 @@ def create_app(settings, session_factory: sessionmaker):
             .all()
         )
 
-        # Group active characters by location to get occupants_count
-        active_chars = session.query(Character.location_id).filter_by(
-            world_id=state["settings"].world.world_id, alive=True
-        ).all()
-        counts = {}
-        for lid, in active_chars:
-            counts[lid] = counts.get(lid, 0) + 1
+        # A2: expose the minimum authoritative identity needed for map markers.
+        # Coordinates remain location truth: occupants do not receive synthetic x/y.
+        active_chars = (
+            session.query(Character)
+            .filter_by(world_id=state["settings"].world.world_id, alive=True)
+            .order_by(Character.id)
+            .all()
+        )
+        occupants_by_location: dict[int, list[dict[str, Any]]] = {}
+        for character in active_chars:
+            occupants_by_location.setdefault(character.location_id, []).append({
+                "id": character.id,
+                "name": f"{character.first_name} {character.last_name}".strip(),
+                "kind": "player" if character.user_id is not None else "npc",
+            })
 
         return [
             {
                 "id": loc.id, "type": loc.type, "name": loc.name,
                 "x": loc.x, "y": loc.y, "parent_id": loc.parent_id,
-                "occupants_count": counts.get(loc.id, 0)
+                "occupants_count": len(occupants_by_location.get(loc.id, [])),
+                "occupants": occupants_by_location.get(loc.id, []),
             }
             for loc in locs
         ]
