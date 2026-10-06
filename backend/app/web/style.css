@@ -815,12 +815,15 @@ body.landing-mode #app {
 .map-card.time-night .map-time-tint {
   background: rgba(12, 24, 45, 0.42);
 }
-.map-card.is-night .map-night-lights {
-  opacity: 0.62;
-  background:
-    radial-gradient(circle at 55% 16%, rgba(255, 217, 132, .78) 0 1px, transparent 3px),
-    radial-gradient(circle at 62% 13%, rgba(255, 217, 132, .62) 0 1px, transparent 3px),
-    radial-gradient(circle at 48% 19%, rgba(255, 217, 132, .55) 0 1px, transparent 3px);
+.map-card.is-night .map-night-lights { opacity: 0.62; }
+.map-night-light {
+  position: absolute;
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  transform: translate(-50%, -50%);
+  background: rgba(255, 217, 132, .9);
+  box-shadow: 0 0 7px 3px rgba(255, 199, 88, .44);
 }
 
 .map-card.is-rain .map-rain {
