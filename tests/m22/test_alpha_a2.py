@@ -150,6 +150,9 @@ def test_a2_frontend_contract_pins():
     assert 'const npcs = (loc.occupants || []).filter(o => o.kind === "npc")' in js
     assert "Presentation-only screen offset" in js
 
+    # F1: LOD focus follows the authoritative player location on poll refresh.
+    assert "S.mapFocusLocationId = character.location_id" in js
+
     # Weather/time and graphics presets alter presentation only.
     assert "S.weather.precipitation > 0.5" in js
     assert "S.weather.visibility < 1.0" in js

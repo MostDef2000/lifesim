@@ -831,6 +831,8 @@ async function pollEvents() {
       try { S.weather = await api("/weather"); } catch { /* keep last readable weather */ }
     }
     S.character = { ...S.character, ...character };
+    // F1: LOD focus follows the authoritative player location on every poll refresh.
+    if (character.location_id != null) S.mapFocusLocationId = character.location_id;
     S.world = world;
     S.mapLocations = locs;
     const clock = document.getElementById("clock");
