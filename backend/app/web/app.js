@@ -525,6 +525,10 @@ function buildLivingMap(locs) {
 
   const dynamicMarkers = [...mapNpcMarkers(visibleLocs), ...mapEventMarkers(visibleLocs)];
   const markerCount = locationAnchors.length + dynamicMarkers.length + (currentLoc ? 1 : 0);
+  const nightLightLimit = S.mapQuality === "low-mobile" ? 8 : 24;
+  const nightLightLocs = night ? visibleLocs.filter(l =>
+    ["settlement", "house", "shop", "workshop", "kitchen"].includes(l.type)
+  ).slice(0, nightLightLimit) : [];
 
   const focusStyle = focus && focus.x !== null
     ? `--map-focus-x:${focus.x}%; --map-focus-y:${focus.y}%`
@@ -539,7 +543,12 @@ function buildLivingMap(locs) {
     el("div", { class: "map-stage" },
       el("img", { class: "map-base", src: "/static/static/map/world-island.jpg", alt: "" }),
       el("div", { class: "map-time-tint", "aria-hidden": "true" }),
-      el("div", { class: "map-night-lights", "aria-hidden": "true" }),
+      el("div", { class: "map-night-lights", "aria-hidden": "true" },
+        ...nightLightLocs.map(loc => el("span", {
+          class: "map-night-light",
+          style: `left:${loc.x}%; top:${loc.y}%`,
+          "data-location-id": String(loc.id),
+        }))),
       el("div", { class: "map-rain", "aria-hidden": "true" }),
       el("div", { class: "map-fog", "aria-hidden": "true" }),
       el("div", { class: "map-anchors", id: "map-anchors" },
