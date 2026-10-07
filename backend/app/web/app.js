@@ -1076,6 +1076,9 @@ async function viewInventory() {
 /* ---------- profile (§77) ---------- */
 
 async function viewProfile() {
+  // #128: route() falls through to #/profile with S.character null (the
+  // create-form hash race and direct navigation) — send the user to creation.
+  if (!S.character) { viewCreateCharacter(); return; }
   location.hash = "#/profile";
   const modeSel = el("select", {},
     el("option", { value: "AUTONOMOUS" }, "AUTONOMOUS (сам решает)"),
