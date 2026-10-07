@@ -131,21 +131,19 @@ class TestApiNotShadowed:
 
 
 class TestWsToken:
-    def test_me_returns_ws_token(self, client):
+    def test_me_does_not_expose_ws_token(self, client):
+        # #124: /auth/me no longer mints a session-equivalent JWT for the
+        # client — WS auth rides the httpOnly cookie, so the field is gone.
         client.post("/auth/register", json={
             "username": "ann1", "email": "ann1@x.com",
             "password": "password123", "age_confirmed": True,
         })
         client.post("/auth/login", json={"username": "ann1", "password": "password123"})
         me = client.get("/auth/me").json()
-        assert me["ws_token"]
+        assert "ws_token" not in me
+        assert me["id"]
+        assert me["username"] == "ann1"
         assert me["role"] == "user"
-        # token verifies against the same secret
-        from app.api.app import get_secret
-        from app.api.auth import verify_token
-
-        payload = verify_token(me["ws_token"], get_secret(SETTINGS))
-        assert payload is not None and payload["role"] == "user"
 
 
 class TestNewEndpoints:

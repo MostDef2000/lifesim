@@ -940,7 +940,7 @@ async function pollEvents() {
 function connectWs() {
   if (!S.user || S.ws) return;
   const proto = location.protocol === "https:" ? "wss" : "ws";
-  const ws = new WebSocket(`${proto}://${location.host}/ws?token=${S.user.ws_token}`);
+  const ws = new WebSocket(`${proto}://${location.host}/ws`);
   ws.onmessage = (msg) => {
     try {
       const data = JSON.parse(msg.data);

@@ -200,7 +200,6 @@ def create_app(settings, session_factory: sessionmaker):
         username: str
         email: str
         role: str
-        ws_token: str  # M9 (§79): browser cannot read the httpOnly cookie
 
     # ---------- Auth routes (§81) ----------
 
@@ -264,15 +263,11 @@ def create_app(settings, session_factory: sessionmaker):
 
     @app.get("/auth/me", response_model=MeOut)
     def me(user: User = Depends(current_user)):
-        from app.api.auth import sign_token
-
-        token = sign_token(
-            user.id, user.role, get_secret(state["settings"]),
-            state["settings"].api.session_ttl_min,
-        )
+        # #124: no session-equivalent JWT is minted for the client anymore —
+        # WS auth rides the httpOnly cookie on the upgrade request.
         return MeOut(
             id=user.id, username=user.username, email=user.email,
-            role=user.role, ws_token=token,
+            role=user.role,
         )
 
     # ---------- Characters (R3) ----------

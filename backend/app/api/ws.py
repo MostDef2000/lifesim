@@ -1,7 +1,9 @@
 """M5 (SPEC §104/R9, §79): WebSocket event stream.
 
-/ws?token= — HMAC-auth; server sends {type:'hello', cursor}, then polls
-world_events (id > cursor) and batches them as {type:'events', events:[...]}.
+/ws — HMAC-auth via the httpOnly session cookie on the upgrade request
+(#124: no credential in the URL, so the token never reaches access logs);
+server sends {type:'hello', cursor}, then polls world_events (id > cursor)
+and batches them as {type:'events', events:[...]}.
 Read-only: no mutations over WS (MVP).
 NOTE: no `from __future__ import annotations` — FastAPI must resolve the
 WebSocket annotation at route-add time.
@@ -43,16 +45,50 @@ def poll_events(
 
 
 def register_ws_route(app, settings, session_factory) -> None:
-    from fastapi import Query, WebSocket, WebSocketDisconnect
+    from fastapi import WebSocket, WebSocketDisconnect
 
     from app.api.auth import verify_token
 
     @app.websocket("/ws")
     async def ws_endpoint(
         websocket: WebSocket,
-        token: str = Query(""),
     ):
-        payload = verify_token(token, _ws_secret(settings))
+        # #124: origin gate — browsers attach Origin on cross-site WS
+        # upgrades; absent Origin (TestClient, non-browser clients) is
+        # allowed, a present one must match the Host header.
+        origin = ""
+        host_hdr = ""
+        for hname, hvalue in websocket.scope["headers"]:
+            if hname == b"origin":
+                origin = hvalue.decode("latin-1", errors="replace")
+            elif hname == b"host":
+                host_hdr = hvalue.decode("latin-1", errors="replace")
+        if origin:
+            from urllib.parse import urlsplit
+            origin_host = urlsplit(origin).hostname
+            host_name = urlsplit(f"//{host_hdr}").hostname if host_hdr else None
+            # hostname is already lowercased by urlsplit on both sides;
+            # IPv6-literal Hosts and "null" origins resolve correctly
+            # (null/no-host -> None -> reject, fail closed).
+            if origin_host is None or origin_host != host_name:
+                await websocket.close(code=4401)
+                return
+
+        from app.db.models import User
+
+        # #124: auth via the httpOnly session cookie carried by the upgrade
+        # request (same-origin client) — no credential in the URL, so the
+        # token never reaches access logs. Supersedes /ws?token= (issue #124).
+        session_cookie = _session_cookie(websocket, settings)
+        payload = verify_token(session_cookie, _ws_secret(settings)) if session_cookie else None
+        if payload is not None:
+            try:
+                with session_factory() as session:
+                    user = session.get(User, int(payload["sub"]))
+            except Exception:
+                user = None  # fail closed on DB errors
+            if user is None or user.disabled:
+                payload = None
         if payload is None:
             await websocket.close(code=4401)
             return
@@ -100,6 +136,31 @@ def register_ws_route(app, settings, session_factory) -> None:
             except Exception:
                 pass
             return
+
+
+def _session_cookie(websocket, settings) -> str:
+    """#124: extract settings.api.cookie_name from raw ASGI cookie headers.
+
+    Fail-closed: ambiguous duplicates or unparseable header -> empty string.
+    """
+    from http.cookies import SimpleCookie
+
+    name = settings.api.cookie_name
+    candidates = []
+    for hname, hvalue in websocket.scope["headers"]:
+        if hname != b"cookie":
+            continue
+        try:
+            jar = SimpleCookie()
+            jar.load(hvalue.decode("latin-1"))
+        except Exception:  # unparseable cookie header -> fail closed
+            return ""
+        morsel = jar.get(name)
+        if morsel is not None and morsel.value:
+            candidates.append(morsel.value)
+    if len(candidates) != 1:
+        return ""  # absent or ambiguous -> fail closed
+    return candidates[0]
 
 
 def _ws_secret(settings) -> str:
