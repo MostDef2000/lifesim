@@ -168,3 +168,17 @@ def test_a2_frontend_contract_pins():
     assert ".map-card.quality-low-mobile" in css
     assert ".map-card.reduced-motion" in css
     assert "@media (prefers-reduced-motion: reduce)" in css
+
+    # F2: re-rendering the living map must capture and restore transient state
+    # (interpolated player-marker position and the travel badge) across rebuilds.
+    assert (
+        "const capturedMarkerLeft = oldMarker && oldMarker.style.left"
+        " ? oldMarker.style.left : null;"
+        in js
+    )
+    assert "newMarker.style.left = capturedMarkerLeft;" in js
+    assert "newBadge.textContent = capturedBadgeText;" in js
+    assert 'newBadge.classList.toggle("hidden", capturedBadgeHidden);' in js
+
+    # F3: the day-boundary weather refetch must update the topbar span in place.
+    assert "if (weatherEl) weatherEl.textContent = weatherLabel();" in js

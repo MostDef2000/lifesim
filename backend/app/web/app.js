@@ -353,6 +353,12 @@ function sceneBlock() {
 
 /* ---------- topbar ---------- */
 
+function weatherLabel() {
+  if (!S.weather || !S.weather.enabled) return "";
+  return "Погода: " + S.weather.description + (S.weather.source === "historical"
+    ? " (реальная " + S.weather.real_date + ")" : "");
+}
+
 function topbar(active) {
   const tabs = [["#/world", "Мир"], ["#/chat", "Чат"], ["#/inventory", "Инвентарь"],
     ["#/profile", "Профиль"]];
@@ -360,9 +366,7 @@ function topbar(active) {
     tabs.push(["#/admin", "Админ"]);
   }
   const weatherSpan = S.weather && S.weather.enabled
-    ? el("span", { id: "weather", class: "muted" },
-        "Погода: " + S.weather.description + (S.weather.source === "historical"
-          ? " (реальная " + S.weather.real_date + ")" : ""))
+    ? el("span", { id: "weather", class: "muted" }, weatherLabel())
     : null;
   return el("div", { class: "topbar" },
     el("h1", {}, "ВЛ1: Рейнеке"),
@@ -614,7 +618,27 @@ function buildLivingMap(locs) {
 
 function rerenderLivingMap() {
   const host = document.getElementById("living-map-host");
-  if (host && S.mapLocations.length) host.replaceChildren(buildLivingMap(S.mapLocations));
+  if (host && S.mapLocations.length) {
+    // F2: capture transient state from the old tree before the rebuild wipes it.
+    const oldMarker = host.querySelector("#player-marker");
+    const oldBadge = host.querySelector("#map-badge");
+    const capturedMarkerLeft = oldMarker && oldMarker.style.left ? oldMarker.style.left : null;
+    const capturedMarkerTop = oldMarker && oldMarker.style.top ? oldMarker.style.top : null;
+    const capturedBadgeText = oldBadge ? oldBadge.textContent : null;
+    const capturedBadgeHidden = oldBadge ? oldBadge.classList.contains("hidden") : null;
+    host.replaceChildren(buildLivingMap(S.mapLocations));
+    // F2: restore transient state onto the freshly built tree.
+    const newMarker = host.querySelector("#player-marker");
+    const newBadge = host.querySelector("#map-badge");
+    if (newMarker && capturedMarkerLeft !== null && capturedMarkerTop !== null) {
+      newMarker.style.left = capturedMarkerLeft;
+      newMarker.style.top = capturedMarkerTop;
+    }
+    if (newBadge && capturedBadgeText !== null) {
+      newBadge.textContent = capturedBadgeText;
+      newBadge.classList.toggle("hidden", capturedBadgeHidden);
+    }
+  }
 }
 
 function setMapLod(lod) {
@@ -829,6 +853,9 @@ async function pollEvents() {
     const locs = await api("/locations");
     if (previousDay !== world.day) {
       try { S.weather = await api("/weather"); } catch { /* keep last readable weather */ }
+      // F3: day-boundary refetch must update the topbar span in place, not wait for a full re-render.
+      const weatherEl = document.getElementById("weather");
+      if (weatherEl) weatherEl.textContent = weatherLabel();
     }
     S.character = { ...S.character, ...character };
     // F1: LOD focus follows the authoritative player location on every poll refresh.
