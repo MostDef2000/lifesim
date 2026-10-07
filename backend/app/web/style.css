@@ -954,3 +954,206 @@ body.landing-mode #app {
   .map-card.lod-region .map-stage { transform: scale(1.5); }
   .map-card.lod-local .map-stage { transform: scale(2.35); }
 }
+
+/* ---------- issue #121: world shell (product-facing #/world) ----------
+   Variant A: the cinematic palette is defined ONLY on .world-shell and its
+   local --w-* custom props — global :root token values (used by chat,
+   profile, admin, auth) are intentionally untouched. No new assets/fonts. */
+.world-shell {
+  --w-bg: #0a1016;
+  --w-panel: rgba(23, 33, 42, 0.72);
+  --w-panel-deep: rgba(12, 19, 25, 0.6);
+  --w-line: rgba(148, 178, 205, 0.16);
+  --w-text: #dde5ec;
+  --w-dim: #8fa1b1;
+  --w-accent: #e2b45a;
+  --w-warm: rgba(226, 180, 90, 0.15);
+  --w-warm-line: rgba(226, 180, 90, 0.4);
+  --w-warm-ink: #1d1506;
+  display: grid;
+  grid-template-columns: minmax(0, 2fr) minmax(0, 1fr);
+  gap: 14px;
+  align-items: start;
+  padding: 14px;
+  border: 1px solid var(--w-line);
+  border-radius: 16px;
+  background:
+    radial-gradient(1100px 480px at 18% -10%, rgba(226, 180, 90, 0.07), transparent 60%),
+    radial-gradient(900px 520px at 88% 8%, rgba(64, 116, 158, 0.12), transparent 55%),
+    linear-gradient(180deg, #0d141b 0%, var(--w-bg) 100%);
+  color: var(--w-text);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04);
+}
+
+.world-shell .muted { color: var(--w-dim); }
+
+/* translucent panel cards (map, журнал, portrait, scene, feed) */
+.world-shell .panel {
+  background: var(--w-panel);
+  border: 1px solid var(--w-line);
+  border-radius: 14px;
+  backdrop-filter: blur(10px);
+  box-shadow: 0 12px 30px rgba(2, 8, 14, 0.35);
+}
+.world-shell .panel + .panel { margin-top: 0; }
+
+/* map-dominant stage: character strip + pills above the map panel (left
+   column), журнал/portrait/scene/feed in the right secondary column */
+.world-map-stage {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-areas:
+    "card"
+    "pills"
+    "map";
+  gap: 12px;
+  align-content: start;
+}
+.world-map-panel {
+  grid-area: map;
+  min-width: 0;
+}
+.world-character-card { grid-area: card; }
+.world-action-pills { grid-area: pills; }
+
+#living-map-host { min-width: 0; }
+
+.world-map-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-bottom: 8px;
+}
+.world-map-heading h2 {
+  margin: 0;
+  color: var(--w-text);
+  font-size: 16px;
+  letter-spacing: .01em;
+}
+.world-map-heading button {
+  padding: 6px 14px;
+  border: 1px solid var(--w-warm-line);
+  border-radius: 999px;
+  background: var(--w-warm);
+  color: var(--w-text);
+  font-size: 12px;
+  transition: background-color .15s ease, border-color .15s ease, color .15s ease;
+}
+.world-map-heading button:hover {
+  background: var(--w-accent);
+  border-color: var(--w-accent);
+  color: var(--w-warm-ink);
+}
+
+/* compact character strip (head + mini needs side by side) */
+.world-character-card {
+  display: grid;
+  grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr);
+  gap: 10px 16px;
+  align-items: center;
+  padding: 12px 14px;
+  border: 1px solid var(--w-line);
+  border-radius: 14px;
+  background: var(--w-panel);
+  backdrop-filter: blur(10px);
+  box-shadow: 0 12px 30px rgba(2, 8, 14, 0.35);
+}
+.world-character-head h2 {
+  margin: 0 0 2px;
+  color: var(--w-text);
+  font-size: 15px;
+}
+.world-money { color: var(--w-accent); font-weight: 600; }
+
+.world-mini-needs { display: grid; gap: 5px; }
+.world-mini-needs .need { margin: 0; }
+.world-mini-needs .need .row { font-size: 11px; }
+.world-mini-needs .need .bar { height: 6px; }
+
+/* large warm pill actions */
+.world-action-pills {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+.world-action-pills button {
+  padding: 9px 18px;
+  border: 1px solid var(--w-warm-line);
+  border-radius: 999px;
+  background: var(--w-warm);
+  color: var(--w-text);
+  font-weight: 600;
+  transition: background-color .15s ease, border-color .15s ease, color .15s ease;
+}
+.world-action-pills button:hover {
+  background: var(--w-accent);
+  border-color: var(--w-accent);
+  color: var(--w-warm-ink);
+}
+.world-action-pills button:last-of-type {
+  background: transparent;
+  border-color: var(--w-line);
+  color: var(--w-dim);
+  font-weight: 500;
+}
+.world-action-pills button:last-of-type:hover {
+  background: rgba(143, 161, 177, 0.12);
+  border-color: var(--w-accent);
+  color: var(--w-text);
+}
+.world-autonomous-note { flex: 1 1 auto; font-size: 13px; }
+
+/* secondary cards: compact журнал, subdued events */
+.world-tasks-card .task { padding: 3px 0; font-size: 12.5px; }
+.world-events-card {
+  max-height: 220px;
+  overflow-y: auto;
+  opacity: .85;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(148, 178, 205, 0.25) transparent;
+  mask-image: linear-gradient(180deg, #000 0, #000 calc(100% - 12px), rgba(0, 0, 0, 0.3) 100%);
+}
+.world-events-card .ev { border-bottom: 1px dashed var(--w-line); }
+
+/* map graphics controls recede inside the cinematic panel */
+.world-map-panel .map-toolbar { opacity: .8; }
+.world-map-panel .map-toolbar button {
+  background: rgba(10, 16, 22, 0.55);
+  border-color: var(--w-line);
+  color: var(--w-dim);
+}
+.world-map-panel .map-toolbar button.active {
+  border-color: var(--w-accent);
+  color: var(--w-accent);
+}
+.world-map-panel .map-reduced-toggle { color: var(--w-dim); }
+
+/* no-coords fallback list keeps working inside the map panel */
+.world-map-panel .loc { border-color: var(--w-line); }
+
+.world-secondary {
+  display: grid;
+  gap: 12px;
+  align-content: start;
+  min-width: 0;
+}
+
+/* responsive: NEW blocks only — the pinned first 880px/520px blocks above
+   stay byte-exact (m21 parses the first occurrence). */
+@media (max-width: 1100px) {
+  .world-shell { grid-template-columns: 1fr; }
+}
+
+@media (max-width: 880px) {
+  .world-shell { gap: 12px; padding: 12px; }
+  .world-character-card { grid-template-columns: 1fr; align-items: stretch; }
+}
+
+@media (max-width: 640px) {
+  .world-shell { padding: 10px; border-radius: 12px; }
+  .world-action-pills button { padding: 8px 14px; }
+  .world-events-card { max-height: 180px; }
+}
