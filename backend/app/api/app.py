@@ -26,9 +26,37 @@ def _schema_version(session):
     row = session.query(SchemaMeta).filter_by(key="version").first()
     return row.value if row is not None else "unknown"
 
+
+def _masked_validation_handler(request, exc):
+    """(#110) Mask sensitive request values echoed in 422 validation errors.
+
+    FastAPI's default handler jsonifies exc.errors() including each error's
+    `input` (the submitted value). Rebuild the error list keeping the
+    type/loc/msg/url/ctx diagnostics, but drop `input` when any string loc
+    component names a sensitive field (substring match, so compound names
+    like password_confirm or api_token are masked too), or when the error
+    type is json_invalid (its input echoes the raw body on some FastAPI
+    versions). Non-sensitive errors keep everything.
+    """
+    from fastapi.encoders import jsonable_encoder
+    from fastapi.responses import JSONResponse
+
+    sanitized = []
+    for err in exc.errors():
+        loc_parts = [part for part in err.get("loc", ()) if isinstance(part, str)]
+        sensitive = any(
+            "password" in part or "token" in part or "secret" in part
+            for part in loc_parts
+        ) or err.get("type") == "json_invalid"
+        if sensitive:
+            err = {key: value for key, value in err.items() if key != "input"}
+        sanitized.append(jsonable_encoder(err))
+    return JSONResponse(status_code=422, content={"detail": sanitized})
+
 def create_app(settings, session_factory: sessionmaker):
     """Build the FastAPI app bound to a sessionmaker and the given Settings."""
     from fastapi import Depends, FastAPI, HTTPException, Request, Response
+    from fastapi.exceptions import RequestValidationError
     from fastapi.responses import JSONResponse
     from pydantic import BaseModel
 
@@ -42,6 +70,7 @@ def create_app(settings, session_factory: sessionmaker):
     from app.db.models import Character, User
 
     app = FastAPI(title="VL1 LifeSim API", version="0.1.0")
+    app.add_exception_handler(RequestValidationError, _masked_validation_handler)
     state: dict[str, Any] = {"settings": settings, "session_factory": session_factory}
 
     # M8 (§27): per-IP sliding-window rate limits (in-memory, per-process)
