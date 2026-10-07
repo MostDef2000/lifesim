@@ -679,12 +679,12 @@ function renderWorld(locs, tasksData) {
   });
   const mapReady = keyedPois.every(k => poiMap[k] && poiMap[k].x !== null);
 
-  const feed = el("div", { class: "panel feed", id: "feed" },
+  const feed = el("div", { class: "panel feed world-events-card", id: "feed" },
     el("h2", {}, "События"),
     ...S.feed.slice(-40).reverse().map(feedRow));
-  const actions = el("div", { class: "actions" },
-    ...["WORK", "EAT", "DRINK", "SLEEP", "SOCIALIZE"].map((a) =>
-      el("button", { onclick: () => doAction(a) }, a)));
+  const actions = [["WORK", "Пойти на работу"], ["EAT", "Поесть"], ["DRINK", "Попить"],
+    ["SLEEP", "Отдохнуть / поспать"], ["SOCIALIZE", "Пообщаться"]].map(([a, label]) =>
+    el("button", { onclick: () => doAction(a) }, label));
   const extBtn = el("button", { onclick: () => viewExternal() },
     "Поездка во Владивосток");
 
@@ -692,45 +692,62 @@ function renderWorld(locs, tasksData) {
   if (tasksData) {
     const planned = tasksData.planned || [];
     const active = tasksData.active || [];
-    [...planned, ...active].forEach(t => {
+    [...active, ...planned].forEach(t => {
       taskRows.push(el("div", { class: "task" },
         el("span", { class: "status" }, t.status),
         el("span", {}, t.task_type || "")));
     });
   }
+  const activeCount = tasksData && tasksData.active ? tasksData.active.length : 0;
 
   const portraitBox = portraitBlock();
   const sceneBox = sceneBlock();
   S.mapLocations = locs;
 
-  const locsPanel = el("div", { class: "panel" },
-    el("h2", {}, "Карта"),
-    mapReady ? el("div", { id: "living-map-host" }, buildLivingMap(locs)) : el("div", { class: "locs" },
-      ...locs.map((loc) => el("div", {
-        class: `loc ${loc.id === ch.location_id ? "here" : ""}`,
-        onclick: () => moveTo(loc),
-      }, el("span", {}, loc.name || `#${loc.id}`),
-         el("span", { class: "muted" }, loc.type || "")))),);
+  const characterName = ch.name || `${ch.first_name || ""} ${ch.last_name || ""}`;
+  const currentLoc = locs.find((l) => l.id === ch.location_id);
+  const currentLocationLabel = currentLoc && currentLoc.name ? currentLoc.name : "—";
+  const autonomous = ch.control_mode === "AUTONOMOUS";
 
   app.replaceChildren(
     topbar("#/world"),
-    el("div", { class: "grid" },
-      el("div", {},
-        locsPanel,
-        el("div", { class: "panel" },
-          el("h2", {}, "Персонаж"),
-          el("div", {}, `${ch.name || `${ch.first_name || ""} ${ch.last_name || ""}`}`),
-          el("div", { class: "muted" }, `Деньги: ${ch.money ?? ch.balance ?? "—"} ₽`),
-          needBar("Сытость", needs.hunger),
-          needBar("Вода", needs.thirst),
-          needBar("Энергия", needs.energy),
-          needBar("Общение", needs.social),
-          actions,
-          el("div", { style: "margin-top:6px" }, extBtn))),
-      el("div", {},
-        el("div", { class: "panel" },
-          el("h2", {}, "Задачи"),
-          taskRows.length ? taskRows : el("div", { class: "muted" }, "Нет активных задач")),
+    el("main", { class: "world-shell" },
+      el("section", { class: "world-map-stage" },
+        el("div", { class: "panel world-map-panel" },
+          el("div", { class: "world-map-heading" },
+            el("h2", {}, "Остров Рейнеке"),
+            el("button", { type: "button", onclick: () => {
+              const scene = document.getElementById("scene-view");
+              if (scene) scene.scrollIntoView({ behavior: S.mapReducedMotion ? "auto" : "smooth", block: "start" });
+            } }, "Осмотреть окрестности")),
+          mapReady ? el("div", { id: "living-map-host" }, buildLivingMap(locs)) : el("div", { class: "locs" },
+            ...locs.map((loc) => el("div", {
+              class: `loc ${loc.id === ch.location_id ? "here" : ""}`,
+              onclick: () => moveTo(loc),
+            }, el("span", {}, loc.name || `#${loc.id}`),
+               el("span", { class: "muted" }, loc.type || ""))))),
+        el("aside", { class: "world-character-card" },
+          el("div", { class: "world-character-head" },
+            el("div", {},
+              el("h2", {}, characterName),
+              el("div", { class: "muted" }, currentLocationLabel),
+              el("div", { class: "muted" }, ch.job ? `Работа: ${ch.job}` : "Работа: —"),
+              el("div", { class: "world-money" }, `Деньги: ${ch.money ?? ch.balance ?? "—"} ₽`))),
+          el("div", { class: "world-mini-needs" },
+            needBar("Сытость", needs.hunger), needBar("Вода", needs.thirst),
+            needBar("Энергия", needs.energy), needBar("Общение", needs.social))),
+        el("nav", { class: "world-action-pills", "aria-label": "Действия персонажа" },
+          ...(autonomous
+            ? [el("span", { class: "muted world-autonomous-note" },
+                "Персонаж действует сам — переключите режим в Профиле"),
+              el("button", { type: "button", onclick: () => { location.hash = "#/profile"; } },
+                "Открыть Профиль")]
+            : [...actions, extBtn]))),
+      el("section", { class: "world-secondary" },
+        el("div", { class: "panel world-tasks-card" },
+          el("h2", {}, "Журнал"),
+          taskRows.length ? el("div", { class: "muted" }, `Активных задач: ${activeCount} (полный журнал — на экране Задач)`) : el("div", { class: "muted" }, "Нет активных задач"),
+          taskRows.slice(0, 3)),
         portraitBox,
         sceneBox,
         feed)));
