@@ -5,7 +5,7 @@
 const app = document.getElementById("app");
 const toastEl = document.getElementById("toast");
 const S = { user: null, character: null, world: null, ws: null, wsTries: 0,
-  feed: [], cursor: 0, pollTimer: null, canonicalPortraitId: null,
+  feed: [], cursor: 0, pollTimer: null, canonicalPortraitId: null, authProbed: false, visualDisabled: false,
   mapLod: "island", mapQuality: "balanced",
   mapReducedMotion: window.matchMedia("(prefers-reduced-motion: reduce)").matches,
   mapFocusLocationId: null, mapLocations: [] };
@@ -79,8 +79,9 @@ const routes = {
 
 async function route() {
   stopFeed();
-  if (!S.user) {
-    try { S.user = await api("/auth/me"); } catch (e) { S.user = null; }
+  if (!S.user && !S.authProbed) {
+    try { S.user = await api("/auth/me"); }
+    catch (e) { S.user = null; S.authProbed = true; }
   }
   if (!S.user) return viewAuth();
   document.body.classList.remove("landing-mode");
@@ -184,6 +185,7 @@ function viewAuth() {
       await api("/auth/login", { method: "POST", body: {
         username: username.value, password: password.value } });
       S.user = await api("/auth/me");
+      S.authProbed = false;
       S.character = null;
       location.hash = "#/world";
       route();
@@ -296,6 +298,7 @@ async function generatePortrait(container, force) {
       await api(`/visual/assets/${r.asset.id}/canonical`,
         { method: "POST", body: { canonical: true } });
       S.canonicalPortraitId = r.asset.id;
+      S.visualDisabled = false;
     } catch (e) { /* best effort */ }
     const blob = await fetchPortraitBlob(`/visual/assets/${r.asset.id}/file`);
     const url = URL.createObjectURL(blob);
@@ -316,15 +319,20 @@ function portraitBlock() {
   const box = el("div", { class: "panel portrait" }, el("h2", {}, "Портрет"), status);
   (async () => {
     let hasCanonical = false;
-    try {
-      const asset = await api(`/visual/characters/${S.character.id}/portrait`);
-      S.canonicalPortraitId = asset.id;
-      const blob = await fetchPortraitBlob(`/visual/assets/${asset.id}/file`);
-      const url = URL.createObjectURL(blob);
-      box.insertBefore(
-        el("img", { class: "portrait-img", src: url, alt: "Портрет" }), status);
-      hasCanonical = true;
-    } catch { /* no portrait yet — keep button */ }
+    if (!S.visualDisabled) {
+      try {
+        const asset = await api(`/visual/characters/${S.character.id}/portrait`);
+        S.canonicalPortraitId = asset.id;
+        const blob = await fetchPortraitBlob(`/visual/assets/${asset.id}/file`);
+        const url = URL.createObjectURL(blob);
+        box.insertBefore(
+          el("img", { class: "portrait-img", src: url, alt: "Портрет" }), status);
+        hasCanonical = true;
+      } catch (e) {
+        if (e && e.status === 503) S.visualDisabled = true;
+        /* no portrait yet — keep button */
+      }
+    }
     box.append(el("button", {
       onclick: () => generatePortrait(box, hasCanonical),
     }, hasCanonical ? "Сгенерировать заново" : "Сгенерировать портрет"));
@@ -1095,6 +1103,7 @@ async function viewProfile() {
           el("button", { onclick: async () => {
             await api("/auth/logout", { method: "POST", body: {} });
             S.user = null; S.character = null;
+            S.authProbed = false;
             location.hash = "#/login";
             route();
           } }, "Выйти"))),
