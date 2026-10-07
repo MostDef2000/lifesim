@@ -15,6 +15,7 @@ import sys
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import sessionmaker
+from starlette.websockets import WebSocketDisconnect
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../../.."))
 
@@ -292,9 +293,9 @@ def test_ae4_persistence(tmp_path):
 
 def test_ae5_websocket_stream(world):
     settings, app, client, cid, npc_id, engine, factory = world
-    token = client.cookies.get(settings.api.cookie_name)
-
-    with client.websocket_connect(f"/ws?token={token}") as ws:
+    # #124: no credential in the URL — the httpOnly session cookie set by
+    # /auth/login rides the upgrade request itself.
+    with client.websocket_connect("/ws") as ws:
         hello = ws.receive_json()
         assert hello["type"] == "hello"
 
@@ -328,12 +329,28 @@ def test_ae5_websocket_stream(world):
         assert ack is not None and ack["id"] == got_events[-1]["id"]
 
 
-def test_ae5_websocket_bad_token(world):
-    _, _, client, *_ = world
-    # starlette closes with 4401 before accept; TestClient raises
-    with pytest.raises(Exception):
-        with client.websocket_connect("/ws?token=bad.token.here") as ws:
+def test_ae5_websocket_bad_cookie(world):
+    settings, _, client, *_ = world
+    # #124: a tampered session cookie must not authenticate the upgrade.
+    # The server closes with 4401 before accept; starlette's TestClient
+    # surfaces that as WebSocketDisconnect with the code observable
+    # (runtime-checked: starlette.websockets.WebSocketDisconnect, .code == 4401).
+    client.cookies.set(settings.api.cookie_name, "bad.token.here")
+    with pytest.raises(WebSocketDisconnect) as excinfo:
+        with client.websocket_connect("/ws") as ws:
             ws.receive_json()
+    assert excinfo.value.code == 4401
+
+
+def test_ae5_websocket_stale_tab_legacy_query(world):
+    # #124 deploy window: a cached old client still opens the legacy
+    # /ws?token=… URL — the undeclared query param is ignored and the
+    # httpOnly session cookie carries the auth. (RED on base: there the
+    # bogus query token alone failed verification -> 4401.)
+    settings, _, client, *_ = world
+    with client.websocket_connect("/ws?token=stale.legacy.token") as ws:
+        hello = ws.receive_json()
+        assert hello["type"] == "hello"
 
 
 # ---------- AE6''': config sensitivity ----------
