@@ -41,6 +41,15 @@ async function api(path, opts = {}) {
   return data;
 }
 
+function appendKids(node, child) {
+  if (child === null || child === undefined || typeof child === "boolean") return;
+  if (Array.isArray(child)) {
+    for (const item of child) appendKids(node, item);
+    return;
+  }
+  node.append(child.nodeType ? child : document.createTextNode(String(child)));
+}
+
 function el(tag, attrs = {}, ...children) {
   const node = document.createElement(tag);
   for (const [k, v] of Object.entries(attrs)) {
@@ -49,10 +58,7 @@ function el(tag, attrs = {}, ...children) {
     else if (k.startsWith("on")) node.addEventListener(k.slice(2), v);
     else node.setAttribute(k, v);
   }
-  for (const child of children) {
-    if (child === null || child === undefined) continue;
-    node.append(child.nodeType ? child : document.createTextNode(String(child)));
-  }
+  for (const child of children) appendKids(node, child);
   return node;
 }
 

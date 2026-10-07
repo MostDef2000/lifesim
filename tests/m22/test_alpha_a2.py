@@ -182,3 +182,9 @@ def test_a2_frontend_contract_pins():
 
     # F3: the day-boundary weather refetch must update the topbar span in place.
     assert "if (weatherEl) weatherEl.textContent = weatherLabel();" in js
+
+    # #122: el() must recurse into array children (topbar tabs, admin/inventory
+    # tables) and silently skip boolean children (auth page `isReg && ...`).
+    assert "for (const item of child) appendKids(node, item);" in js
+    assert 'typeof child === "boolean"' in js
+    assert 'el("div", { class: "tabs" },' in js
