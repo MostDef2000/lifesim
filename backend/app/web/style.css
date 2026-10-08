@@ -140,6 +140,16 @@ textarea {
 .anchor.here .map-label {
   display: block;
 }
+
+/* #106 Lane A (item 4): touch reveals — :active is pure CSS while the tap
+   is pressed; the JS `touched` class keeps the label up after the tap.
+   Houses keep their label suppressed (they render no .map-label child). */
+.anchor:active .map-label {
+  display: block;
+}
+.anchor.touched .map-label {
+  display: block;
+}
 .anchor.above .map-label {
   top: auto;
   bottom: 10px;
@@ -1156,4 +1166,17 @@ body.landing-mode #app {
   .world-shell { padding: 10px; border-radius: 12px; }
   .world-action-pills button { padding: 8px 14px; }
   .world-events-card { max-height: 180px; }
+}
+
+/* #106 Lane A (item 1a): WCAG 2.5.8 — enlarge map anchor hit targets to
+   >=24px with zero visual change. `.anchor` is already position:absolute
+   (pinned block above), so the ::before inset needs no extra positioning.
+   12px dot + 8px inset on every side = 28px effective target. On narrow
+   viewports the grid pitch (~13.7px @414px) means adjacent targets overlap;
+   accepted — the hovered/focused/current anchor is already lifted above its
+   neighbours via z-index: 3 (pinned rule above). */
+.anchor::before {
+  content: "";
+  position: absolute;
+  inset: -8px;
 }
