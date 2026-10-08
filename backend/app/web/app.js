@@ -20,6 +20,16 @@ function toast(msg, isErr) {
   toast._t = setTimeout(() => toastEl.classList.add("hidden"), 3500);
 }
 
+/* #144/§61: AUTONOMOUS characters refuse direct actions server-side (409),
+   so every direct-control surface says the same localized thing instead of
+   leaking the raw English server detail. */
+const AUTONOMOUS_HINT = "Персонаж действует сам — переключите режим в Профиле";
+// #144/§61: matches the server detail regardless of which error surface
+// (message/detail) the api() wrapper populated; used by every direct-control
+// catch so a stale-state 409 still speaks the localized hint.
+const isAutonomousRefusal = (e) =>
+  String(e.message ?? e.detail ?? "").includes("character is AUTONOMOUS");
+
 async function api(path, opts = {}) {
   const res = await fetch(path, {
     credentials: "same-origin",
@@ -758,7 +768,7 @@ function renderWorld(locs, tasksData) {
         el("nav", { class: "world-action-pills", "aria-label": "Действия персонажа" },
           ...(autonomous
             ? [el("span", { class: "muted world-autonomous-note" },
-                "Персонаж действует сам — переключите режим в Профиле"),
+                AUTONOMOUS_HINT),
               el("button", { type: "button", onclick: () => { location.hash = "#/profile"; } },
                 "Открыть Профиль")]
             : [...actions, extBtn]))),
@@ -778,11 +788,23 @@ async function doAction(actionType, params = {}) {
       body: { character_id: S.character.id, action_type: actionType, params } });
     toast(`Задача ${actionType} принята`);
     viewWorld();
-  } catch (e) { toast(e.message, true); }
+  } catch (e) {
+    // #144/§61: map the AUTONOMOUS refusal to the localized hint; every
+    // other server error keeps its raw message (out of scope here).
+    if (isAutonomousRefusal(e)) {
+      toast(AUTONOMOUS_HINT, true);
+    } else { toast(e.message, true); }
+  }
 }
 
 async function moveTo(loc) {
   if (loc.id === S.character.location_id) return;
+  // #144/§61: in AUTONOMOUS the server refuses MOVE with 409 — gate it
+  // client-side instead of posting a doomed /actions request.
+  if (S.character.control_mode === "AUTONOMOUS") {
+    toast(AUTONOMOUS_HINT);
+    return;
+  }
   try {
     await api("/actions", { method: "POST", body: {
       character_id: S.character.id, action_type: "MOVE",
@@ -790,7 +812,11 @@ async function moveTo(loc) {
     toast(`Идём в ${loc.name || loc.id}`);
     viewWorld();
   } catch (e) {
-    if (e.status === 422 && String(e.detail).includes("needs_move")) {
+    if (isAutonomousRefusal(e)) {
+      // #144/§61: stale S.character (GUIDED shown, server AUTONOMOUS) — the
+      // client gate passed but the server refused; speak the hint, not §61.
+      toast(AUTONOMOUS_HINT, true);
+    } else if (e.status === 422 && String(e.detail).includes("needs_move")) {
       toast("Сначала дойдите до промежуточной точки", true);
     } else { toast(e.message, true); }
   }
@@ -845,8 +871,13 @@ async function viewExternal() {
               location.hash = "#/world";
               viewWorld();
             } catch (e) {
-              err.textContent = String(e.detail);
-              if (String(e.detail).includes("port")) toast("Сначала дойдите до порта", true);
+              // #144/§61: same stale-state class as moveTo — localize.
+              err.textContent = isAutonomousRefusal(e)
+                ? AUTONOMOUS_HINT : String(e.detail);
+              if (isAutonomousRefusal(e))
+                toast(AUTONOMOUS_HINT, true);
+              if (String(e.detail).includes("port"))
+                toast("Сначала дойдите до порта", true);
             }
           } }, "Отправиться"),
           el("button", { onclick: () => { location.hash = oldHash; viewWorld(); } },
@@ -984,6 +1015,16 @@ function connectWs() {
           if (feedBox) {
             feedBox.replaceChildren(el("h2", {}, "События"),
               ...S.feed.slice(-40).reverse().map(feedRow));
+          }
+          // #144: a CONTROL_CHANGED fired from another tab/session leaves
+          // stale action pills behind — re-render the world view (it re-reads
+          // the character). ws.onmessage fires on ALL views, so only refresh
+          // when the world view is actually on screen (never hijack
+          // #/profile or #/chat); viewWorld() only reads state, so no
+          // event/POST feedback loop is possible.
+          if (fresh.some((e) => e.event_type === "CONTROL_CHANGED")
+            && location.hash === "#/world") {
+            viewWorld();
           }
         }
       }
