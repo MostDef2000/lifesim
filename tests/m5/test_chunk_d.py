@@ -10,6 +10,7 @@ AE6''': config sensitivity (session TTL, serve gate)
 
 import json
 import os
+import subprocess
 import sys
 
 import pytest
@@ -378,16 +379,46 @@ def test_ae6_serve_disabled_refuses(tmp_path, capsys):
 
 
 def test_ae6_serve_missing_db(tmp_path):
-    """api.enabled=true but DB absent → refusal (exit 2)."""
-    from app.simulation.cli import main
+    """api.enabled=true but DB absent → refusal (exit 2).
 
+    #125: the old in-process main([...]) hung the whole suite: its str.replace
+    target (`db_path: data/lifesim.db`) never matched the real config key
+    `db_path: "lifesim.db"`, so the patch no-oped and any stray lifesim.db in
+    the CWD fell through to a blocking uvicorn.run(). Now the patch targets
+    the real key (and asserts it applied), and serve runs as a subprocess with
+    cwd= isolated to tmp_path under a hard timeout= that kills the child and
+    fails the test instead of hanging.
+    """
     cfg = tmp_path / "cfg.yaml"
     src = open("config/default.yaml").read()
     src = src.replace("api:\n  enabled: false", "api:\n  enabled: true")
-    src = src.replace("db_path: data/lifesim.db", f"db_path: {tmp_path / 'missing.db'}")
+    missing_db = tmp_path / "missing.db"
+    src = src.replace('db_path: "lifesim.db"', f'db_path: "{missing_db}"')
     cfg.write_text(src)
-    rc = main(["serve", "--config", str(cfg)])
-    assert rc == 2
+    assert f'db_path: "{missing_db}"' in cfg.read_text(), (
+        "#125: config patch must actually apply to the real db_path key"
+    )
+
+    # #125: cwd= isolation (a stray lifesim.db in the repo root is irrelevant)
+    # + hard timeout= guard — a broken refusal path must fail, never hang.
+    backend_dir = os.path.abspath(
+        os.path.join(os.path.dirname(__file__), "..", "..", "backend")
+    )
+    env = dict(os.environ)
+    env["PYTHONPATH"] = os.pathsep.join(
+        [backend_dir] + ([env["PYTHONPATH"]] if env.get("PYTHONPATH") else [])
+    )
+    try:
+        proc = subprocess.run(
+            [sys.executable, "-m", "app.simulation.cli", "serve", "--config", str(cfg)],
+            cwd=tmp_path,
+            env=env,
+            capture_output=True,
+            timeout=60,
+        )
+    except subprocess.TimeoutExpired:
+        pytest.fail("#125: serve did not refuse a missing DB — reached uvicorn.run")
+    assert proc.returncode == 2, proc.stderr.decode(errors="replace")
 
 
 def test_ae6_control_change_visible_in_events(world):
