@@ -1,0 +1,26 @@
+# Dependency vulnerability audit: checks the locked dependency set (uv.lock)
+# against the pip-audit vulnerability database. CI-only workflow, kept separate
+# from the main `CI` gate so audit findings cannot block lint/test runtime.
+name: pip-audit
+
+on: [push, pull_request]
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      # Same interpreter pin as the `gate` job in ci.yml so the audit runs
+      # against the Python version the project actually targets.
+      - uses: astral-sh/setup-uv@v5
+        with:
+          python-version: "3.14"
+      # pip-audit has no native uv.lock reader, so export the locked dependency
+      # set to a requirements file first (--no-hashes keeps the export simple;
+      # the lock is already the authority on versions). Deliberately cache-free:
+      # export + audit runs in well under a minute.
+      - run: uv export --format requirements-txt --no-hashes > requirements-audit.txt
+      - run: uvx pip-audit -r requirements-audit.txt
