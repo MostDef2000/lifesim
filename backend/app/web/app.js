@@ -865,18 +865,8 @@ function stopFeed() {
 
 async function pollEvents() {
   try {
-    const data = await api(`/world/events?since=${S.cursor}`);
-    const events = Array.isArray(data) ? data : (data.events || []);
-    if (events.length) {
-      S.cursor = events[events.length - 1].id;
-      S.feed.push(...events);
-      const feedBox = document.getElementById("feed");
-      if (feedBox) {
-        feedBox.replaceChildren(el("h2", {}, "События"),
-          ...S.feed.slice(-40).reverse().map(feedRow));
-      }
-    }
-    
+    await pollEventsFeed();
+
     // A2 Living Map: refresh authoritative read state, then rebuild presentation.
     const previousDay = S.world ? S.world.day : null;
     const character = await api(`/characters/${S.character.id}`);
@@ -937,6 +927,31 @@ async function pollEvents() {
   } catch (e) { /* silent */ }
 }
 
+// #139: WS is the live channel while connected; the REST events fetch is
+// the fallback for when the socket is down (resumes automatically next tick).
+// The A2 world-state refresh above keeps running on every tick either way —
+// only the events fetch is skipped while the socket is the live channel.
+async function pollEventsFeed() {
+  if (S.ws && S.ws.readyState === 1) return;
+  const data = await api(`/world/events?since=${S.cursor}`);
+  const events = Array.isArray(data) ? data : (data.events || []);
+  if (events.length) {
+    S.cursor = events[events.length - 1].id;
+    // #139: the REST cursor path can re-fetch on a missed ack — push and
+    // render only events not already buffered (dedup by id).
+    const seen = new Set(S.feed.map(e => e.id));
+    const fresh = events.filter((e) => !seen.has(e.id));
+    if (fresh.length) {
+      S.feed.push(...fresh);
+      const feedBox = document.getElementById("feed");
+      if (feedBox) {
+        feedBox.replaceChildren(el("h2", {}, "События"),
+          ...S.feed.slice(-40).reverse().map(feedRow));
+      }
+    }
+  }
+}
+
 function connectWs() {
   if (!S.user || S.ws) return;
   const proto = location.protocol === "https:" ? "wss" : "ws";
@@ -948,11 +963,17 @@ function connectWs() {
         for (const ev of data.events) {
           if (ev.id > S.cursor) S.cursor = ev.id;
         }
-        S.feed.push(...data.events);
-        const feedBox = document.getElementById("feed");
-        if (feedBox) {
-          feedBox.replaceChildren(el("h2", {}, "События"),
-            ...S.feed.slice(-40).reverse().map(feedRow));
+        // #139: WS can re-deliver around a reconnect — push and render only
+        // events not already buffered (dedup by id).
+        const seen = new Set(S.feed.map(e => e.id));
+        const fresh = data.events.filter((e) => !seen.has(e.id));
+        if (fresh.length) {
+          S.feed.push(...fresh);
+          const feedBox = document.getElementById("feed");
+          if (feedBox) {
+            feedBox.replaceChildren(el("h2", {}, "События"),
+              ...S.feed.slice(-40).reverse().map(feedRow));
+          }
         }
       }
     } catch (e) { /* ignore malformed */ }
