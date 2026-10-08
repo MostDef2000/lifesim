@@ -42,6 +42,9 @@ sudo -u lifesim .venv/bin/vl1 simulate --days 0 --population 20 --seed 42 --conf
 ```bash
 sudo cp deploy/lifesim.service /etc/systemd/system/
 sudo systemctl daemon-reload
+# #112: pre-start check — production refuses to boot without the session
+# secret (api.require_secret: true). Проверка-указатель, значение не выводим:
+grep -q '^VL1_SECRET=' /opt/lifesim/.env || echo "VL1_SECRET не задан в /opt/lifesim/.env — lifesim не стартует (см. §2)"
 sudo systemctl enable --now lifesim
 systemctl status lifesim
 ```
@@ -62,13 +65,15 @@ WS (websockets) проксируется автоматически. Сжати�
 
 ```bash
 curl -s http://127.0.0.1:8000/health && echo                         # {"status":"ok"}
-curl -s -o /dev/null -w '%{http_code}\n' http://127.0.0.1:8000/docs   # 200
+curl -s -o /dev/null -w '%{http_code}\n' http://127.0.0.1:8000/docs   # 404 (#113: docs закрыты в проде)
 curl -s http://127.0.0.1:8000/world && echo                          # мир
 curl -s https://<домен>/ | head -1                                   # после DNS
 curl -s http://127.0.0.1:8000/static/app.js | head -c 100            # статика под /static/
 ```
 
-UI — на `/`, OpenAPI — на `/docs`, liveness — на `/health`.
+UI — на `/`, liveness — на `/health`. Swagger/redoc/openapi в проде закрыты
+(#113, `api.docs: false`): `/docs`, `/redoc`, `/openapi.json` → 404, край
+(Caddy) режет их тем же кодом.
 
 ## 7. Smoke-тест реальной погоды (опционально, Рейнеке)
 

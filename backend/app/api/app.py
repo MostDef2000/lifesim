@@ -9,13 +9,29 @@ from typing import Any
 
 from sqlalchemy.orm import Session, sessionmaker
 
+_DEV_SECRET_FALLBACK = "dev-insecure-secret-change-me"
+
 
 def get_secret(settings) -> str:
-    """HMAC secret from env; dev fallback (R2/NFR-security)."""
+    """HMAC secret from env; dev fallback only when api.require_secret=false.
+
+    #112 (§security): lookup uses ONLY the configured api.secret_env name —
+    the old secondary `or os.getenv("VL1_SECRET")` let the canonical var
+    silently override a custom secret_env and masked a missing secret. When
+    api.require_secret is true and the env var is unset, raise instead of
+    failing open to the dev literal.
+    """
 
     env_name = getattr(getattr(settings, "api", None), "secret_env", "VL1_SECRET")
-    secret = os.getenv(env_name) or os.getenv("VL1_SECRET") or "dev-insecure-secret-change-me"
-    return secret
+    secret = os.getenv(env_name)
+    if secret:
+        return secret
+    if getattr(getattr(settings, "api", None), "require_secret", False):
+        raise RuntimeError(
+            f"api.secret_env '{env_name}' not set; refusing to sign sessions "
+            "with a dev secret (§security)"
+        )
+    return _DEV_SECRET_FALLBACK  # dev fallback (R2/NFR-security; dev/test only)
 
 
 
@@ -69,7 +85,17 @@ def create_app(settings, session_factory: sessionmaker):
     )
     from app.db.models import Character, User
 
-    app = FastAPI(title="VL1 LifeSim API", version="0.1.0")
+    # #113: Swagger/redoc/openapi.json only when api.docs=true (fail-closed;
+    # default.yaml opts in for dev, production.yaml pins docs: false, and the
+    # deploy/Caddyfile edge block 404s the paths anyway — defense in depth).
+    docs = settings.api.docs
+    app = FastAPI(
+        title="VL1 LifeSim API",
+        version="0.1.0",
+        docs_url="/docs" if docs else None,
+        redoc_url="/redoc" if docs else None,
+        openapi_url="/openapi.json" if docs else None,
+    )
     app.add_exception_handler(RequestValidationError, _masked_validation_handler)
     state: dict[str, Any] = {"settings": settings, "session_factory": session_factory}
 

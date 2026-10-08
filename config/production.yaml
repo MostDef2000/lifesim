@@ -249,6 +249,8 @@ api:
   cookie_name: vl1_session
   ws_interval_s: 1.0
   secret_env: VL1_SECRET
+  docs: false
+  require_secret: true
 
 visual:
   enabled: true
