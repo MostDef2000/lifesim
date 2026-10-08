@@ -26,6 +26,14 @@ def _build():
                 "api.enabled=false in config; "
                 "deploy config (e.g. config/production.yaml) must set api.enabled=true"
             )
+        # #112 (§security): refuse at BOOT (uvicorn lifespan → _build), not at
+        # first request — symmetric to the api.enabled guard above. Reuses
+        # get_secret so the env-name lookup stays single-sourced: with
+        # api.require_secret=true it raises when the configured env is unset.
+        if settings.api.enabled and settings.api.require_secret:
+            from app.api.app import get_secret
+
+            get_secret(settings)
         from app.db.models import create_engine_factory
 
         engine = create_engine_factory(settings)

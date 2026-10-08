@@ -223,7 +223,9 @@ class ApiConfig(BaseModel):
     session_ttl_min: int = 720
     cookie_name: str = "vl1_session"
     ws_interval_s: float = 1.0
-    secret_env: str = "VL1_SECRET"  # HMAC secret; dev fallback with warning
+    secret_env: str = "VL1_SECRET"  # HMAC secret env name (see get_secret)
+    docs: bool = False  # #113: Swagger/redoc/openapi; fail-closed (prod pins false)
+    require_secret: bool = False  # #112: true → refuse dev-fallback session secret
 
 class RomanceConfig(BaseModel):
     """018 (§31): explicit consent for romance. Off by default (П4 gate)."""

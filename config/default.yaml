@@ -237,6 +237,7 @@ api:
   cookie_name: vl1_session
   ws_interval_s: 1.0
   secret_env: VL1_SECRET
+  docs: true
 
 visual:
   enabled: false

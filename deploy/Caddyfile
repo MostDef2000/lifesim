@@ -3,6 +3,12 @@
 
 # Замените example.com на ваш домен после делегирования DNS (см. deploy/README.md)
 example.com {
+	# --- edge block (#113): docs/redoc/openapi never leave the box even if
+	# the app misconfigures api.docs. Caddy executes respond before
+	# reverse_proxy by directive order — placed first for readability too.
+	respond /docs* "Not Found" 404
+	respond /redoc* "Not Found" 404
+	respond /openapi.json "Not Found" 404
 	reverse_proxy 127.0.0.1:8000
 	encode gzip
 	# --- security headers (issue #114) ---

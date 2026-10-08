@@ -48,6 +48,39 @@ class TestCaddyfile:
         assert "example.com" in caddy
 
 
+class TestCaddyfileDocsEdgeBlock:
+    """#113: edge 404s the docs paths (defense in depth, inside the site block)."""
+
+    def test_docs_redoc_openapi_blocked_at_edge(self):
+        caddy = read("Caddyfile")
+        assert 'respond /docs* "Not Found" 404' in caddy
+        assert 'respond /redoc* "Not Found" 404' in caddy
+        assert 'respond /openapi.json "Not Found" 404' in caddy
+
+
+class TestProductionConfig:
+    """#113/#112: prod config serves no docs and demands a real secret."""
+
+    def _production_lines(self):
+        path = os.path.join(
+            os.path.dirname(__file__), "..", "..", "config", "production.yaml"
+        )
+        with open(path, encoding="utf-8") as fh:
+            return fh.read().splitlines()
+
+    def test_docs_disabled_and_secret_required(self):
+        lines = self._production_lines()
+        assert "  docs: false" in lines
+        assert "  require_secret: true" in lines
+        # both keys live inside the api section (between api: and visual:)
+        api_i = lines.index("api:")
+        visual_i = lines.index("visual:")
+        docs_i = lines.index("  docs: false")
+        require_i = lines.index("  require_secret: true")
+        assert api_i < docs_i < visual_i
+        assert api_i < require_i < visual_i
+
+
 class TestEnvExample:
     def test_keystone_flags_safe(self):
         env = read(".env.example")
