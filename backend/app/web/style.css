@@ -1180,3 +1180,16 @@ body.landing-mode #app {
   position: absolute;
   inset: -8px;
 }
+
+/* #106 Lane B: at local zoom houses render as ambient non-interactive
+   spans (the client cannot know the player's home id, so every house is a
+   span). Same 8px .anchor .dot visual, but no cursor affordance, no hover
+   lift, and no 24px ::before hit target — that budget stays reserved for
+   POI anchors; house dots never intercept taps or tab stops. */
+.anchor--house {
+  pointer-events: none;
+  cursor: default;
+}
+.anchor--house::before {
+  content: none;
+}

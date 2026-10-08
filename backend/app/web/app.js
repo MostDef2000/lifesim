@@ -459,8 +459,14 @@ function mapDistance(a, b) {
 }
 
 function visibleMapLocations(locs, focus) {
-  const positioned = locs.filter(l => l.x !== null && l.y !== null && l.type !== "island");
-  if (S.mapLod === "island") return positioned.filter(l => l.type !== "house");
+  // #106 Lane B (visual bible §zoom-levels): houses render only at local
+  // zoom — region mirrors the island LOD exclusion and drops them from the
+  // marker set entirely; at local they downgrade to ambient spans in
+  // buildLivingMap (no interactive house anchors).
+  const positioned = locs.filter(l =>
+    l.x !== null && l.y !== null && l.type !== "island"
+    && (S.mapLod === "local" || l.type !== "house"));
+  if (S.mapLod === "island") return positioned;
   if (!focus || focus.x === null || focus.y === null) return positioned;
   const radius = S.mapLod === "region" ? 28 : 14;
   return positioned.filter(l => mapDistance(l, focus) <= radius);
@@ -547,9 +553,25 @@ function buildLivingMap(locs) {
   const reduced = S.mapReducedMotion ? "reduced-motion" : "";
   const qualityClass = `quality-${S.mapQuality}`;
 
-  const locationAnchors = visibleLocs.map(l => {
+  // #106 Lane B: houses split off the interactive anchor path. The client
+  // cannot know which house is the player's own home (no client payload
+  // exposes the home location), so ALL houses render as ambient
+  // non-interactive spans at local zoom — same 8px dot visual, but no
+  // button, no tab stop, no ::before hit target, no MOVE wiring; POI
+  // anchors keep the Lane A interactive set.
+  const locationAnchors = [];
+  const houseSpans = [];
+  for (const l of visibleLocs) {
+    if (l.type === "house") {
+      houseSpans.push(el("span", {
+        class: "anchor anchor--house",
+        style: `left:${l.x}%; top:${l.y}%`,
+        "data-loc-id": String(l.id),
+      }, el("span", { class: "dot" })));
+      continue;
+    }
     const isHere = l.id === ch.location_id;
-    return el("button", {
+    locationAnchors.push(el("button", {
       class: `anchor location-anchor ${isHere ? "here" : ""} ${l.y >= 20 ? "above" : ""}`,
       style: `left:${l.x}%; top:${l.y}%`,
       "aria-label": l.name,
@@ -559,11 +581,11 @@ function buildLivingMap(locs) {
     },
       el("span", { class: "dot" }),
       (!/^House \d+$/.test(l.name) ? el("span", { class: "map-label" }, l.name) : null),
-    );
-  });
+    ));
+  }
 
   const dynamicMarkers = [...mapNpcMarkers(visibleLocs), ...mapEventMarkers(visibleLocs)];
-  const markerCount = locationAnchors.length + dynamicMarkers.length + (currentLoc ? 1 : 0);
+  const markerCount = houseSpans.length + locationAnchors.length + dynamicMarkers.length + (currentLoc ? 1 : 0);
   const nightLightLimit = S.mapQuality === "low-mobile" ? 8 : 24;
   const nightLightLocs = night ? visibleLocs.filter(l =>
     ["settlement", "house", "shop", "workshop", "kitchen"].includes(l.type)
@@ -591,6 +613,7 @@ function buildLivingMap(locs) {
       el("div", { class: "map-rain", "aria-hidden": "true" }),
       el("div", { class: "map-fog", "aria-hidden": "true" }),
       el("div", { class: "map-anchors", id: "map-anchors" },
+        ...houseSpans,
         ...locationAnchors,
         ...dynamicMarkers,
         currentLoc && currentLoc.x !== null ? el("span", {
