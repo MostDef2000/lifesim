@@ -513,6 +513,16 @@ function mapEventMarkers(visibleLocs) {
   });
 }
 
+/* #106 Lane A (item 4): touch has no :hover, so keep the tapped anchor's
+   label visible after the tap — one `touched` anchor at a time; the class
+   is dropped on the next map rebuild (or when another anchor is tapped). */
+function markTouchedAnchor(ev) {
+  for (const a of document.querySelectorAll(".anchor.touched")) {
+    a.classList.remove("touched");
+  }
+  ev.currentTarget.classList.add("touched");
+}
+
 function buildLivingMap(locs) {
   S.mapLocations = locs;
   const ch = S.character;
@@ -534,6 +544,7 @@ function buildLivingMap(locs) {
       style: `left:${l.x}%; top:${l.y}%`,
       "aria-label": l.name,
       "data-loc-id": String(l.id),
+      onpointerdown: markTouchedAnchor,
       onclick: () => moveTo(l),
     },
       el("span", { class: "dot" }),
