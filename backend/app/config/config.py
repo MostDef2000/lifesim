@@ -12,6 +12,14 @@ class WorldConfig(BaseModel):
     start_real_timestamp: str
     config_sha256: str = "unknown"
     source_path: str = ""
+    # #151 [alpha-v1][engine]: live tick driver. The API runtime advances
+    # game time itself (Engine.step every live_tick_interval_s of real time,
+    # speed = world_clock.time_scale) — it REPLACES an external cron-driven
+    # `vl1 simulate` (one writer per world; never run both). The batch
+    # simulate CLI is a separate process that never builds the API app, so
+    # it never starts the driver — no config guard needed there.
+    live_tick_enabled: bool = True
+    live_tick_interval_s: float = 2.0
 
 class TicksConfig(BaseModel):
     time_scale: float

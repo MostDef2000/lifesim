@@ -37,6 +37,17 @@ sudo -u lifesim .venv/bin/vl1 simulate --days 0 --population 20 --seed 42 --conf
 # ожидание: JSON-отчёт с "invariants_ok": true; БД — data/lifesim.db
 ```
 
+### 3.1 Live tick driver (#151) — вместо cron-simulate
+
+Начиная с #151 сервер двигает игровое время сам: lifespan API-рантайма
+запускает тик-драйвер (`backend/app/api/ticker.py`) — каждые
+`world.live_tick_interval_s` секунд реального времени он делает `Engine.step`
+на заработанные `world_clock.time_scale` игровые минуты (is_paused — пауза,
+`POST /admin/world/timescale` — скорость). **Внешний cron-`vl1 simulate`
+больше не нужен и опасен** (два писателя в одну БД) — не настраивайте его.
+Выключатель старого поведения: `world.live_tick_enabled: false` в YAML
+(время стоит, как до #151).
+
 ## 4. systemd
 
 ```bash
