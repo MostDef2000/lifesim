@@ -1193,3 +1193,8 @@ body.landing-mode #app {
 .anchor--house::before {
   content: none;
 }
+
+/* #138: profile danger zone — self-service account deletion. */
+.danger-zone { border-top: 1px solid #f0d0d0; margin-top: 12px; padding-top: 8px; display: flex; flex-direction: column; gap: 6px; }
+button.danger { background: #b3402e; color: #fff; }
+button.danger:hover { background: #93301f; }

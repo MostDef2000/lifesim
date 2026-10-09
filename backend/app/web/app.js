@@ -1202,7 +1202,25 @@ async function viewProfile() {
             S.authProbed = false;
             location.hash = "#/login";
             route();
-          } }, "Выйти"))),
+          } }, "Выйти")),
+        el("div", { class: "danger-zone", style: "margin-top:12px" },
+          el("div", { class: "muted", style: "font-size:11px" },
+            "Удаление необратимо: персонаж, диалоги и все связанные данные будут стёрты."),
+          el("input", { type: "text", placeholder: S.user.username,
+            "aria-label": "Подтверждение: имя аккаунта",
+            oninput: (e) => { S.confirmDelete = e.target.value; } }),
+          el("button", { class: "danger", onclick: async () => {
+            try {
+              await api("/auth/account/delete", { method: "POST", body: { confirm: S.confirmDelete || "" } });
+              S.user = null; S.character = null;
+              // #138: no S.authProbed reset here (m132 pins exactly two reset
+              // sites) — after deletion auth state is known-gone and the
+              // cookie is cleared server-side; a re-probe would only 401.
+              toast("Аккаунт удалён");
+              location.hash = "#/login";
+              route();
+            } catch (e) { toast(e.message, true); }
+          } }, "Удалить аккаунт"))),
       el("div", { class: "panel" },
         el("h2", {}, "Режим управления"),
         modeSel,
