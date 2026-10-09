@@ -104,6 +104,9 @@ def create_app(settings, session_factory: sessionmaker):
         if settings.world.live_tick_enabled:
             from app.api.ticker import start_tick_driver
 
+            # Review F1 (#151): start_tick_driver returns None when another
+            # process holds the single-writer tick lock — this process then
+            # simply doesn't tick (multi-worker/multi-server safe).
             tick_task = start_tick_driver(settings, session_factory)
         try:
             yield

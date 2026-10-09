@@ -300,3 +300,37 @@ def test_repeated_ticks_never_double_apply(world):
             "completed task re-processed by later ticks"
         )
         assert _arrivals(session) == 1, "duplicate arrival event"
+
+
+def test_lock_held_disables_ticker(world):
+    """Review F1 (#151): when the single-writer lock is held elsewhere
+    (OSError from flock), start_tick_driver must return None — no ticker,
+    frozen clock. The lock itself is kernel-managed (flock on
+    <db>.tick.lock); here the conflict is simulated at the seam."""
+    settings, app, client, factory = world
+    import time
+    from unittest.mock import patch
+
+    calls = []
+
+    def conflicting(fd, operation):
+        calls.append(operation)
+        raise OSError(11, "Resource temporarily unavailable")
+
+    from app.api import ticker as ticker_mod
+    fd_before = ticker_mod._TICK_LOCK_FD
+    with patch("app.api.ticker.fcntl.flock", conflicting):
+        with client:
+            with factory() as s:
+                before = s.query(WorldClock).filter_by(
+                    world_id=settings.world.world_id).first().game_timestamp
+            time.sleep(2.0)
+            with factory() as s:
+                after = s.query(WorldClock).filter_by(
+                    world_id=settings.world.world_id).first().game_timestamp
+
+    assert calls, "guard never attempted the lock"
+    assert after == before, (
+        "ticked despite the lock being held elsewhere")
+    assert ticker_mod._TICK_LOCK_FD is fd_before, (
+        "conflicting driver stored a lock fd")

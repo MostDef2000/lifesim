@@ -27,9 +27,14 @@ and resumes when the world unpauses).
 """
 
 import asyncio
+import fcntl
 import logging
 
 logger = logging.getLogger("vl1.ticker")
+
+# Process-lifetime fd holding the single-writer flock (None when this
+# process is not the ticker — second worker/server on the same DB).
+_TICK_LOCK_FD = None
 
 
 def step_world_live(session_factory, settings, carry: float) -> float:
@@ -84,13 +89,37 @@ async def run_tick_loop(settings, session_factory) -> None:
         except Exception:
             # #151: a failed tick (e.g. SQLite lock contention) must not
             # kill the driver or the server — log and continue on the next
-            # beat; the carry keeps the earned game-minutes.
+            # beat. Note: the beat's earned fraction is NOT preserved here
+            # (carry keeps its pre-beat value) — under sustained contention
+            # the clock runs marginally slower than time_scale; acceptable
+            # drift, never double-applied.
             logger.exception("live tick failed; continuing")
         await asyncio.sleep(interval)
 
 
-def start_tick_driver(settings, session_factory) -> asyncio.Task:
-    """Spawn the driver on the running loop (lifespan startup)."""
+def start_tick_driver(settings, session_factory) -> "asyncio.Task | None":
+    """Spawn the driver on the running loop (lifespan startup).
+
+    Single-writer guard (review F1): an OS-level flock on
+    ``<db>.tick.lock`` — kernel-released on process death, so a crash can
+    never wedge the next start. Only the process that takes the lock ticks;
+    a second worker/server on the same DB logs and stays read-only on TIME.
+    """
+    db_path = settings.persistence.db_path
+    lock_path = f"{db_path}.tick.lock"
+    fd = open(lock_path, "w")
+    try:
+        fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except OSError:
+        logger.warning(
+            "live tick lock held by another process (%s); "
+            "live ticking disabled in this one", lock_path,
+        )
+        fd.close()
+        return None
+    # Keep fd open for the process lifetime: closing it releases the lock.
+    global _TICK_LOCK_FD
+    _TICK_LOCK_FD = fd
     return asyncio.create_task(
         run_tick_loop(settings, session_factory), name="vl1-live-tick"
     )
