@@ -33,11 +33,15 @@ packages = ["backend/app"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-ra"
+# Кэш — вне репо (умирает с песочницей, не грязнит git-статус)
+cache_dir = "/tmp/opencode/toolcache/lifesim/pytest"
 markers = [
     "slow: длинные интеграционные прогоны (30 дней, детерминизм)",
 ]
 
 [tool.ruff]
+# Кэш — вне репо (умирает с песочницей, не грязнит git-статус)
+cache-dir = "/tmp/opencode/toolcache/lifesim/ruff"
 line-length = 100
 target-version = "py312"
 src = ["backend", "tests"]
