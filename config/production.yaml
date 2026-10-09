@@ -183,14 +183,14 @@ locations:
   houses_count: 24
   locations:
     island: { name: "Reineke Island", type: "island", parent: null, capacity: 1000 }
-    settlement: { name: "Main Settlement", type: "settlement", parent: "island", capacity: 200 }
+    settlement: { name: "Main Settlement", type: "settlement", parent: "island", capacity: 200, aliases: ["поселение", "деревня"] }
     home: { name: "Residential House", type: "house", parent: "settlement", capacity: 1 }
-    shop: { name: "General Store", type: "shop", parent: "settlement", capacity: 4 }
-    workshop: { name: "Workshop", type: "workshop", parent: "settlement", capacity: 4 }
-    storage: { name: "Community Storage", type: "storage", parent: "settlement", capacity: 10 }
-    well: { name: "Water Well", type: "well", parent: "settlement", capacity: 10 }
-    pier: { name: "Main Pier", type: "pier", parent: "settlement", capacity: 20 }
-    kitchen: { name: "Community Kitchen", type: "kitchen", parent: "settlement", capacity: 6 }
+    shop: { name: "General Store", type: "shop", parent: "settlement", capacity: 4, aliases: ["магазин"] }
+    workshop: { name: "Workshop", type: "workshop", parent: "settlement", capacity: 4, aliases: ["мастерская"] }
+    storage: { name: "Community Storage", type: "storage", parent: "settlement", capacity: 10, aliases: ["склад"] }
+    well: { name: "Water Well", type: "well", parent: "settlement", capacity: 10, aliases: ["колодец"] }
+    pier: { name: "Main Pier", type: "pier", parent: "settlement", capacity: 20, aliases: ["причал", "пирс"] }
+    kitchen: { name: "Community Kitchen", type: "kitchen", parent: "settlement", capacity: 6, aliases: ["кухня"] }
 
 social:
   enabled: false

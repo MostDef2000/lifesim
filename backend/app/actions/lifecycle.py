@@ -144,12 +144,16 @@ def complete_task(
         path = params.get("path", [])
         if path:
             character.location_id = path[-1]
+            # #82 (A3): spec payload for the client state machine
+            # (interpreting → travelling → arrived).
             log_event(
                 session, world_id, game_timestamp, EventType.CHARACTER_MOVED,
                 actor_id=character.id,
                 payload={
-                    "from": params.get("from"), "to": character.location_id,
-                    "minutes": params.get("total_minutes")
+                    "character_id": character.id,
+                    "from_location": params.get("from"),
+                    "to_location": character.location_id,
+                    "arrived_at": game_timestamp,
                 }
             )
 
