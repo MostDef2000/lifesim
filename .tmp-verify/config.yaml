@@ -49,7 +49,7 @@ api:
   docs: true
   enabled: true
   host: 127.0.0.1
-  port: 8745
+  port: 8747
   secret_env: VL1_SECRET
   session_ttl_min: 720
   ws_interval_s: 1.0
@@ -356,8 +356,8 @@ org:
     enabled: true
     target_affection: -30.0
 persistence:
-  db_path: /home/mostdef/vibe/projects/ai-playground/.work-a3/.tmp-verify/w.db
-  snapshot_dir: /home/mostdef/vibe/projects/ai-playground/.work-a3/.tmp-verify/snap
+  db_path: /home/mostdef/vibe/projects/ai-playground/.work-a4/.tmp-verify/w.db
+  snapshot_dir: /home/mostdef/vibe/projects/ai-playground/.work-a4/.tmp-verify/snap
   synchronous: NORMAL
   wal_mode: true
 population:
@@ -441,7 +441,7 @@ visual:
   image_size: 512x512
   lora: ''
   model: flux.1-schnell
-  storage_dir: /home/mostdef/vibe/projects/ai-playground/.work-a3/.tmp-verify/vis
+  storage_dir: /home/mostdef/vibe/projects/ai-playground/.work-a4/.tmp-verify/vis
   timeout_sec: 30.0
   transport: stub
 weather:
@@ -456,5 +456,7 @@ weather:
   year_lag: 1
 world:
   initial_population: 20
+  live_tick_enabled: true
+  live_tick_interval_s: 2.0
   start_real_timestamp: '2026-09-16T00:00:00Z'
   world_id: reineke_001

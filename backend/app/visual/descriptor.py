@@ -33,8 +33,15 @@ def build_scene_descriptor(
     location_id: int,
     event_id: int | None = None,
     camera: str = "wide",
+    player_character_id: str | None = None,
 ) -> dict:
-    """§67 structured scene description from committed world state (§66)."""
+    """§67 structured scene description from committed world state (§66).
+
+    #86 (A4): player_character_id enriches the descriptor with the requesting
+    player's appearance/outfit (`player` section) and their canonical portrait
+    reference — all pure reads of committed state; default None keeps the
+    pre-A4 shape for existing callers.
+    """
     location = session.get(Location, location_id)
     if location is None or location.world_id != world_id:
         raise LookupError(f"location not found: {location_id}")
@@ -59,6 +66,44 @@ def build_scene_descriptor(
     event_part = None
     if event is not None and event.world_id == world_id:
         event_part = {"type": event.event_type, "actor_id": event.actor_id}
+
+    # #86 (A4): the requesting player's appearance/outfit — committed state
+    # only (Character.looks self-description + worn wearable WorldObjects
+    # per 018 §28 object_metadata). Pure read; nothing here mutates.
+    player_part = None
+    if player_character_id is not None:
+        player = session.get(Character, player_character_id)
+        if player is not None and player.world_id == world_id:
+            from app.social.clothing import worn_items
+
+            player_part = {
+                "id": player.id,
+                "name": f"{player.first_name} {player.last_name}",
+                "sex": player.sex,
+                "age": player.age,
+                "looks": player.looks or "",
+                "worn": [
+                    r.object_type
+                    for r in worn_items(session, world_id, player_character_id)
+                ],
+            }
+
+    # #86 (A4): the player's canonical portrait asset id (§70) — the same
+    # query /visual/characters/{cid}/portrait serves. None → references [].
+    references: list[int] = []
+    if player_character_id is not None:
+        from app.db.models import VisualAsset
+
+        canonical = (
+            session.query(VisualAsset)
+            .filter_by(
+                world_id=world_id, asset_type="portrait",
+                character_id=player_character_id, canonical=True,
+            )
+            .first()
+        )
+        if canonical is not None:
+            references = [canonical.id]
 
     # 010 (§71, R6): weather from the world's current day row; without a row
     # the descriptor stays byte-identical to the pre-weather pin ('clear').
@@ -90,7 +135,8 @@ def build_scene_descriptor(
                  "time_of_day": _time_of_day((game_ts % 1440) // 60)},
         "camera": camera,
         "event": event_part,
-        "references": [],  # canonical portrait asset ids (§70), filled by caller
+        "player": player_part,  # #86 (A4): None without player_character_id
+        "references": references,  # §70 canonical portrait asset ids
     }
 
 

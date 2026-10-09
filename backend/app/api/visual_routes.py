@@ -208,11 +208,22 @@ def register_visual_routes(app, settings: Settings, session_factory: sessionmake
         session: Session = Depends(db),
     ):
         gate()
+        from app.db.models import Character
         from app.visual.descriptor import build_scene_descriptor
 
+        # #86 (A4): the requesting player's character enriches the descriptor
+        # (appearance/outfit + canonical reference). Read-only lookup; a user
+        # without a character still gets a scene, just without a player part.
+        player = (
+            session.query(Character)
+            .filter_by(world_id=settings.world.world_id, user_id=request_user.id)
+            .order_by(Character.id)
+            .first()
+        )
         try:
             descriptor = build_scene_descriptor(
                 session, settings.world.world_id, body.location_id, body.event_id,
+                player_character_id=player.id if player else None,
             )
         except LookupError as exc:
             raise HTTPException(status_code=404, detail=str(exc))

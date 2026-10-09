@@ -8,7 +8,7 @@ const S = { user: null, character: null, world: null, ws: null, wsTries: 0,
   feed: [], cursor: 0, pollTimer: null, canonicalPortraitId: null, authProbed: false, visualDisabled: false,
   mapLod: "island", mapQuality: "balanced",
   mapReducedMotion: window.matchMedia("(prefers-reduced-motion: reduce)").matches,
-  mapFocusLocationId: null, mapLocations: [], travel: null };
+  mapFocusLocationId: null, mapLocations: [], travel: null, scene: null };
 
 /* ---------- helpers ---------- */
 
@@ -353,28 +353,124 @@ function portraitBlock() {
   return box;
 }
 
-async function generateScene(container) {
-  const status = container.querySelector(".scene-status");
-  if (status) status.textContent = "Генерация сцены…";
+/* ---------- #86 (A4): Scene view — inspect surroundings ---------- */
+
+function sceneDescriptorData(d) {
+  // Authoritative summary from the committed-state scene descriptor.
+  // "Рядом" excludes the inspecting player (they see others, not themselves).
+  const hour = d && d.time ? String(d.time.hour).padStart(2, "0") : "00";
+  return {
+    locationName: d && d.location ? d.location.name : "—",
+    timeText: d && d.time ? `День ${d.time.day + 1}, ${hour}:00` : "—",
+    weatherText: d && d.weather ? d.weather : "",
+    nearby: d && Array.isArray(d.characters)
+      ? d.characters.filter((c) => c.id !== S.character.id).map((c) => c.name)
+      : [],
+    objects: d && Array.isArray(d.objects) ? d.objects.map((o) => o.type) : [],
+  };
+}
+
+function sceneFallbackData() {
+  // Visual service down (503/502/…): same summary built client-side from
+  // already-loaded authoritative state — a dead visual service never blocks
+  // inspection. Read-only: no gameplay state is touched on any path.
+  const ch = S.character;
+  const loc = (S.mapLocations || []).find((l) => l.id === ch.location_id);
+  const nearby = ((loc && loc.occupants) || [])
+    .filter((o) => o.id !== ch.id)
+    .map((o) => o.name);
+  return {
+    locationName: loc && loc.name ? loc.name : "—",
+    timeText: dayTime((S.world && S.world.game_timestamp) || 0),
+    weatherText: S.weather && S.weather.enabled ? S.weather.description : "",
+    nearby,
+    objects: [],
+  };
+}
+
+function sceneSummaryLines(d) {
+  const lines = [`Место: ${d.locationName}`, `Время: ${d.timeText}`];
+  if (d.weatherText) lines.push(`Погода: ${d.weatherText}`);
+  lines.push(d.nearby.length ? `Рядом: ${d.nearby.join(", ")}` : "Рядом никого");
+  if (d.objects.length) lines.push(`Объекты: ${d.objects.join(", ")}`);
+  return lines;
+}
+
+function backToMap() {
+  // Back navigation from the scene state to the world view.
+  S.scene = null;
+  renderScenePanel();
+  const map = document.querySelector(".world-map-panel");
+  if (map) map.scrollIntoView({ behavior: S.mapReducedMotion ? "auto" : "smooth", block: "start" });
+}
+
+function fillScenePanel(box) {
+  // S.scene state machine → scene panel content:
+  // idle → loading («Осматриваю окрестности…») → ready (image + descriptor
+  // summary) or fallback (summary from loaded world state).
+  const scene = S.scene;
+  const kids = [];
+  if (!scene) {
+    kids.push(el("div", { class: "muted" },
+      "Нажмите «Осмотреть окрестности», чтобы осмотреться."));
+  } else if (scene.state === "loading") {
+    kids.push(el("div", { class: "muted scene-status" }, "Осматриваю окрестности…"));
+    // #86 review: escape hatch while a generation is in flight.
+    kids.push(el("button", { type: "button", onclick: backToMap }, "К карте"));
+  } else {
+    if (scene.state === "ready") {
+      const status = el("div", { class: "muted scene-status" });
+      kids.push(status);
+      (async () => {
+        // Cookie-auth image fetch (img src cannot carry auth → blob).
+        try {
+          const blob = await fetchPortraitBlob(`/visual/assets/${scene.asset.id}/file`);
+          const url = URL.createObjectURL(blob);
+          box.insertBefore(
+            el("img", { class: "portrait-img", src: url, alt: "Сцена" }), status);
+          status.textContent = "";
+        } catch (e) { status.textContent = "Изображение недоступно"; }
+      })();
+    }
+    const data = scene.state === "fallback"
+      ? sceneFallbackData()
+      : sceneDescriptorData(scene.asset.scene_descriptor);
+    for (const line of sceneSummaryLines(data)) {
+      kids.push(el("div", { class: "muted" }, line));
+    }
+    kids.push(el("button", { type: "button", onclick: backToMap }, "К карте"));
+  }
+  box.replaceChildren(el("h2", {}, "Сцена"), ...kids);
+}
+
+function renderScenePanel() {
+  const box = document.getElementById("scene-view");
+  if (box) fillScenePanel(box);
+  return box;
+}
+
+async function inspectSurroundings() {
+  // #86 review: one inspection in flight — rapid re-clicks are no-ops.
+  if (S.scene && S.scene.state === "loading") return;
+  S.scene = { state: "loading" };
+  const scene = renderScenePanel();
+  if (scene) scene.scrollIntoView({ behavior: S.mapReducedMotion ? "auto" : "smooth", block: "start" });
   try {
     const r = await api("/visual/scenes", { method: "POST",
       body: { location_id: S.character.location_id } });
-    const blob = await fetchPortraitBlob(`/visual/assets/${r.asset.id}/file`);
-    const url = URL.createObjectURL(blob);
-    const img = el("img", { class: "portrait-img", src: url, alt: "Сцена" });
-    const old = container.querySelector(".portrait-img");
-    if (old) old.remove();
-    container.insertBefore(img, status);
-    if (status) status.textContent = "";
+    S.scene = { state: "ready", asset: r.asset };
+    renderScenePanel();
   } catch (e) {
-    if (status) status.textContent = String(e.detail || e.message || "Ошибка сцены");
+    S.scene = { state: "fallback" };
+    renderScenePanel();
+    toast("Визуал недоступен, показываю данные");
   }
 }
 
 function sceneBlock() {
-  const status = el("div", { class: "scene-status muted" });
-  const box = el("div", { class: "panel portrait", id: "scene-view" }, el("h2", {}, "Сцена"), status);
-  box.append(el("button", { onclick: () => generateScene(box) }, "Сгенерировать сцену"));
+  // Sync host node for renderWorld; content follows S.scene (A4 Scene view).
+  const box = el("div", { class: "panel portrait", id: "scene-view" }, el("h2", {}, "Сцена"));
+  fillScenePanel(box);
   return box;
 }
 
@@ -724,6 +820,12 @@ function renderWorld(locs, tasksData) {
   const ch = S.character;
   const needs = ch.needs || {};
 
+  // #86 review: the scene is tied to the location it was inspected at —
+  // a world re-render (travel, arrival, action) invalidates it, otherwise
+  // the panel would show a stale location after moving.
+  S.scene = null;
+
+
   // Keep the A1 fallback when canonical map coordinates are unavailable.
   const keyedPois = ["settlement", "shop", "workshop", "kitchen", "storage", "well", "pier"];
   const poiMap = {};
@@ -771,10 +873,8 @@ function renderWorld(locs, tasksData) {
         el("div", { class: "panel world-map-panel" },
           el("div", { class: "world-map-heading" },
             el("h2", {}, "Остров Рейнеке"),
-            el("button", { type: "button", onclick: () => {
-              const scene = document.getElementById("scene-view");
-              if (scene) scene.scrollIntoView({ behavior: S.mapReducedMotion ? "auto" : "smooth", block: "start" });
-            } }, "Осмотреть окрестности")),
+            el("button", { type: "button",
+              onclick: () => inspectSurroundings() }, "Осмотреть окрестности")),
           travelBar(),
           mapReady ? el("div", { id: "living-map-host" }, buildLivingMap(locs)) : el("div", { class: "locs" },
             ...locs.map((loc) => el("div", {
@@ -932,7 +1032,7 @@ function locationView(locs) {
     el("div", { class: "muted" },
       nearby.length ? `Рядом: ${nearby.join(", ")}` : "Рядом никого"),
     el("button", { type: "button",
-      onclick: () => toast("Осмотр — в следующем срезе") }, "Осмотреть"));
+      onclick: () => inspectSurroundings() }, "Осмотреть"));
 }
 
 async function viewExternal() {
