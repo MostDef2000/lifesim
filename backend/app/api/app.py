@@ -214,6 +214,10 @@ def create_app(settings, session_factory: sessionmaker):
         username: str
         password: str
 
+    class DeleteAccountIn(BaseModel):
+        # #138: self-service deletion confirm — must equal the caller's username.
+        confirm: str
+
     class CharacterIn(BaseModel):
         name: str
         sex: str
@@ -284,6 +288,15 @@ def create_app(settings, session_factory: sessionmaker):
 
     @app.post("/auth/logout")
     def logout(response: Response):
+        """Clear the session cookie (#138).
+
+        Sessions are stateless HMAC tokens (app.api.auth sign_token/
+        verify_token): there is no session table and therefore no server-side
+        state to revoke. Logout is exactly this cookie clear. An outstanding
+        token remains valid until its TTL expires, but it only authenticates
+        a live user — a deleted or disabled account is rejected by
+        current_user regardless of the token.
+        """
         response.delete_cookie(settings.api.cookie_name)
         return {"ok": True}
 
@@ -295,6 +308,222 @@ def create_app(settings, session_factory: sessionmaker):
             id=user.id, username=user.username, email=user.email,
             role=user.role,
         )
+
+    def _delete_user_cascade(session: Session, user: User) -> list[str]:
+        """Explicit cascade delete of the user and every FK-bound row (#138).
+
+        FK-order rationale: create_engine_factory sets PRAGMA
+        foreign_keys=ON on every connection, so SQLite enforces each FK
+        immediately — there is no deferred/ON DELETE CASCADE behavior, and a
+        single unhandled child row turns the delete into a 500. Deletes are
+        therefore ordered children-first along the real FK graph:
+
+        - Nullable owner links are NULLED, not deleted: world_objects.owner
+          and organizations.leader survive the player (objects/orgs outlive
+          them like abandoned property). MarketOffer.buyer is likewise
+          nulled; offers where the deleted player was the SELLER are removed
+          (NOT NULL FK).
+        - The financial ledger (accounts.owner_id) and world_events.actor_id
+          are plain strings, NOT FKs — those rows are preserved deliberately
+          (audit/history outlives the account).
+        - AdminAuditLog rows authored by the deleted user are DELETED
+          (admin_user_id is a NOT NULL FK to users); moderation rows merely
+          targeting them remain.
+        - Interleaved chains order two more steps: character_goals reference
+          character_tasks (goals before tasks), dialogue_messages reference
+          dialogue_sessions (messages before sessions), and dialogue_turns
+          reference ai_requests (turns before requests).
+
+        Returns the storage_path values of the VisualAsset rows orphaned by
+        the delete, so the caller can unlink the files only AFTER a
+        successful commit (a file surviving a rolled-back delete is better
+        than a file deleted before the DB settled).
+        """
+        from sqlalchemy import or_
+
+        from app.db.models import (
+            AdminAuditLog,
+            AiRequest,
+            CharacterGoal,
+            CharacterHealth,
+            CharacterJob,
+            CharacterNeeds,
+            CharacterProfile,
+            CharacterTask,
+            CharacterTrait,
+            Crime,
+            DialogueMessage,
+            DialogueSession,
+            DialogueTurn,
+            ExternalContact,
+            InteractionPermission,
+            MarketOffer,
+            Memory,
+            Message,
+            Organization,
+            OrganizationMember,
+            OrgLaw,
+            OrgLawViolation,
+            Relationship,
+            RelationshipEvent,
+            VisualAsset,
+            WorldObject,
+        )
+
+        cids = [c.id for c in session.query(Character).filter_by(user_id=user.id).all()]
+        orphaned_assets: list[str] = []
+
+        # 0) user-scoped NOT NULL FK children — must run even when the user
+        # owns no characters (an admin/moderator who audited actions has
+        # admin_audit_log rows; review ses_ee064 Finding 1).
+        session.query(AdminAuditLog).filter(
+            AdminAuditLog.admin_user_id == user.id
+        ).delete(synchronize_session=False)
+        # dialogue_sessions.user_id is a NOT NULL FK to users — scope sessions
+        # to the user (plus their characters) unconditionally, not just when
+        # cids is non-empty.
+        dlg_ids = [
+            row.id
+            for row in session.query(DialogueSession.id)
+            .filter(or_(
+                DialogueSession.user_id == user.id,
+                DialogueSession.character_id.in_(cids),
+                DialogueSession.npc_id.in_(cids),
+            ))
+            .all()
+        ]
+        if dlg_ids:
+            session.query(DialogueMessage).filter(
+                DialogueMessage.session_id.in_(dlg_ids)
+            ).delete(synchronize_session=False)
+            session.query(DialogueSession).filter(
+                DialogueSession.id.in_(dlg_ids)
+            ).delete(synchronize_session=False)
+
+        if cids:
+            # 1) nullable owner links: null, don't delete (abandoned property)
+            session.query(WorldObject).filter(
+                WorldObject.owner_character_id.in_(cids)
+            ).update({"owner_character_id": None}, synchronize_session=False)
+            session.query(Organization).filter(
+                Organization.leader_character_id.in_(cids)
+            ).update({"leader_character_id": None}, synchronize_session=False)
+            session.query(MarketOffer).filter(
+                MarketOffer.buyer_character_id.in_(cids)
+            ).update({"buyer_character_id": None}, synchronize_session=False)
+
+            # 2) NOT NULL FK children, dependency-ordered
+            session.query(CharacterGoal).filter(
+                CharacterGoal.character_id.in_(cids)  # FK -> character_tasks
+            ).delete(synchronize_session=False)
+            session.query(CharacterTask).filter(
+                CharacterTask.character_id.in_(cids)
+            ).delete(synchronize_session=False)
+            session.query(DialogueTurn).filter(
+                DialogueTurn.character_id.in_(cids)  # FK -> ai_requests
+            ).delete(synchronize_session=False)
+            session.query(AiRequest).filter(
+                AiRequest.character_id.in_(cids)
+            ).delete(synchronize_session=False)
+            session.query(Relationship).filter(or_(
+                Relationship.character_a.in_(cids),
+                Relationship.character_b.in_(cids),
+            )).delete(synchronize_session=False)
+            session.query(RelationshipEvent).filter(or_(
+                RelationshipEvent.character_a.in_(cids),
+                RelationshipEvent.character_b.in_(cids),
+            )).delete(synchronize_session=False)
+            session.query(OrgLaw).filter(
+                OrgLaw.enacted_by_character_id.in_(cids)
+            ).delete(synchronize_session=False)
+            session.query(OrgLawViolation).filter(
+                OrgLawViolation.character_id.in_(cids)
+            ).delete(synchronize_session=False)
+            session.query(Memory).filter(
+                Memory.character_id.in_(cids)
+            ).delete(synchronize_session=False)
+            session.query(OrganizationMember).filter(
+                OrganizationMember.character_id.in_(cids)
+            ).delete(synchronize_session=False)
+            session.query(CharacterJob).filter(
+                CharacterJob.character_id.in_(cids)
+            ).delete(synchronize_session=False)
+            session.query(ExternalContact).filter(
+                ExternalContact.character_id.in_(cids)
+            ).delete(synchronize_session=False)
+            session.query(Crime).filter(
+                Crime.actor_character_id.in_(cids)
+            ).delete(synchronize_session=False)
+            session.query(Message).filter(or_(
+                Message.from_character_id.in_(cids),
+                Message.to_character_id.in_(cids),
+            )).delete(synchronize_session=False)
+            session.query(InteractionPermission).filter(or_(
+                InteractionPermission.actor_character_id.in_(cids),
+                InteractionPermission.target_character_id.in_(cids),
+            )).delete(synchronize_session=False)
+            session.query(MarketOffer).filter(
+                MarketOffer.seller_character_id.in_(cids)
+            ).delete(synchronize_session=False)
+
+            # 3) visual assets: collect orphaned file paths BEFORE the delete
+            orphaned_assets = [
+                row.storage_path
+                for row in session.query(VisualAsset)
+                .filter(VisualAsset.character_id.in_(cids))
+                .all()
+            ]
+            session.query(VisualAsset).filter(
+                VisualAsset.character_id.in_(cids)
+            ).delete(synchronize_session=False)
+
+            # 4) 1:1 / attribute rows of the owned characters
+            session.query(CharacterProfile).filter(
+                CharacterProfile.character_id.in_(cids)
+            ).delete(synchronize_session=False)
+            session.query(CharacterNeeds).filter(
+                CharacterNeeds.character_id.in_(cids)
+            ).delete(synchronize_session=False)
+            session.query(CharacterHealth).filter(
+                CharacterHealth.character_id.in_(cids)
+            ).delete(synchronize_session=False)
+            session.query(CharacterTrait).filter(
+                CharacterTrait.character_id.in_(cids)
+            ).delete(synchronize_session=False)
+
+            # 5) the characters themselves (audit rows for this user were
+            # already removed unconditionally in step 0)
+            session.query(Character).filter(
+                Character.id.in_(cids)
+            ).delete(synchronize_session=False)
+
+        session.delete(user)
+        return orphaned_assets
+
+    @app.post("/auth/account/delete")
+    def delete_account(
+        body: DeleteAccountIn,
+        response: Response,
+        user: User = Depends(current_user),
+        session: Session = Depends(db),
+    ):
+        """Self-service account deletion (#138): confirm == username."""
+        if body.confirm != user.username:
+            raise HTTPException(status_code=409, detail="confirm does not match username")
+        orphaned_assets = _delete_user_cascade(session, user)
+        session.commit()
+        # Files go only after the DB settled: unlink best-effort, traversal
+        # safety delegated to AssetStore._resolve (same guard as read()).
+        from app.visual.store import AssetStore
+
+        store = AssetStore(settings.visual)
+        for relative in orphaned_assets:
+            try:
+                store.remove(relative)
+            except (ValueError, OSError):
+                pass  # best-effort; the row is gone either way
+        response.delete_cookie(settings.api.cookie_name)
+        return {"ok": True}
 
     # ---------- Characters (R3) ----------
 

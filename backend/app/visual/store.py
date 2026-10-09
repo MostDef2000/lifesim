@@ -25,6 +25,10 @@ class AssetStore:
     def exists(self, storage_path: str) -> bool:
         return self._resolve(storage_path).exists()
 
+    def remove(self, storage_path: str) -> None:
+        """Delete an asset file (#138 account deletion). Same traversal guard."""
+        self._resolve(storage_path).unlink(missing_ok=True)
+
     def _resolve(self, relative: str) -> Path:
         if "/" in relative or ".." in relative or relative.startswith("."):
             raise ValueError(f"unsafe storage path: {relative!r}")
