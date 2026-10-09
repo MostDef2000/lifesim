@@ -130,7 +130,8 @@ def test_descriptor_player_section_without_canonical(tmp_path):
         assert d["references"] == []
 
         # Backward compat: existing callers (no player_character_id) are
-        # byte-identical to the pre-A4 shape — no player section.
+        # Pre-A4 shape: the only new key is `player: None` (no player
+        # section content) — #86 review wording fix.
         d0 = build_scene_descriptor(session, wid, loc_id)
         assert d0["player"] is None
         assert d0["references"] == []
@@ -295,7 +296,12 @@ def test_ui_scene_state_pins_without_damaging_existing_pins():
     # A4 additions — pin exactly what this slice implements.
     assert js.count('"Осматриваю окрестности…"') == 1
     assert js.count('"Визуал недоступен, показываю данные"') == 1
-    assert js.count('"К карте"') == 1
+    # #86 review: the escape hatch exists in loading AND ready/fallback.
+    assert js.count('"К карте"') == 2
+    # #86 review: stale-scene invalidation on world re-render (travel)
+    # and the one-in-flight guard against double POST.
+    assert js.count("S.scene = null;") >= 2
+    assert js.count('S.scene.state === "loading"') >= 1
     assert js.count("async function inspectSurroundings()") == 1
     # m14 carry: the inspect action posts the current location.
     assert js.count('api("/visual/scenes", { method: "POST",') == 1

@@ -415,6 +415,8 @@ function fillScenePanel(box) {
       "Нажмите «Осмотреть окрестности», чтобы осмотреться."));
   } else if (scene.state === "loading") {
     kids.push(el("div", { class: "muted scene-status" }, "Осматриваю окрестности…"));
+    // #86 review: escape hatch while a generation is in flight.
+    kids.push(el("button", { type: "button", onclick: backToMap }, "К карте"));
   } else {
     if (scene.state === "ready") {
       const status = el("div", { class: "muted scene-status" });
@@ -448,6 +450,8 @@ function renderScenePanel() {
 }
 
 async function inspectSurroundings() {
+  // #86 review: one inspection in flight — rapid re-clicks are no-ops.
+  if (S.scene && S.scene.state === "loading") return;
   S.scene = { state: "loading" };
   const scene = renderScenePanel();
   if (scene) scene.scrollIntoView({ behavior: S.mapReducedMotion ? "auto" : "smooth", block: "start" });
@@ -815,6 +819,12 @@ function setMapReducedMotion(enabled) {
 function renderWorld(locs, tasksData) {
   const ch = S.character;
   const needs = ch.needs || {};
+
+  // #86 review: the scene is tied to the location it was inspected at —
+  // a world re-render (travel, arrival, action) invalidates it, otherwise
+  // the panel would show a stale location after moving.
+  S.scene = null;
+
 
   // Keep the A1 fallback when canonical map coordinates are unavailable.
   const keyedPois = ["settlement", "shop", "workshop", "kitchen", "storage", "well", "pier"];
