@@ -8,7 +8,7 @@ const S = { user: null, character: null, world: null, ws: null, wsTries: 0,
   feed: [], cursor: 0, pollTimer: null, canonicalPortraitId: null, authProbed: false, visualDisabled: false,
   mapLod: "island", mapQuality: "balanced",
   mapReducedMotion: window.matchMedia("(prefers-reduced-motion: reduce)").matches,
-  mapFocusLocationId: null, mapLocations: [] };
+  mapFocusLocationId: null, mapLocations: [], travel: null };
 
 /* ---------- helpers ---------- */
 
@@ -772,12 +772,14 @@ function renderWorld(locs, tasksData) {
               const scene = document.getElementById("scene-view");
               if (scene) scene.scrollIntoView({ behavior: S.mapReducedMotion ? "auto" : "smooth", block: "start" });
             } }, "Осмотреть окрестности")),
+          travelBar(),
           mapReady ? el("div", { id: "living-map-host" }, buildLivingMap(locs)) : el("div", { class: "locs" },
             ...locs.map((loc) => el("div", {
               class: `loc ${loc.id === ch.location_id ? "here" : ""}`,
               onclick: () => moveTo(loc),
             }, el("span", {}, loc.name || `#${loc.id}`),
-               el("span", { class: "muted" }, loc.type || ""))))),
+               el("span", { class: "muted" }, loc.type || "")))),
+          locationView(locs)),
         el("aside", { class: "world-character-card" },
           el("div", { class: "world-character-head" },
             el("div", {},
@@ -845,7 +847,89 @@ async function moveTo(loc) {
   }
 }
 
-/* ---------- external travel (§38-39, M7) ---------- */
+/* ---------- #82 (A3): free-text travel on the Living Map ---------- */
+
+function travelStatusLabel() {
+  if (!S.travel) return "";
+  if (S.travel.state === "interpreting") return "Уточняю маршрут…";
+  if (S.travel.state === "travelling") {
+    return `Идём в ${S.travel.destName} — ~${S.travel.etaMinutes} мин`;
+  }
+  return "";
+}
+
+function travelBar() {
+  return el("div", { class: "travel-bar", id: "travel-bar" },
+    el("input", {
+      id: "travel-input", type: "text",
+      placeholder: "Куда идти? Например: к причалу",
+      onkeydown: (ev) => { if (ev.key === "Enter") submitTravel(); },
+    }),
+    el("button", { id: "travel-go", type: "button", onclick: () => submitTravel() }, "Идти"),
+    el("span", { id: "travel-status", class: "muted" }, travelStatusLabel()));
+}
+
+function travelErrorText(e) {
+  const d = e.detail;
+  if (d && typeof d === "object" && d.detail === "ambiguous destination"
+    && Array.isArray(d.options)) {
+    return `Уточните пункт назначения: ${d.options.join(", ")}`;
+  }
+  if (typeof d === "string" && d) return d;
+  return e.message || "Не удалось построить маршрут";
+}
+
+async function submitTravel() {
+  const input = document.getElementById("travel-input");
+  const text = input ? input.value.trim() : "";
+  if (!text) return;
+  S.travel = { state: "interpreting" };
+  const status = document.getElementById("travel-status");
+  if (status) status.textContent = travelStatusLabel();
+  try {
+    const plan = await api("/travel/plan", { method: "POST", body: { text } });
+    S.travel = { state: "travelling", destName: plan.name,
+      etaMinutes: plan.travel_minutes, taskId: plan.task_id };
+    viewWorld();
+  } catch (e) {
+    S.travel = null;
+    const stale = document.getElementById("travel-status");
+    if (stale) stale.textContent = "";
+    toast(travelErrorText(e), true);
+  }
+}
+
+function isOwnMoveEvent(e) {
+  return e.event_type === "CHARACTER_MOVED"
+    && !!e.payload && e.payload.character_id === S.character.id;
+}
+
+function onOwnArrival() {
+  if (S.travel && S.travel.state === "travelling") {
+    const destName = S.travel.destName || "";
+    S.travel = null;
+    toast(`Вы прибыли: ${destName}`);
+  }
+  if (location.hash !== "#/world") return;
+  viewWorld();
+}
+
+function locationView(locs) {
+  const ch = S.character;
+  const currentLoc = locs.find((l) => l.id === ch.location_id);
+  const nearby = ((currentLoc && currentLoc.occupants) || [])
+    .filter((o) => o.id !== ch.id)
+    .map((o) => o.name);
+  return el("div", { class: "location-view", id: "location-view" },
+    el("h3", {}, currentLoc ? currentLoc.name : "—"),
+    el("div", { class: "muted" }, dayTime((S.world && S.world.game_timestamp) || 0)),
+    S.weather && S.weather.enabled
+      ? el("div", { class: "muted" }, S.weather.description) : null,
+    el("div", { class: "muted" },
+      nearby.length ? `Рядом: ${nearby.join(", ")}` : "Рядом никого"),
+    el("button", { type: "button",
+      onclick: () => toast("Осмотр — в следующем срезе") }, "Осмотреть"));
+}
 
 async function viewExternal() {
   const oldHash = location.hash;
@@ -1013,6 +1097,8 @@ async function pollEventsFeed() {
         feedBox.replaceChildren(el("h2", {}, "События"),
           ...S.feed.slice(-40).reverse().map(feedRow));
       }
+      // #82 (A3): REST fallback path mirrors the WS arrival hook.
+      if (fresh.some((e) => isOwnMoveEvent(e))) onOwnArrival();
     }
   }
 }
@@ -1049,6 +1135,9 @@ function connectWs() {
             && location.hash === "#/world") {
             viewWorld();
           }
+          // #82 (A3): own arrival completes the travel state machine
+          // (travelling → arrived) and re-renders the map.
+          if (fresh.some((e) => isOwnMoveEvent(e))) onOwnArrival();
         }
       }
     } catch (e) { /* ignore malformed */ }

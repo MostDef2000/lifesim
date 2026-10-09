@@ -126,6 +126,8 @@ class LocationParams(BaseModel):
     type: str
     parent: Optional[str] = None
     capacity: Optional[int] = None
+    # #82 (A3): optional free-text travel aliases (deterministic grounding).
+    aliases: List[str] = Field(default_factory=list)
 
 class MapCoord(BaseModel):
     x: float

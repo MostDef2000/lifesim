@@ -116,3 +116,72 @@ def resolve_goal_params(
 
 def candidates_sorted(chars):
     return sorted(chars, key=lambda c: len(f"{c.first_name} {c.last_name}".strip()), reverse=True)
+
+
+# ---------- #82 (A3): free-text destination grounding ----------
+
+def ground_destination(session: Session, world_id: str, settings, text: str):
+    """Deterministic free-text → Location grounding (no LLM in this slice).
+
+    Match order: exact display name → case-insensitive substring → config
+    aliases (optional `aliases` lists on config locations). Returns a
+    Location when resolved uniquely, otherwise a 422 payload dict:
+      {"detail": "unknown destination"} or
+      {"detail": "ambiguous destination", "options": [display names]}.
+    """
+    normalized = (text or "").strip().lower()
+    if not normalized:
+        return {"detail": "unknown destination"}
+
+    locs = (
+        session.query(Location)
+        .filter_by(world_id=world_id)
+        .order_by(Location.id)
+        .all()
+    )
+
+    # 1. exact display-name match
+    exact = [
+        loc for loc in locs
+        if (loc.name or "").strip().lower() == normalized
+    ]
+    if len(exact) == 1:
+        return exact[0]
+    if len(exact) > 1:
+        return {"detail": "ambiguous destination",
+                "options": [loc.name for loc in exact]}
+
+    # 2. case-insensitive substring: the text mentions a display name
+    substring = [
+        loc for loc in locs
+        if (loc.name or "").strip() and loc.name.lower() in normalized
+    ]
+    if len(substring) == 1:
+        return substring[0]
+    if len(substring) > 1:
+        return {"detail": "ambiguous destination",
+                "options": [loc.name for loc in substring]}
+
+    # 3. config aliases: alias text → config location name → DB location.
+    # The loader tolerates locations without `aliases` (default []).
+    name_to_loc = {
+        (loc.name or "").strip().lower(): loc for loc in locs
+    }
+    matches: list = []
+    seen_ids: set = set()
+    config_locations = getattr(settings.locations, "locations", None) or {}
+    for _key, params in sorted(config_locations.items()):
+        for alias in (getattr(params, "aliases", None) or []):
+            alias_norm = str(alias).strip().lower()
+            if alias_norm and alias_norm in normalized:
+                loc = name_to_loc.get((params.name or "").strip().lower())
+                if loc is not None and loc.id not in seen_ids:
+                    seen_ids.add(loc.id)
+                    matches.append(loc)
+    if len(matches) == 1:
+        return matches[0]
+    if len(matches) > 1:
+        return {"detail": "ambiguous destination",
+                "options": [loc.name for loc in matches]}
+
+    return {"detail": "unknown destination"}

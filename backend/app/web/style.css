@@ -1198,3 +1198,11 @@ body.landing-mode #app {
 .danger-zone { border-top: 1px solid #f0d0d0; margin-top: 12px; padding-top: 8px; display: flex; flex-direction: column; gap: 6px; }
 button.danger { background: #b3402e; color: #fff; }
 button.danger:hover { background: #93301f; }
+
+/* #82 (A3): free-text travel bar + minimal location view on the Living Map. */
+.travel-bar { display: flex; gap: 6px; margin-top: 8px; align-items: center; }
+.travel-bar input { flex: 1; min-width: 0; }
+#travel-status { white-space: nowrap; }
+.location-view { border-top: 1px solid var(--w-line); margin-top: 10px; padding-top: 10px; display: flex; flex-direction: column; gap: 4px; }
+.location-view h3 { margin: 0; font-size: 1.05em; }
+.location-view button { align-self: flex-start; }

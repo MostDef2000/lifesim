@@ -762,6 +762,71 @@ def create_app(settings, session_factory: sessionmaker):
             "source": task.source, "started_at": task.started_at, "ends_at": task.ends_at,
         }
 
+    # ---------- #82 (A3): free-text destination → authoritative MOVE ----------
+
+    class TravelPlanIn(BaseModel):
+        text: str
+
+    @app.post("/travel/plan")
+    def travel_plan(
+        body: TravelPlanIn,
+        user: User = Depends(current_user),
+        session: Session = Depends(db),
+    ):
+        """Ground free text against canonical locations and create the SAME
+        authoritative MOVE as a direct map click (reuse of the fixed
+        validate() MOVE path — the two endpoints cannot diverge).
+
+        Deterministic only (LLM disabled in this slice). 422 payloads:
+        {"detail": "unknown destination"} | {"detail": "impossible route"} |
+        {"detail": "ambiguous destination", "options": [names]} — no state
+        mutation on any 422.
+        """
+        from fastapi.responses import JSONResponse
+
+        from app.actions.lifecycle import enqueue_task
+        from app.actions.validators import validate
+        from app.api.intent import ground_destination
+
+        text = (body.text or "").strip()
+        if not text or len(text) > 2000:
+            return JSONResponse(
+                status_code=422, content={"detail": "unknown destination"})
+        character = _owned_character_by_user(session, user)
+        if character.control_mode == "AUTONOMOUS":
+            raise HTTPException(
+                status_code=409,
+                detail="character is AUTONOMOUS; switch to GUIDED or DIRECT first (§61)",
+            )
+        resolved = ground_destination(
+            session, character.world_id, state["settings"], text)
+        if isinstance(resolved, dict):
+            # {"detail": ...} | {"detail": ..., "options": [...]} — no mutation.
+            return JSONResponse(status_code=422, content=resolved)
+
+        now_ts = _world_now(session)
+        ok, reason, _needs_move, vparams = validate(
+            session, character.world_id, character, "MOVE", now_ts,
+            state["settings"], params={"location_id": resolved.id},
+        )
+        if not ok:
+            return JSONResponse(status_code=422, content={"detail": reason})
+
+        task = enqueue_task(
+            session, character.world_id, character, "MOVE", "player",
+            {**vparams}, now_ts, state["settings"],
+        )
+        if task is None:
+            raise HTTPException(
+                status_code=409, detail="character already has an active task")
+        session.commit()
+        return {
+            "location_id": resolved.id, "name": resolved.name,
+            "travel_minutes": vparams.get("total_minutes"),
+            "task_id": task.id, "task_type": task.task_type,
+            "status": task.status,
+        }
+
     # ---------- Goals (R6, §62) ----------
 
     class GoalIn(BaseModel):

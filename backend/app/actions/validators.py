@@ -3,7 +3,7 @@ from typing import Any, Dict, Optional, Tuple
 from sqlalchemy.orm import Session
 
 from app.config.config import Settings
-from app.db.models import Character, CharacterJob, WorldObject
+from app.db.models import Character, CharacterJob, Location, WorldObject
 
 
 def validate(
@@ -162,9 +162,36 @@ def validate(
         return True, None, None, {}
 
     elif action_type == "MOVE":
-        # Validator exists but utility skips it.
-        # Only valid if a destination is provided in params (which is handled by the mover).
-        return True, None, None, {}
+        # #82 (A3): authoritative player MOVE. POST /actions carries
+        # params.location_id: validate that the destination exists and a
+        # route exists in the edges graph, and compute the path HERE so the
+        # enqueued task completes with a real arrival. Previously this branch
+        # was a stub — the task was created without a path and completion
+        # silently changed nothing (HTTP 201 but no arrival, no event).
+        request_params = params or {}
+        dest_raw = request_params.get("location_id")
+        if dest_raw is None:
+            # No explicit destination (utility-internal call): MOVE is only
+            # ever enqueued as a precondition with a precomputed path.
+            return True, None, None, {}
+        from app.world.seed_world import find_path
+
+        try:
+            dest_id = int(dest_raw)
+        except (TypeError, ValueError):
+            return False, "unknown destination", None, {}
+        dest = session.get(Location, dest_id)
+        if dest is None or dest.world_id != world_id:
+            return False, "unknown destination", None, {}
+        path, total_min = find_path(
+            session, world_id, character.location_id, dest_id
+        )
+        if not path:
+            return False, "impossible route", None, {}
+        return True, None, None, {
+            "path": path, "total_minutes": total_min,
+            "from": character.location_id,
+        }
 
     elif action_type == "BUY_ITEM":
         # At shop (needs_move=shop)
