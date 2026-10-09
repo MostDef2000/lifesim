@@ -373,6 +373,33 @@ def create_app(settings, session_factory: sessionmaker):
         cids = [c.id for c in session.query(Character).filter_by(user_id=user.id).all()]
         orphaned_assets: list[str] = []
 
+        # 0) user-scoped NOT NULL FK children — must run even when the user
+        # owns no characters (an admin/moderator who audited actions has
+        # admin_audit_log rows; review ses_ee064 Finding 1).
+        session.query(AdminAuditLog).filter(
+            AdminAuditLog.admin_user_id == user.id
+        ).delete(synchronize_session=False)
+        # dialogue_sessions.user_id is a NOT NULL FK to users — scope sessions
+        # to the user (plus their characters) unconditionally, not just when
+        # cids is non-empty.
+        dlg_ids = [
+            row.id
+            for row in session.query(DialogueSession.id)
+            .filter(or_(
+                DialogueSession.user_id == user.id,
+                DialogueSession.character_id.in_(cids),
+                DialogueSession.npc_id.in_(cids),
+            ))
+            .all()
+        ]
+        if dlg_ids:
+            session.query(DialogueMessage).filter(
+                DialogueMessage.session_id.in_(dlg_ids)
+            ).delete(synchronize_session=False)
+            session.query(DialogueSession).filter(
+                DialogueSession.id.in_(dlg_ids)
+            ).delete(synchronize_session=False)
+
         if cids:
             # 1) nullable owner links: null, don't delete (abandoned property)
             session.query(WorldObject).filter(
@@ -392,23 +419,6 @@ def create_app(settings, session_factory: sessionmaker):
             session.query(CharacterTask).filter(
                 CharacterTask.character_id.in_(cids)
             ).delete(synchronize_session=False)
-            dlg_ids = [
-                row.id
-                for row in session.query(DialogueSession.id)
-                .filter(or_(
-                    DialogueSession.user_id == user.id,
-                    DialogueSession.character_id.in_(cids),
-                    DialogueSession.npc_id.in_(cids),
-                ))
-                .all()
-            ]
-            if dlg_ids:
-                session.query(DialogueMessage).filter(
-                    DialogueMessage.session_id.in_(dlg_ids)
-                ).delete(synchronize_session=False)
-                session.query(DialogueSession).filter(
-                    DialogueSession.id.in_(dlg_ids)
-                ).delete(synchronize_session=False)
             session.query(DialogueTurn).filter(
                 DialogueTurn.character_id.in_(cids)  # FK -> ai_requests
             ).delete(synchronize_session=False)
@@ -481,12 +491,8 @@ def create_app(settings, session_factory: sessionmaker):
                 CharacterTrait.character_id.in_(cids)
             ).delete(synchronize_session=False)
 
-            # 5) audit rows authored by the deleted user (NOT NULL FK)
-            session.query(AdminAuditLog).filter(
-                AdminAuditLog.admin_user_id == user.id
-            ).delete(synchronize_session=False)
-
-            # 6) the characters themselves, then the user row
+            # 5) the characters themselves (audit rows for this user were
+            # already removed unconditionally in step 0)
             session.query(Character).filter(
                 Character.id.in_(cids)
             ).delete(synchronize_session=False)

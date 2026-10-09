@@ -23,6 +23,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../../.."))
 from app.api.app import create_app  # noqa: E402
 from app.config.config import load_config  # noqa: E402
 from app.db.models import (  # noqa: E402
+    AdminAuditLog,
     Character,
     CharacterHealth,
     CharacterJob,
@@ -283,3 +284,25 @@ def test_delete_account_removes_visual_asset_files(tmp_path):
     assert not store.exists(relative)
     with factory2() as session:
         assert session.query(VisualAsset).filter_by(id=asset_id).count() == 0
+
+
+def test_delete_account_admin_without_character_with_audit_rows(world):
+    """Review ses_ee064 Finding 1: a user with users.id-bound rows but NO
+    character (admin/moderator who audited actions) must not 500 — the
+    AdminAuditLog / user-scoped DialogueSession deletes run unconditionally."""
+    _, _, client, factory = world
+    uid = _register_and_login(client, "mod138")
+    with factory() as s:
+        user = s.get(User, uid)
+        user.role = "moderator"
+        s.add(AdminAuditLog(
+            admin_user_id=uid, action="users.disable", target_type="user",
+            target_id=str(uid), payload=None, wall_created_at="0",
+        ))
+        s.commit()
+
+    r = client.post("/auth/account/delete", json={"confirm": "mod138"})
+    assert r.status_code == 200, r.text
+    with factory() as s:
+        assert s.get(User, uid) is None
+        assert s.query(AdminAuditLog).filter_by(admin_user_id=uid).count() == 0
