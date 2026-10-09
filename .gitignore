@@ -46,3 +46,6 @@ snapshots/
 # Runtime artifacts (M8)
 backups/
 data/
+
+# local verification artifacts (orchestrator browser/API passes)
+.tmp-verify/

@@ -1206,3 +1206,15 @@ button.danger:hover { background: #93301f; }
 .location-view { border-top: 1px solid var(--w-line); margin-top: 10px; padding-top: 10px; display: flex; flex-direction: column; gap: 4px; }
 .location-view h3 { margin: 0; font-size: 1.05em; }
 .location-view button { align-self: flex-start; }
+
+/* #88 Dialogue alpha: chat screen — visual header, always-visible free-text
+   composer, non-frozen wait status. Appended after the pinned media blocks. */
+.chat-head { display: flex; gap: 10px; margin-top: 8px; align-items: flex-start; }
+.chat-head-info { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+#chat-visual { min-height: 96px; max-width: 220px; }
+.chat-visual-img { width: 200px; max-width: 100%; border-radius: 8px; display: block; }
+.chat-when { font-size: 0.8em; margin-left: 6px; }
+#chat-log { min-height: 120px; }
+.chat-bar { display: flex; gap: 6px; margin-top: 8px; }
+#chat-msg-input { flex: 1; min-width: 0; }
+.profile-roles { margin-top: 8px; }

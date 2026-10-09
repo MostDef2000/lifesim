@@ -1342,12 +1342,19 @@ function connectWs() {
   S.ws = ws;
 }
 
-/* ---------- chat (§77) ---------- */
+/* ---------- chat (§77, #88 Dialogue alpha) ---------- */
 
 async function viewChat() {
   location.hash = "#/chat";
   app.replaceChildren(topbar("#/chat"), el("div", { class: "muted" }, "Загрузка…"));
   try {
+    // Cold-load safety: #/chat can be the first route after reload — the
+    // by-user hydration omits location_id, so read the authoritative
+    // character first (same pattern as viewWorld).
+    if (S.character.location_id == null) {
+      const me = await api(`/characters/${S.character.id}`);
+      S.character = { ...S.character, ...me };
+    }
     const loc = await api(`/locations/${S.character.location_id}`);
     const npcs = (loc.characters_here || []).filter((id) => id.startsWith("npc_"));
     S.chatNpcs = npcs;
@@ -1358,72 +1365,179 @@ async function viewChat() {
       catch (e) { names[id] = id; }
     }));
     S.chatNpcNames = names;
-    renderChat(null);
+    // #88: current session history comes from the authoritative read model.
+    let sess = null;
+    if (S.chatSessionId) {
+      try { sess = await api(`/dialogue/${S.chatSessionId}`); }
+      catch (e) { S.chatSessionId = null; sess = null; }
+    }
+    renderChat(sess);
   } catch (e) { toast(e.message, true); }
 }
 
-async function renderChat(session) {
+function renderChat(session) {
+  let curSession = session;
   const npcSel = el("select", {},
     ...S.chatNpcs.map((id) => el("option", { value: id },
       (S.chatNpcNames && S.chatNpcNames[id])
         ? `${S.chatNpcNames[id]} (${id})` : id)));
-  
-  // Relationship line in header
-  let relLine = null;
-  if (S.character) {
-    try {
-      const rels = await api(`/characters/${S.character.id}/relationships`);
-      const rel = rels.find(r => r.other_id === npcSel.value);
-      if (rel) {
-        const affection = rel.affection;
-        const label = affection > 20 ? "тёплые" : (affection < -20 ? "холодные" : "нейтральные");
-        relLine = el("div", { class: "muted", style: "font-size:0.85em; margin-bottom:8px" },
-          `Отношения: ${label} (симпатия ${Math.round(affection)}, доверие ${Math.round(rel.trust)})`);
-      }
-    } catch (e) { console.error("Rel fetch failed", e); }
+  npcSel.addEventListener("change", () => {
+    S.chatSessionId = null;
+    renderChat(null);
+  });
+
+  // #89: public roles from the authoritative read model (no trait overlap,
+  // derive-on-read server-side — the client never invents roles).
+  const rolesLine = el("div", { class: "muted", id: "chat-roles" }, "Роли: …");
+  if (npcSel.value) {
+    api(`/characters/${npcSel.value}/roles`).then((r) => {
+      const titles = (r.roles || []).map((x) => x.title);
+      rolesLine.textContent = titles.length ? `Роли: ${titles.join(", ")}` : "Роли: нет";
+    }).catch(() => { rolesLine.textContent = "Роли: недоступны"; });
+  } else {
+    rolesLine.textContent = "Роли: выберите NPC";
   }
 
-  const log = el("div", { class: "chatlog" });
-  const input = el("input", { placeholder: "Сообщение…" });
-  const sugg = el("div", {});
-  if (session) {
-    for (const m of session.messages || []) {
-      log.append(el("div", { class: `chatmsg ${m.role === "npc" ? "npc" : ""}` },
-        el("span", { class: "who" }, m.role === "npc" ? "NPC" : "Вы"),
-        m.content));
-    }
-    for (const s of session.suggested_responses || []) {
-      sugg.append(el("span", { class: "sugg", onclick: () => { input.value = s; send(); } }, s));
-    }
+  // #88: relationship summary — authoritative read model only, current
+  // values, no client-side delta guessing; refreshed after each reply.
+  const relLine = el("div", { class: "muted" }, "Отношения: нет данных");
+  function refreshRel() {
+    api(`/characters/${S.character.id}/relationships`).then((rels) => {
+      const rel = (rels || []).find((x) => x.other_id === npcSel.value);
+      if (!rel) { relLine.textContent = "Отношения: пока незнакомы"; return; }
+      const a = rel.affection;
+      const label = a > 20 ? "тёплые" : (a < -20 ? "холодные" : "нейтральные");
+      relLine.textContent =
+        `Отношения: ${label} (симпатия ${Math.round(a)}, доверие ${Math.round(rel.trust)})`;
+    }).catch(() => { relLine.textContent = "Отношения: нет данных"; });
   }
-  async function send() {
-    const content = input.value.trim();
-    if (!content) return;
-    input.value = "";
-    try {
-      const sid = session ? session.session_id
-        : (await api("/dialogue/start", { method: "POST", body: { npc_id: npcSel.value } })).session_id;
-      const r = await api(`/dialogue/${sid}/message`, { method: "POST", body: { content } });
-      renderChat({ session_id: sid,
-        messages: [...(session ? session.messages : []), 
-          { role: "user", content },
-          { role: "npc", content: r.npc_reply }],
-        suggested_responses: r.suggested_responses || [] });
-    } catch (e) { toast(e.message, true); }
+  refreshRel();
+
+  // #88: canonical NPC visual (cookie-auth blob), graceful placeholder on
+  // 503 (visual off) / 404 (no canonical yet). Reads the #132 negative
+  // cache (S.visualDisabled) to skip the doomed request, but does NOT set
+  // the flag — m132 pins its single set-site inside portraitBlock(), and
+  // chat re-renders only on explicit user action.
+  const visual = el("div", { class: "panel portrait", id: "chat-visual" });
+  visual.append(el("div", { class: "portrait-status muted" }, "Портрет…"));
+  const visualOn = !S.visualDisabled;
+  if (visualOn) {
+    (async () => {
+      try {
+        const asset = await api(`/visual/characters/${npcSel.value}/portrait`);
+        const blob = await fetchPortraitBlob(`/visual/assets/${asset.id}/file`);
+        const url = URL.createObjectURL(blob);
+        visual.replaceChildren(el("img", {
+          class: "portrait-img chat-visual-img", src: url, alt: "Портрет NPC",
+        }));
+      } catch (e) {
+        visual.replaceChildren(el("div", { class: "portrait-status muted" },
+          "Визуал недоступен — диалог текстом"));
+      }
+    })();
+  } else {
+    visual.append(el("div", { class: "portrait-status muted" },
+      "Визуал недоступен — диалог текстом"));
   }
-  const sendBtn = el("button", { class: "primary", onclick: () => send() }, "Отправить");
+
+  const log = el("div", { class: "chatlog", id: "chat-log" });
+  function renderMessages(messages) {
+    log.replaceChildren(...(messages || []).map((m) =>
+      el("div", { class: `chatmsg ${m.sender === "npc" ? "npc" : ""}` },
+        el("span", { class: "who" }, m.sender === "npc" ? "NPC" : "Вы"),
+        m.content,
+        el("span", { class: "muted chat-when" },
+          " " + dayTime(m.game_timestamp)))));
+  }
+  renderMessages(curSession ? curSession.messages : []);
+
+  // #88: suggested replies are SHORTCUTS ONLY — clicking fills the always
+  // visible free-text input and focuses it; nothing is sent automatically.
+  const sugg = el("div", { id: "chat-sugg" });
+  function renderSugg(list) {
+    sugg.replaceChildren(...(list || []).map((s) =>
+      el("span", { class: "sugg", onclick: () => {
+        const inp = document.getElementById("chat-msg-input");
+        if (inp) { inp.value = s; inp.focus(); }
+      } }, s)));
+  }
+  const lastNpc = [...(curSession ? curSession.messages : [])]
+    .reverse().find((m) => m.sender === "npc");
+  renderSugg(lastNpc && lastNpc.suggested_responses
+    ? lastNpc.suggested_responses : []);
+
+  const status = el("div", { class: "muted", id: "chat-status" });
+  const input = el("input", { id: "chat-msg-input", placeholder: "Сообщение…" });
+  const sendBtn = el("button", {
+    id: "chat-send", class: "primary", onclick: () => send(),
+  }, "Отправить");
   input.addEventListener("keydown", (ev) => { if (ev.key === "Enter") send(); });
+
+  async function send() {
+    const draft = input.value;
+    const content = draft.trim();
+    if (!content) return;
+    const sentNpc = npcSel.value;  // #88: guard against NPC switch mid-flight
+    // #88: LLM latency is 14-45s — visibly non-frozen wait with a ticking
+    // elapsed-seconds counter.
+    status.textContent = "Печатает…";
+    const t0 = Date.now();
+    const tick = setInterval(() => {
+      status.textContent = `Печатает… ${Math.round((Date.now() - t0) / 1000)} с`;
+    }, 1000);
+    try {
+      const sid = curSession ? curSession.session_id
+        : (await api("/dialogue/start",
+          { method: "POST", body: { npc_id: sentNpc } })).session_id;
+      const r = await api(`/dialogue/${sid}/message`,
+        { method: "POST", body: { content } });
+      clearInterval(tick);
+      if (npcSel.value !== sentNpc) {
+        // The turn is logged server-side for the original NPC's session;
+        // a stale closure must not hijack the freshly re-rendered view.
+        input.value = "";
+        return;
+      }
+      const hist = await api(`/dialogue/${sid}`);
+      curSession = curSession || {};
+      curSession.session_id = sid;
+      curSession.messages = hist.messages;
+      S.chatSessionId = sid;
+      renderMessages(hist.messages);
+      const npcMsg = [...hist.messages].reverse().find((m) => m.sender === "npc");
+      renderSugg(npcMsg && npcMsg.suggested_responses
+        ? npcMsg.suggested_responses : []);
+      refreshRel();
+      input.value = "";
+      status.textContent = r.source === "fallback"
+        ? "LLM недоступен, отвечает fallback" : "";
+    } catch (e) {
+      clearInterval(tick);
+      input.value = draft;  // #88: recoverable error keeps the typed draft
+      status.textContent = "Не удалось отправить — проверьте связь и повторите";
+      toast(e.message, true);
+    }
+  }
+
   app.replaceChildren(topbar("#/chat"),
     el("div", { class: "grid" },
-      el("div", { class: "panel" },
+      el("div", { class: "panel", id: "chat-view" },
         el("h2", {}, "Диалог"),
         el("label", {}, "NPC на этой локации"), npcSel,
-        relLine,
+        el("div", { class: "chat-head" },
+          visual,
+          el("div", { class: "chat-head-info" },
+            el("div", { id: "chat-npc-name" },
+              (S.chatNpcNames && S.chatNpcNames[npcSel.value])
+                ? S.chatNpcNames[npcSel.value] : npcSel.value),
+            rolesLine, relLine)),
         el("div", { style: "margin-top:8px" }, log),
+        status,
         sugg,
-        el("div", { style: "display:flex;gap:6px;margin-top:8px" }, input, sendBtn)),
+        el("div", { class: "chat-bar" }, input, sendBtn)),
       el("div", { class: "panel" }, el("h2", {}, "Подсказки"),
-        el("div", { class: "muted" }, "Кликните подсказку, чтобы отправить её."))));
+        el("div", { class: "muted" },
+          "Подсказки заполняют поле ввода, свободный текст — основной"))));
 }
 
 /* ---------- inventory (§77) ---------- */
@@ -1474,6 +1588,15 @@ async function viewProfile() {
         el("h2", {}, "Аккаунт"),
         el("div", {}, S.user.username),
         el("div", { class: "muted" }, `${S.user.email} · роль: ${S.user.role}`),
+        // #89 profile hook: public roles from the authoritative read model.
+        (() => {
+          const rolesLine = el("div", { class: "muted profile-roles" }, "Роли: …");
+          api(`/characters/${S.character.id}/roles`).then((r) => {
+            const rolesText = (r.roles || []).map((x) => x.title).join(", ");
+            rolesLine.textContent = "Роли: " + (rolesText || "нет");
+          }).catch(() => { rolesLine.textContent = "Роли: недоступны"; });
+          return rolesLine;
+        })(),
         el("div", { style: "margin-top:8px" },
           el("button", { onclick: async () => {
             await api("/auth/logout", { method: "POST", body: {} });

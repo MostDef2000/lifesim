@@ -55,6 +55,11 @@ def build_context(
     # 013 (R4): NPC's most recent mainland trip enters the dialogue context
     from app.db.models import WorldEvent
 
+    # #89 (A7): public roles enter the dialogue context (derive-on-read,
+    # authoritative rows only). Appended keys — existing keys keep their
+    # positions/shapes (m-units pin those).
+    from app.social.roles import derive_roles
+
     last_return = (
         session.query(WorldEvent)
         .filter_by(
@@ -76,6 +81,8 @@ def build_context(
             else {"trust": 0.0, "affection": 0.0, "respect": 0.0}
         ),
         "npc_location": loc.name if loc is not None else None,
+        "npc_roles": derive_roles(session, world_id, npc.id),
+        "player_roles": derive_roles(session, world_id, user_char.id),
     }
     if last_return is not None:
         import json as _json
