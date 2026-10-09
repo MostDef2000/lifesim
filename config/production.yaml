@@ -13,6 +13,11 @@ world:
   world_id: "reineke_001"
   initial_population: 20
   start_real_timestamp: "2026-09-16T00:00:00Z"
+  # #151: live tick driver — the served world advances in real time; an
+  # external cron-driven `vl1 simulate` must NOT also run (one writer per
+  # world). Set false to pin the old frozen-clock behavior.
+  live_tick_enabled: true
+  live_tick_interval_s: 2.0
 
 ticks:
   time_scale: 1.0 # 1 real min = 1 game min for headless

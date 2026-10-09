@@ -4,6 +4,8 @@ The API layer is additive: headless simulation never imports this module
 (lazy imports inside routes). П2: with api.enabled=false nothing here runs.
 """
 
+import asyncio
+import contextlib
 import os
 from typing import Any
 
@@ -89,12 +91,40 @@ def create_app(settings, session_factory: sessionmaker):
     # default.yaml opts in for dev, production.yaml pins docs: false, and the
     # deploy/Caddyfile edge block 404s the paths anyway — defense in depth).
     docs = settings.api.docs
+
+    # #151 [alpha-v1][engine]: live tick driver. Started in the lifespan so
+    # every ASGI runtime gets it (`vl1 serve` and `uvicorn app.run:app`
+    # alike). TestClient used WITHOUT a context manager never triggers the
+    # lifespan, so existing suites keep the frozen-clock behavior; m152 uses
+    # the context manager to exercise the driver. ONE writer per world: the
+    # live driver replaces an external cron-driven `vl1 simulate`.
+    @contextlib.asynccontextmanager
+    async def _lifespan(_app):
+        tick_task = None
+        if settings.world.live_tick_enabled:
+            from app.api.ticker import start_tick_driver
+
+            # Review F1 (#151): start_tick_driver returns None when another
+            # process holds the single-writer tick lock — this process then
+            # simply doesn't tick (multi-worker/multi-server safe).
+            tick_task = start_tick_driver(settings, session_factory)
+        try:
+            yield
+        finally:
+            if tick_task is not None:
+                tick_task.cancel()
+                # Graceful cancel: wait for the loop to unwind; a driver
+                # that already died with another error must not fail
+                # shutdown.
+                await asyncio.gather(tick_task, return_exceptions=True)
+
     app = FastAPI(
         title="VL1 LifeSim API",
         version="0.1.0",
         docs_url="/docs" if docs else None,
         redoc_url="/redoc" if docs else None,
         openapi_url="/openapi.json" if docs else None,
+        lifespan=_lifespan,
     )
     app.add_exception_handler(RequestValidationError, _masked_validation_handler)
     state: dict[str, Any] = {"settings": settings, "session_factory": session_factory}

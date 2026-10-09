@@ -2,6 +2,12 @@ world:
   world_id: "reineke_001"
   initial_population: 20
   start_real_timestamp: "2026-09-16T00:00:00Z"
+  # #151: live tick driver — the API runtime advances game time itself
+  # (Engine.step every live_tick_interval_s of real time; speed follows
+  # world_clock.time_scale). Replaces an external cron-simulate; set false
+  # for the old frozen-clock behavior.
+  live_tick_enabled: true
+  live_tick_interval_s: 2.0
 
 ticks:
   time_scale: 1.0 # 1 real min = 1 game min for headless

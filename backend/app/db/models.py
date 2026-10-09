@@ -600,7 +600,15 @@ class ExternalContact(Base):
 def create_engine_factory(settings: Settings):
     engine = create_engine(
         f"sqlite:///{settings.persistence.db_path}",
-        connect_args={"check_same_thread": False}
+        connect_args={
+            "check_same_thread": False,
+            # #151 (single-writer safety): the live tick driver shares the
+            # DB file with request handlers. sqlite3's connect timeout is
+            # the busy timeout — a briefly blocked writer waits instead of
+            # raising "database is locked"; the ticker also logs-and-retries
+            # on its next beat.
+            "timeout": 15.0,
+        },
     )
 
     @event.listens_for(engine, "connect")
