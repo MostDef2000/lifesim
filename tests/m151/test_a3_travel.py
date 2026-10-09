@@ -212,7 +212,7 @@ def test_travel_plan_grounds_alias_and_creates_move(world):
     assert path, "pier must be reachable from the starting house"
 
     r = client.post("/travel/plan", json={"text": "идти к причалу"})
-    assert r.status_code == 200, r.text
+    assert r.status_code == 201, r.text
     body = r.json()
     assert body["location_id"] == pier_id
     assert body["name"] == "Main Pier"
@@ -235,7 +235,7 @@ def test_travel_plan_exact_display_name(world):
     cid = _make_character(client, "Exact Tester")
     _to_direct(client, cid)
     r = client.post("/travel/plan", json={"text": "Main Pier"})
-    assert r.status_code == 200, r.text
+    assert r.status_code == 201, r.text
     assert r.json()["name"] == "Main Pier"
 
 
@@ -354,5 +354,38 @@ def test_travel_plan_is_deterministic_without_llm(world):
     cid = _make_character(client, "Det Tester")
     _to_direct(client, cid)
     r = client.post("/travel/plan", json={"text": "идти к причалу"})
-    assert r.status_code == 200, r.text
+    assert r.status_code == 201, r.text
     assert r.json()["name"] == "Main Pier"
+
+
+def test_move_without_location_id_is_422(world):
+    """Review F1: destination-less MOVE (client POST with empty params) used
+    to enqueue a silent no-op task — reject it, don't accept."""
+    _, _, client, factory = world
+    _register_and_login(client, "nof138")
+    cid = _make_character(client, "Nof Dest")
+    _to_direct(client, cid)
+    r = client.post("/actions", json={
+        "character_id": cid, "action_type": "MOVE", "params": {},
+    })
+    assert r.status_code == 422, r.text
+    assert "location_id required" in r.text
+    with factory() as s:
+        assert s.query(CharacterTask).count() == 0
+
+
+def test_move_to_current_location_is_422(world):
+    """Review F5: same-location MOVE would produce a 0-minute no-op with a
+    spurious CHARACTER_MOVED — the server guards what the client guards."""
+    settings, _, client, factory = world
+    _register_and_login(client, "here138")
+    cid = _make_character(client, "Here Already")
+    _to_direct(client, cid)
+    with factory() as s:
+        loc_id = s.get(Character, cid).location_id
+    r = client.post("/actions", json={
+        "character_id": cid, "action_type": "MOVE",
+        "params": {"location_id": loc_id},
+    })
+    assert r.status_code == 422, r.text
+    assert "already at destination" in r.text

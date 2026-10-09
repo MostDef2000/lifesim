@@ -46,7 +46,10 @@ async function api(path, opts = {}) {
   try { data = await res.json(); } catch (e) { data = null; }
   if (!res.ok) {
     const detail = data && data.detail ? data.detail : `HTTP ${res.status}`;
-    throw Object.assign(new Error(String(detail)), { status: res.status, detail });
+    // #82 (A3): keep the whole body (422 ambiguous carries .options) —
+    // .detail alone would strand the options list server-side.
+    throw Object.assign(new Error(String(detail)),
+      { status: res.status, detail, data });
   }
   return data;
 }
@@ -871,9 +874,10 @@ function travelBar() {
 
 function travelErrorText(e) {
   const d = e.detail;
-  if (d && typeof d === "object" && d.detail === "ambiguous destination"
-    && Array.isArray(d.options)) {
-    return `Уточните пункт назначения: ${d.options.join(", ")}`;
+  const body = e.data || {};
+  if (body.detail === "ambiguous destination"
+    && Array.isArray(body.options)) {
+    return `Уточните пункт назначения: ${body.options.join(", ")}`;
   }
   if (typeof d === "string" && d) return d;
   return e.message || "Не удалось построить маршрут";

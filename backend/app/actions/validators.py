@@ -171,9 +171,12 @@ def validate(
         request_params = params or {}
         dest_raw = request_params.get("location_id")
         if dest_raw is None:
-            # No explicit destination (utility-internal call): MOVE is only
-            # ever enqueued as a precondition with a precomputed path.
-            return True, None, None, {}
+            # Review F1 (#82): no internal caller reaches this branch without
+            # a destination (utility skips MOVE entirely; NPC/goal producers
+            # enqueue MOVE directly with precomputed paths). A destination-
+            # less MOVE here can only be a client POST — reject it instead of
+            # enqueuing a task whose completion is a silent no-op.
+            return False, "location_id required", None, {}
         from app.world.seed_world import find_path
 
         try:
@@ -183,6 +186,11 @@ def validate(
         dest = session.get(Location, dest_id)
         if dest is None or dest.world_id != world_id:
             return False, "unknown destination", None, {}
+        if dest_id == character.location_id:
+            # Review F5 (#82): find_path would return ([from], 0) — a no-op
+            # move with a spurious CHARACTER_MOVED. The client guards same-
+            # location clicks; the server now guards it too.
+            return False, "already at destination", None, {}
         path, total_min = find_path(
             session, world_id, character.location_id, dest_id
         )

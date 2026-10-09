@@ -767,7 +767,7 @@ def create_app(settings, session_factory: sessionmaker):
     class TravelPlanIn(BaseModel):
         text: str
 
-    @app.post("/travel/plan")
+    @app.post("/travel/plan", status_code=201)
     def travel_plan(
         body: TravelPlanIn,
         user: User = Depends(current_user),
