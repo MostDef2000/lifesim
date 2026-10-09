@@ -8,7 +8,7 @@ const S = { user: null, character: null, world: null, ws: null, wsTries: 0,
   feed: [], cursor: 0, pollTimer: null, canonicalPortraitId: null, authProbed: false, visualDisabled: false,
   mapLod: "island", mapQuality: "balanced",
   mapReducedMotion: window.matchMedia("(prefers-reduced-motion: reduce)").matches,
-  mapFocusLocationId: null, mapLocations: [], travel: null, scene: null };
+  mapFocusLocationId: null, mapLocations: [], travel: null, scene: null, sceneAct: null };
 
 /* ---------- helpers ---------- */
 
@@ -440,6 +440,10 @@ function fillScenePanel(box) {
     }
     kids.push(el("button", { type: "button", onclick: backToMap }, "К карте"));
   }
+  // #87 (A5): the free-text scene action bar + the last result line are part
+  // of EVERY scene panel state (idle/loading/ready/fallback) — the issue
+  // requires the input to be always visible in Scene.
+  kids.push(sceneActBar(), sceneActResultNode());
   box.replaceChildren(el("h2", {}, "Сцена"), ...kids);
 }
 
@@ -472,6 +476,88 @@ function sceneBlock() {
   const box = el("div", { class: "panel portrait", id: "scene-view" }, el("h2", {}, "Сцена"));
   fillScenePanel(box);
   return box;
+}
+
+/* ---------- #87 (A5): free-text scene action ---------- */
+
+function sceneActBar() {
+  return el("div", { class: "scene-act" },
+    el("input", {
+      id: "scene-act-input", type: "text",
+      placeholder: "Что вы делаете? Например: поговорить с Ивановым",
+      onkeydown: (ev) => { if (ev.key === "Enter") submitSceneAct(); },
+    }),
+    el("button", { id: "scene-act-go", type: "button",
+      onclick: () => submitSceneAct() }, "Сделать"));
+}
+
+function sceneActInterpText(i) {
+  if (!i) return "";
+  const p = i.params || {};
+  if (i.intent === "move") return `идти: ${p.destination_name || p.destination_id || ""}`;
+  if (i.intent === "socialize") return `поговорить: ${p.target_name || ""}`;
+  if (i.intent === "buy") return `купить: ${p.item || ""}`;
+  if (i.intent === "wear") return `надеть: ${p.object_type || p.object_text || ""}`;
+  if (i.intent === "take_off") return `снять: ${p.object_type || p.object_text || ""}`;
+  return String(i.intent || "");
+}
+
+function sceneActResultNode() {
+  // Result of the last /scene/act submission. It lives in S.sceneAct (not in
+  // the DOM), so it survives the scene refresh — the committed gameplay
+  // result stays visible even when the visual re-inspection fails.
+  const r = S.sceneAct;
+  if (!r) return null;
+  const lines = [];
+  if (r.ok === false) {
+    lines.push(r.detail || "Не удалось выполнить действие");
+  } else {
+    if (r.interpretation) {
+      lines.push(el("div", { class: "muted" },
+        "Распознано: " + sceneActInterpText(r.interpretation)));
+    }
+    if (r.action === "look") {
+      lines.push(el("div", {}, r.result));
+    } else if (r.action === "wear" || r.action === "take_off") {
+      lines.push(el("div", {}, r.worn ? "Надето" : "Снято"));
+    } else if (r.task_id) {
+      const ev = r.events && r.events.length
+        ? " · " + r.events[r.events.length - 1].event_type : "";
+      lines.push(el("div", {}, "Принято: " + r.task_type
+        + " (задача " + r.task_id + ")" + ev));
+    }
+  }
+  return el("div", { id: "scene-act-result", class: "scene-act-line muted" }, ...lines);
+}
+
+async function submitSceneAct() {
+  const input = document.getElementById("scene-act-input");
+  const text = input ? input.value.trim() : "";
+  if (!text) return;
+  // A5: one submission in flight — the button is disabled for the request,
+  // mirroring the A4 one-inspection guard philosophy.
+  const go = document.getElementById("scene-act-go");
+  if (go) go.disabled = true;
+  try {
+    const r = await api("/scene/act", { method: "POST", body: { text } });
+    S.sceneAct = r;
+    // Committed result → visual refresh: re-inspect ONLY from ready/fallback
+    // (A4 invariant: never reset S.scene, never re-render the whole world —
+    // travel/arrival invalidation stays in renderWorld). Idle keeps the
+    // result line without a refresh.
+    const st = S.scene && S.scene.state;
+    if (r.ok && r.task_id && (st === "ready" || st === "fallback")) {
+      await inspectSurroundings();
+    } else {
+      renderScenePanel();
+    }
+  } catch (e) {
+    // Same error phrasing as the A3 travel bar (409/401/4xx surfaces).
+    S.sceneAct = { ok: false, detail: travelErrorText(e) };
+    renderScenePanel();
+  } finally {
+    if (go) go.disabled = false;
+  }
 }
 
 /* ---------- topbar ---------- */

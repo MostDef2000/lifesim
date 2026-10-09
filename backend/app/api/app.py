@@ -738,13 +738,71 @@ def create_app(settings, session_factory: sessionmaker):
         action_type: str
         params: dict = {}
 
+    def _validated_enqueue(
+        session: Session, character: Character, action_type: str,
+        request_params: dict, now_ts: int,
+    ):
+        """Authoritative player-action path shared by POST /actions and
+        POST /scene/act (#87 A5): the SAME validate() → enqueue_task()
+        sequence, so the two endpoints cannot diverge. validate() is
+        read-only (world queries + find_path); enqueue_task() is the only
+        write here. Returns (task, reject_reason): reject_reason set →
+        validate() refused (no mutation happened); task None without a
+        reason → the character already has an active task. Caller commits."""
+        from app.actions.lifecycle import enqueue_task
+        from app.actions.validators import validate
+
+        params = request_params or {}
+        ok, reason, _needs_move, vparams = validate(
+            session, character.world_id, character, action_type, now_ts,
+            state["settings"], params=params,
+        )
+        if not ok:
+            return None, reason
+        task = enqueue_task(
+            session, character.world_id, character, action_type,
+            "player", {**vparams, **params}, now_ts, state["settings"],
+        )
+        return task, None
+
+    def _actor_events_since(
+        session: Session, world_id: str, actor_id: str, after_id: int, limit: int = 10
+    ):
+        """#87 (A5): WorldEvents logged during THIS request (actor-scoped,
+        strictly after the pre-call watermark), so the client can show an
+        event line before the scene refresh. enqueue_task() itself logs
+        nothing — completion events land later via the tick — so this is
+        usually []; the field exists so the UI never guesses."""
+        import json as _json
+
+        from app.db.models import WorldEvent
+
+        rows = (
+            session.query(WorldEvent)
+            .filter(
+                WorldEvent.world_id == world_id,
+                WorldEvent.actor_id == actor_id,
+                WorldEvent.id > after_id,
+            )
+            .order_by(WorldEvent.id)
+            .limit(limit)
+            .all()
+        )
+        return [
+            {
+                "id": e.id, "event_type": e.event_type, "actor_id": e.actor_id,
+                "location_id": e.location_id, "day": e.game_timestamp // 1440,
+                "game_timestamp": e.game_timestamp,
+                "payload": _json.loads(e.payload) if e.payload else {},
+            }
+            for e in rows
+        ]
+
     @app.post("/actions", status_code=201)
     def post_action(
         body: ActionIn, user: User = Depends(current_user), session: Session = Depends(db)
     ):
-        from app.actions.lifecycle import enqueue_task
         from app.actions.registry import ACTION_REGISTRY
-        from app.actions.validators import validate
 
         character = _owned_character(session, user, body.character_id)
         if character.control_mode == "AUTONOMOUS":
@@ -757,17 +815,11 @@ def create_app(settings, session_factory: sessionmaker):
             raise HTTPException(status_code=422, detail=f"unknown action_type {body.action_type}")
 
         now_ts = _world_now(session)
-        ok, reason, needs_move_id, vparams = validate(
-            session, character.world_id, character, body.action_type, now_ts,
-            state["settings"], params=body.params or {},
-        )
-        if not ok:
-            raise HTTPException(status_code=422, detail=f"action not possible: {reason}")
-
-        task = enqueue_task(
-            session, character.world_id, character, body.action_type,
-            "player", {**vparams, **body.params}, now_ts, state["settings"],
-        )
+        task, reject_reason = _validated_enqueue(
+            session, character, body.action_type, body.params, now_ts)
+        if reject_reason is not None:
+            raise HTTPException(
+                status_code=422, detail=f"action not possible: {reject_reason}")
         if task is None:
             raise HTTPException(status_code=409, detail="character already has an active task")
         session.commit()
@@ -856,6 +908,269 @@ def create_app(settings, session_factory: sessionmaker):
             "task_id": task.id, "task_type": task.task_type,
             "status": task.status,
         }
+
+    # ---------- #87 (A5): free-text scene action ----------
+
+    class SceneActIn(BaseModel):
+        text: str
+
+    # scene intent → registry action_type (IDLE is NOT here — see below).
+    _SCENE_TASK_TYPES = {
+        "move": "MOVE", "socialize": "SOCIALIZE", "sleep": "SLEEP",
+        "eat": "EAT", "drink": "DRINK", "buy": "BUY_ITEM",
+    }
+
+    def _scene_act_wear(
+        session: Session, wid: str, character: Character, kind: str,
+        params: dict, watermark: int,
+    ):
+        """A5 wear/take-off: resolve the OWN wearable (the only writer is
+        toggle_wear — the SAME path POST /wear uses) and toggle it. No task
+        is created; the worn-flag flip is the whole mutation. The intent
+        maps to the expected outcome: «надеть» picks an object that is not
+        worn yet, «снять» a worn one (toggle_wear itself stays a toggle)."""
+        import json as _json
+
+        from fastapi.responses import JSONResponse
+
+        from app.db.models import WorldObject
+        from app.social.clothing import WearError, toggle_wear
+
+        interpretation = {"intent": kind, "params": params}
+        wtype = params.get("wearable")
+        if not wtype:
+            return JSONResponse(status_code=200, content={
+                "ok": False, "reason": "not_possible",
+                "detail": "Вещь не распознана (каталог: jacket/куртка, "
+                          "boots/сапоги, hat/шляпа).",
+                "interpretation": interpretation, "events": [],
+            })
+        own = (
+            session.query(WorldObject)
+            .filter(
+                WorldObject.world_id == wid,
+                WorldObject.owner_character_id == character.id,
+                WorldObject.object_type == wtype,
+            )
+            .order_by(WorldObject.id)
+            .all()
+        )
+        want_worn = kind == "wear"
+        pick = None
+        for obj in own:
+            try:
+                meta = _json.loads(obj.object_metadata or "{}")
+            except (ValueError, TypeError):
+                meta = {}
+            if isinstance(meta, dict) and bool(meta.get("worn")) != want_worn:
+                pick = obj
+                break
+        if pick is None:
+            if own:
+                detail = "Уже надето." if want_worn else "Вещь не надета."
+            else:
+                detail = f"Нет такой вещи: {wtype}."
+            return JSONResponse(status_code=200, content={
+                "ok": False, "reason": "not_possible", "detail": detail,
+                "interpretation": interpretation, "events": [],
+            })
+        try:
+            result = toggle_wear(session, wid, character.id, pick.id)
+        except WearError as exc:
+            session.rollback()
+            return JSONResponse(status_code=200, content={
+                "ok": False, "reason": "not_possible", "detail": exc.code,
+                "interpretation": interpretation, "events": [],
+            })
+        session.commit()
+        return JSONResponse(status_code=201, content={
+            "ok": True, "action": kind, "object_id": pick.id,
+            "worn": result["worn"], "slot": result["slot"],
+            "interpretation": interpretation,
+            "events": _actor_events_since(session, wid, character.id, watermark),
+        })
+
+    @app.post("/scene/act")
+    def scene_act(
+        body: SceneActIn, user: User = Depends(current_user), session: Session = Depends(db)
+    ):
+        """#87 (A5): free-text scene action → interpret → validate → commit.
+
+        Deterministic only: llm.enabled=false in dev and there is NO LLM call
+        on any path of this endpoint — the interpreter
+        (app.api.scene_act.interpret_scene_action) is a PURE text→intent
+        function without a Session parameter, so neither it nor any model
+        can write the DB/world directly. Every mutation goes through the
+        existing authoritative paths only: validate()+enqueue_task() (the
+        POST /actions path, shared via _validated_enqueue) and toggle_wear()
+        (the POST /wear path). Unsupported/ambiguous/validator-rejected
+        intents return 200 {"ok": false, "reason", "detail"} with NO
+        mutation (validate() is read-only).
+
+        IDLE: validate() has no IDLE branch ("Unknown action type"); the
+        engine itself enqueues IDLE directly (lifecycle.py path-not-found
+        fallback), so this endpoint follows that existing precedent with
+        source="player" instead of a doomed validate() call.
+
+        Status codes: 201 task/wear committed; 200 look (pure read) or
+        ok:false; 409 AUTONOMOUS (same as POST /actions); 401 unauthenticated.
+        """
+        from fastapi.responses import JSONResponse
+        from sqlalchemy import func
+
+        from app.actions.lifecycle import enqueue_task
+        from app.api.intent import ground_destination
+        from app.api.scene_act import (
+            UNSUPPORTED_DETAIL,
+            ground_social_target,
+            interpret_scene_action,
+        )
+        from app.db.models import WorldEvent
+        from app.visual.descriptor import build_scene_descriptor
+
+        text = (body.text or "").strip()
+        intent = interpret_scene_action(text)
+        if intent is None:
+            # Interpreter could not classify: explanation + catalog, no
+            # mutation (the character is not even resolved yet).
+            return JSONResponse(status_code=200, content={
+                "ok": False, "reason": "unsupported_action",
+                "detail": UNSUPPORTED_DETAIL, "events": [],
+            })
+
+        character = _owned_character_by_user(session, user)
+        if character.control_mode == "AUTONOMOUS":
+            raise HTTPException(
+                status_code=409,
+                detail="character is AUTONOMOUS; switch to GUIDED or DIRECT first (§61)",
+            )
+
+        wid = character.world_id
+        settings_ = state["settings"]
+        now_ts = _world_now(session)
+        # Pre-call event watermark: everything the response reports must be
+        # a WorldEvent committed by THIS request (never fabricated).
+        watermark_row = session.query(func.max(WorldEvent.id)).first()
+        watermark = watermark_row[0] if watermark_row and watermark_row[0] else 0
+
+        kind = intent["intent"]
+        params = intent["params"]
+        interpretation = {"intent": kind, "params": {}}
+
+        if kind == "look":
+            # Pure read of committed state (§67 descriptor) — no task, no
+            # mutation of any kind (no commit, no event, no task row).
+            descriptor = build_scene_descriptor(
+                session, wid, character.location_id,
+                player_character_id=character.id,
+            )
+            return {
+                "ok": True, "action": "look", "result": "Вы осматриваетесь.",
+                "scene": descriptor, "interpretation": interpretation,
+                "events": [],
+            }
+
+        if kind in ("wear", "take_off"):
+            return _scene_act_wear(session, wid, character, kind, params, watermark)
+
+        request_params: dict = {}
+        if kind == "move":
+            resolved = ground_destination(
+                session, wid, settings_, params.get("destination_text", ""))
+            if isinstance(resolved, dict):
+                if resolved.get("options"):
+                    return JSONResponse(status_code=200, content={
+                        "ok": False, "reason": "ambiguous",
+                        "detail": "Уточните пункт назначения: "
+                                  + ", ".join(resolved["options"]),
+                        "options": resolved["options"], "events": [],
+                    })
+                return JSONResponse(status_code=200, content={
+                    "ok": False, "reason": "not_possible",
+                    "detail": resolved.get("detail", "unknown destination"),
+                    "events": [],
+                })
+            request_params = {"location_id": resolved.id}
+            interpretation["params"] = {
+                "destination_id": resolved.id, "destination_name": resolved.name}
+
+        elif kind == "socialize":
+            # Resolve the mentioned target among the characters PRESENT at
+            # this scene for the interpretation + ambiguity UX; the SOCIALIZE
+            # validator stays authoritative for the actual target (it ignores
+            # request params on purpose), so request_params stays {} and the
+            # task carries the validator's own choice.
+            present = (
+                session.query(Character)
+                .filter(
+                    Character.world_id == wid,
+                    Character.alive,
+                    Character.id != character.id,
+                    Character.location_id == character.location_id,
+                )
+                .order_by(Character.id)
+                .all()
+            )
+            candidates = [
+                (c.id, f"{c.first_name} {c.last_name}".strip()) for c in present
+            ]
+            status_t, _tid, name_t = ground_social_target(
+                candidates, params.get("target_text", ""))
+            options_t = list(name_t) if isinstance(name_t, list) else []
+            if status_t == "ambiguous":
+                return JSONResponse(status_code=200, content={
+                    "ok": False, "reason": "ambiguous",
+                    "detail": "Уточните, с кем говорить: " + ", ".join(options_t),
+                    "options": options_t, "events": [],
+                })
+            if status_t == "none":
+                detail = (
+                    "Рядом нет такого персонажа. Кто здесь: " + ", ".join(options_t)
+                    if options_t else "Рядом никого — некому говорить."
+                )
+                return JSONResponse(status_code=200, content={
+                    "ok": False, "reason": "ambiguous", "detail": detail,
+                    "options": options_t, "events": [],
+                })
+            interpretation["params"] = {"target_id": _tid, "target_name": name_t}
+
+        elif kind == "buy":
+            if not params.get("item"):
+                return JSONResponse(status_code=200, content={
+                    "ok": False, "reason": "not_possible",
+                    "detail": "Предмет не распознан (каталог: еда, вода, "
+                              "инструменты, лекарства, одежда, книга).",
+                    "interpretation": interpretation, "events": [],
+                })
+            # The BUY_ITEM validator derives the stocked object itself; the
+            # parsed key only documents the interpretation.
+            interpretation["params"] = {"item": params["item"]}
+
+        if kind == "idle":
+            # validate() has no IDLE branch — see the docstring; direct
+            # enqueue follows the engine's own IDLE fallback precedent.
+            task = enqueue_task(
+                session, wid, character, "IDLE", "player", {}, now_ts, settings_)
+            reject_reason = None
+        else:
+            task, reject_reason = _validated_enqueue(
+                session, character, _SCENE_TASK_TYPES[kind], request_params, now_ts)
+
+        if reject_reason is not None:
+            # validate() refused — read-only, so nothing was mutated.
+            return JSONResponse(status_code=200, content={
+                "ok": False, "reason": "not_possible", "detail": reject_reason,
+                "interpretation": interpretation, "events": [],
+            })
+        if task is None:
+            raise HTTPException(
+                status_code=409, detail="character already has an active task")
+        session.commit()
+        return JSONResponse(status_code=201, content={
+            "ok": True, "task_id": task.id, "task_type": task.task_type,
+            "status": task.status, "interpretation": interpretation,
+            "events": _actor_events_since(session, wid, character.id, watermark),
+        })
 
     # ---------- Goals (R6, §62) ----------
 
