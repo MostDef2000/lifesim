@@ -325,7 +325,10 @@ def test_ui_travel_bar_pins_without_damaging_existing_pins():
     assert js.count('"Идти"') == 1
     assert js.count("/travel/plan") == 1
     assert js.count('"Осмотреть"') == 1
-    assert js.count("Осмотр — в следующем срезе") == 1
+    # #86 (A4) supersedes the A3 placeholder: the locationView «Осмотреть»
+    # button now runs the real inspect action (inspectSurroundings), so the
+    # placeholder toast string is gone — pin updated 1 → 0 by A4.
+    assert js.count("Осмотр — в следующем срезе") == 0
     assert js.count("Уточняю маршрут") == 1
     # Carry-forward pins (m146/m149/m150 lineage) must survive.
     assert js.count("innerHTML") == 0
