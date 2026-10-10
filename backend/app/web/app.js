@@ -558,7 +558,15 @@ async function submitSceneAct() {
   try {
     const r = await api("/scene/act", { method: "POST", body: { text } });
     S.sceneAct = r;
-    S.sceneActDraft = null;
+    if (r && r.ok === false) {
+      // #93 review F2: 200 ok:false (unsupported/ambiguous/not_possible) is a
+      // RECOVERABLE rejection — the user must rephrase, so the typed draft is
+      // kept here exactly like the catch path below.
+      S.sceneActDraft = text;
+    } else {
+      // Only a real success (or the discarded 200-ok shape) clears it.
+      S.sceneActDraft = null;
+    }
     // Committed result → visual refresh: re-inspect ONLY from ready/fallback
     // (A4 invariant: never reset S.scene, never re-render the whole world —
     // travel/arrival invalidation stays in renderWorld). Idle keeps the
@@ -574,8 +582,11 @@ async function submitSceneAct() {
     S.sceneAct = { ok: false, detail: travelErrorText(e) };
     // #93: a recoverable error keeps the typed draft (chat-draft pattern).
     S.sceneActDraft = text;
+    // #93 review F1: §61 refusals surface as localized hints (same discipline
+    // as doAction/moveTo/viewExternal); any other error keeps the raw text.
+    // The typed draft stays — switching control mode makes the same text valid.
     renderScenePanel();
-    toast(e.message, true);
+    toast(isAutonomousRefusal(e) ? AUTONOMOUS_HINT : e.message, true);
   } finally {
     if (go) go.disabled = false;
   }

@@ -58,6 +58,8 @@ from app.actions.lifecycle import progress_tick  # noqa: E402
 from app.api.app import create_app  # noqa: E402
 from app.config.config import load_config  # noqa: E402
 from app.db.models import (  # noqa: E402
+    Character,
+    CharacterTask,
     WorldClock,
     WorldEvent,
     bootstrap,
@@ -303,10 +305,35 @@ def test_flux_down_scene_result_commits_and_serves(world):
     loc_id = client.get(f"/characters/{cid}").json()["location_id"]
     with factory() as session:
         obj_count = session.query(WorldClock).filter_by(world_id=wid).count()
+        char_before = (
+            session.query(Character)
+            .filter_by(id=cid)
+            .with_entities(
+                Character.location_id,
+                Character.alive,
+                Character.updated_at,
+            )
+            .first()
+        )
+        tasks_before = (
+            session.query(CharacterTask).filter_by(character_id=cid).count()
+        )
     r = client.post("/visual/scenes", json={"location_id": loc_id})
     assert r.status_code == 503, r.text
     with factory() as session:
         assert session.query(WorldClock).filter_by(world_id=wid).count() == obj_count
+        char_after = (
+            session.query(Character)
+            .filter_by(id=cid)
+            .with_entities(
+                Character.location_id,
+                Character.alive,
+                Character.updated_at,
+            )
+            .first()
+        )
+        assert char_after == char_before
+        assert session.query(CharacterTask).filter_by(character_id=cid).count() == tasks_before
 
     # The committed-state descriptor still serves (gameplay result persists).
     r = client.post("/scene/act", json={"text": "осмотреться"})
@@ -353,11 +380,14 @@ def test_ui_transient_failure_catch_pins():
     assert js.count('el("button", { type: "button", onclick: retry }, "Повторить")') == 1
     # Scene act draft preservation (never uses the chat literals — m156 pins
     # 'input.value = draft;' == 1 and 'input.value = "";' == 2 exactly).
-    assert js.count("sceneActDraft") == 4  # S-init + read + success-clear + error-set
-    assert js.count("S.sceneActDraft = text;") == 1
-    assert js.count("S.sceneActDraft = null;") == 1
+    # S-init + read + ok:false-keep + success-clear + error-set:
+    assert js.count("sceneActDraft") == 5
+    assert js.count("S.sceneActDraft = text;") == 2  # 200 ok:false AND catch — both recoverable
+    assert js.count("S.sceneActDraft = null;") == 1  # only a real success clears it
     assert js.count("value: S.sceneActDraft || ") == 1
-    assert js.count("toast(e.message, true);\n  } finally {") == 1
+    # §61 refusals surface localized (F1): the raw-English toast form is gone.
+    assert js.count("toast(isAutonomousRefusal(e) ? AUTONOMOUS_HINT : e.message, true);") == 1
+    assert js.count("toast(e.message, true);\n  } finally {") == 0
     # Desire save failure: explicit hint, typed text kept (no re-render).
     assert js.count('"Не удалось сохранить желание. " + RETRY_HINT') == 1
     # Travel failure: state reset + toast only — the input survives because
