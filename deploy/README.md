@@ -119,15 +119,135 @@ sudo -u lifesim sqlite3 /opt/lifesim/data/lifesim.db ".backup '/opt/lifesim/back
 
 Крон-строка (пример, 03:15 ежедневно): `15 3 * * * sqlite3 /opt/lifesim/data/lifesim.db ".backup /opt/lifesim/backups/\$(date +\%F).db"`
 
-## 9. Обновление
+## 9. Обновление (workflow-dispatch — штатный путь)
+
+Штатное обновление прод-сервера — GitHub Actions workflow
+`.github/workflows/deploy.yml` (ручной dispatch, адаптация проверенного
+паттерна stroy #130). Ручная процедура ниже остаётся как **break-glass**.
+
+Поток:
+
+1. Владелец подтверждает деплой в dev-чате → оркестратор запускает workflow
+   (`workflow_dispatch`) с input `deploy_sha` — полным 40-hex SHA коммита,
+   уже влитого в `main`. Человеческий гейт — подтверждение в чате (решение
+   владельца 2026-10-10), поэтому environment `production` — без protection
+   rules.
+2. Job `gate`: SHA валиден (40 hex) и является предком `origin/main`
+   (`git merge-base --is-ancestor`); через GitHub API выбирается последний
+   завершённый успешный `push`-run `ci.yml` для этого SHA, его джобы обязаны
+   быть `success` (в `ci.yml` джобы `gate` и `slow`; `slow` на push не
+   запускается — `skipped`, это принимается). Любая ошибка API — отказ
+   (fail-closed).
+3. Job `deploy` (concurrency-группа `lifesim-production`): один SSH-вызов с
+   forced command `lifesim-deploy-v1 <sha>`. Обёртка на сервере
+   (`/usr/local/sbin/lifesim-deploy-wrapper`, исходник —
+   `deploy/deploy-wrapper`): flock single-flight → `git fetch` (origin
+   зафиксирован на канонический URL) → проверка, что SHA лежит на
+   first-parent-цепочке `origin/main` → запись previous-sha → бэкап SQLite
+   (§8) → `git checkout --detach <sha>` → `.venv/bin/pip install -e .
+   uvicorn` → `sudo systemctl restart lifesim` → пробы §6 (health с ретраем
+   ~60 с, docs 404, static 200). Обёртка работает от пользователя `deploy`
+   через ограниченный sudoers — root не предполагается (§9.1).
+4. Успех: обёртка печатает `DEPLOYMENT_ACCEPTED sha=<sha> previous=<prev>`;
+   job проверяет маркер и кладёт SSH-транскрипт в артефакты; на сервере
+   пишется манифест `/opt/lifesim/deploy-state/deployment-manifest.json`
+   (sha, timestamp, probes, previous_sha, путь к бэкапу).
+5. Неудача после записи previous-sha: обёртка автоматически откатывается на
+   previous sha (checkout + pip + restart + пробы) и печатает
+   `DEPLOY_ROLLED_BACK sha=... previous=...`; job падает, транскрипт — в
+   артефактах.
+
+Ручной откат = повторный dispatch предыдущего SHA (он в манифесте и в строке
+`DEPLOYMENT_ACCEPTED`). SHA должен оставаться на first-parent-цепочке `main`
+и иметь зелёный push-run `ci.yml` — для штатных деплоев это всегда так;
+после force-push истории — только break-glass.
+
+Локальные правки отслеживаемых файлов на сервере (например, §7 правит
+`config/production.yaml`) остаются в рабочем дереве и могут заблокировать
+`git checkout --detach` на конфликтующем SHA — обёртка тогда безопасно
+откатится и job упадёт с транскриптом. Переносите такие правки в репо
+коммитом или снимайте их на сервере перед деплоем.
+
+### 9.1 Bootstrap (однократно, Lane B)
+
+Bootstrap выполняется вручную владельцем/сисадмином с root-доступом, один
+раз. Обёртка никогда не предполагает root — только эти гранты.
+
+1. **Deploy-пользователь и каталоги:**
+
+   ```bash
+   sudo adduser --disabled-password --gecos "lifesim deploy" deploy
+   sudo mkdir -p /opt/lifesim/deploy-state /opt/lifesim/backups
+   sudo chown deploy:deploy /opt/lifesim/deploy-state
+   sudo chown lifesim:lifesim /opt/lifesim/backups
+   ```
+
+2. **Обёртка** (копия с root-владельцем — НЕ symlink в чекаут: код обёртки
+   не должен меняться из деплоя; при изменении `deploy/deploy-wrapper` в
+   репо повторить шаг вручную):
+
+   ```bash
+   sudo install -m 0755 -o root -g root \
+     /opt/lifesim/deploy/deploy-wrapper /usr/local/sbin/lifesim-deploy-wrapper
+   ```
+
+3. **Ключи**: отдельная пара для CI (`ssh-keygen -t ed25519 -f
+   lifesim-deploy -C lifesim-deploy@ci`); публичный ключ — в
+   `/home/deploy/.ssh/authorized_keys` с forced command (одной строкой):
+
+   ```
+   command="/usr/local/sbin/lifesim-deploy-wrapper",no-pty,no-agent-forwarding,no-X11-forwarding,no-port-forwarding ssh-ed25519 AAAA... lifesim-deploy@ci
+   ```
+
+4. **Sudoers** — `/etc/sudoers.d/lifesim-deploy` (root:root, 0440; перед
+   установкой проверить `visudo -cf <файл>`):
+
+   ```
+   Defaults:deploy !requiretty
+   deploy ALL=(lifesim) NOPASSWD: /usr/bin/git -C /opt/lifesim *
+   deploy ALL=(lifesim) NOPASSWD: /opt/lifesim/.venv/bin/pip install *
+   deploy ALL=(lifesim) NOPASSWD: /usr/bin/sqlite3 /opt/lifesim/data/lifesim.db *
+   deploy ALL=(root) NOPASSWD: /usr/bin/systemctl restart lifesim
+   deploy ALL=(lifesim) NOPASSWD: /usr/bin/rm -f -- /opt/lifesim/backups/pre-deploy-*.db
+   ```
+
+5. **origin**: обёртка принимает только канонический URL; проверьте/выставьте
+
+   ```bash
+   sudo -u lifesim git -C /opt/lifesim remote get-url origin
+   # должно быть: https://github.com/MostDef2000/lifesim.git
+   ```
+
+6. **known_hosts для CI** (repo VARIABLE `LIFESIM_SSH_KNOWN_HOSTS`): снимите
+   отпечаток на сервере (`ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub`),
+   из доверенной сессии возьмите строку вида
+   `<значение секрета LIFESIM_HOST> ssh-ed25519 AAAA...` и сверьте отпечаток. `ssh-keyscan`
+   вслепую запрещён (TOFU) — пиннинг только с проверкой отпечатка.
+
+7. **GitHub secrets/variables** (Settings → Secrets and variables → Actions):
+
+   | Имя | Тип | Значение |
+   |---|---|---|
+   | `LIFESIM_SSH_PRIVATE_KEY` | secret | приватный ключ деплоя (шаг 3) |
+   | `LIFESIM_HOST` | secret | IP прод-сервера (только в GitHub secret, в репо не хранится) |
+   | `LIFESIM_USER` | secret | `deploy` |
+   | `LIFESIM_SSH_KNOWN_HOSTS` | variable | pinned host key (шаг 6) |
+
+8. **Environment** `production` создаётся GitHub автоматически при первом
+   запуске workflow; protection rules не настраиваются — человеческий гейт
+   это подтверждение в dev-чате до dispatch (решение владельца 2026-10-10).
+
+**Break-glass** (ручной путь, когда Actions недоступны). После деплоев через
+workflow чекаут detached на задеплоенном SHA — сначала вернитесь на ветку:
 
 ```bash
-cd /opt/lifesim && sudo -u lifesim git pull
+cd /opt/lifesim && sudo -u lifesim git checkout main
+sudo -u lifesim git pull
 sudo -u lifesim .venv/bin/pip install -e .
 sudo systemctl restart lifesim
 ```
 
-## 8. Штатные операции
+## 10. Штатные операции
 
 **Сброс 429 (rate-limit)**: `sudo systemctl restart lifesim`. Бакеты M8
 in-memory per-process — рестарт обнуляет их. Безопасно: сессии живут в
@@ -140,7 +260,7 @@ HMAC-подписи (VL1_SECRET), а не в памяти; мир возобно
 идут в глобальный бакет — легитимный перелогин после смены секрета не
 блокируется.
 
-## 10. Визуальный канал (worker, туннель, flux/pony)
+## 11. Визуальный канал (worker, туннель, flux/pony)
 
 Фаза 6 (issue #39). Цепь: `API (VPS) → 127.0.0.1:7860 (reverse-туннель)
 → адаптер (GPU-воркер sea-speed-worker) → ComfyUI :8188 → PNG`.
@@ -173,7 +293,7 @@ HMAC-подписи (VL1_SECRET), а не в памяти; мир возобно
   каждый `POST /visual/portraits/{cid}` — новая платная генерация.
   Клиент обязан пинить canonical после первой генерации.
 
-## 11. LLM-канал (домашний ПК, ollama, туннель)
+## 12. LLM-канал (домашний ПК, ollama, туннель)
 
 Фаза 7 (issue #47). Цепь: `API (VPS, llm.transport=ollama, base_url
 localhost:11434) → reverse-туннель (home-pc:11434 → VPS:11434, ключ
