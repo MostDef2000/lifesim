@@ -87,7 +87,7 @@ function dayTime(ts) {
 
 const routes = {
   "#/login": viewAuth, "#/world": viewWorld, "#/chat": viewChat,
-  "#/inventory": viewInventory, "#/profile": viewProfile, "#/admin": viewAdmin,
+  "#/inventory": viewInventory, "#/tasks": viewTasks, "#/profile": viewProfile, "#/admin": viewAdmin,
 };
 
 async function route() {
@@ -570,7 +570,7 @@ function weatherLabel() {
 
 function topbar(active) {
   const tabs = [["#/world", "Мир"], ["#/chat", "Чат"], ["#/inventory", "Инвентарь"],
-    ["#/profile", "Профиль"]];
+    ["#/tasks", "Дела"], ["#/profile", "Профиль"]];
   if (["admin", "developer", "moderator"].includes(S.user.role)) {
     tabs.push(["#/admin", "Админ"]);
   }
@@ -1218,8 +1218,13 @@ async function pollEvents() {
       if (weatherEl) weatherEl.textContent = weatherLabel();
     }
     S.character = { ...S.character, ...character };
-    // F1: LOD focus follows the authoritative player location on every poll refresh.
-    if (character.location_id != null) S.mapFocusLocationId = character.location_id;
+    // F1: LOD focus follows the authoritative player location on every poll
+    // refresh — unless a manual focus is active (#92 «Показать на карте»);
+    // manual focus releases as soon as the player physically moves.
+    if (S.mapFocusManual && S.mapFocusAnchor !== character.location_id) {
+      S.mapFocusManual = false;
+    }
+    if (!S.mapFocusManual && character.location_id != null) S.mapFocusLocationId = character.location_id;
     S.world = world;
     S.mapLocations = locs;
     const clock = document.getElementById("clock");
@@ -1540,7 +1545,22 @@ function renderChat(session) {
           "Подсказки заполняют поле ввода, свободный текст — основной"))));
 }
 
-/* ---------- inventory (§77) ---------- */
+/* ---------- inventory (§77, #91 Inventory alpha) ---------- */
+
+/* #91: wearable set mirrors the authoritative SLOT_MAP in
+   app/social/clothing.py (jacket/boots/hat) — keep in sync with the server;
+   anything else gets no wear button (no capability → no button). */
+const INV_WEARABLE_TYPES = ["jacket", "boots", "hat"];
+
+/* #91: RU category groups over the real seeded object_types (config
+   shop/kitchen stock: food_, water_ prefixes and jacket/boots/hat); unknown
+   types fall back to their raw object_type — nothing invented client-side. */
+function invCategoryRu(objectType) {
+  const t = String(objectType || "");
+  if (/^(food|water)_/.test(t)) return "Провизия";
+  if (/^(jacket|boots|hat|clothing_)/.test(t)) return "Одежда";
+  return t || "Прочее";
+}
 
 async function viewInventory() {
   location.hash = "#/inventory";
@@ -1548,27 +1568,289 @@ async function viewInventory() {
   try {
     const inv = await api(`/characters/${S.character.id}/inventory`);
     const items = Array.isArray(inv) ? inv : (inv.items || []);
-    const rows = items.map((it) => {
-      const badge = (it.worn === true) 
-        ? el("span", { class: "badge worn" }, `надето ${it.slot || ""}`) 
-        : null;
-      return el("tr", {},
-        el("td", {}, it.object_type || it.type || "", badge),
-        el("td", {}, it.quantity ?? ""),
-        el("td", { class: "muted" }, `#${it.id}`));
-    });
-    app.replaceChildren(topbar("#/inventory"),
-      el("div", { class: "panel" },
-        el("h2", {}, "Инвентарь"),
-        el("table", { class: "inv" },
-          el("tr", {}, el("th", {}, "Предмет"), el("th", {}, "Кол-во"), el("th", {}, "ID")),
-          rows.length ? rows : el("tr", {}, el("td", { colspan: "3", class: "muted" },
-            "Пусто — купите что-нибудь во Владивостоке"))),
-        el("p", { class: "muted" },
-          "Использование предметов выполняется игровыми действиями (EAT/DRINK).")));
+    // Real market state: which owned objects already have an active offer —
+    // the sell affordance is grounded in the validator's one-offer-per-object
+    // rule, shown as authoritative state instead of a doomed POST.
+    const listed = {};
+    try {
+      const offers = await api("/market/offers?status=active");
+      (Array.isArray(offers) ? offers : []).forEach((o) => { listed[o.object_id] = o.price; });
+    } catch (e) { /* market read failed: POST errors still surface below */ }
+    renderInventory(items, listed);
   } catch (e) { toast(e.message, true); }
 }
 
+async function wearToggle(objectId) {
+  try {
+    await api("/wear", { method: "POST", body: { object_id: objectId } });
+    viewInventory();  // refresh state after the authoritative action
+  } catch (e) { toast(e.message, true); }  // errors keep the screen state
+}
+
+function invSellRow(objectId) {
+  const price = el("input", { type: "number", min: "1", step: "1", placeholder: "Цена, ₽" });
+  const go = el("button", {
+    id: "inv-sell", type: "button",
+    onclick: async () => {
+      const p = Math.floor(Number(price.value));
+      if (!Number.isFinite(p) || p < 1) {
+        toast("Цена должна быть целым числом ≥ 1", true);
+        return;
+      }
+      try {
+        await api("/market/offers", { method: "POST", body: { object_id: objectId, price: p } });
+        toast("Предмет выставлен на рынок");
+        viewInventory();  // refresh state after the authoritative action
+      } catch (e) { toast(e.message, true); }  // errors keep the screen state
+    },
+  }, "Продать");
+  return el("span", { class: "inv-sell-row" }, price, go);
+}
+
+function invDetail(it, wearable, isListed) {
+  const box = el("div", { id: "inv-detail", class: "inv-detail-box" },
+    el("div", { class: "muted" }, `Количество: ${it.quantity ?? "—"}`),
+    el("div", { class: "muted" }, `Состояние: ${it.condition ?? "—"}%`));
+  // Location name resolved lazily through the authoritative read model.
+  const locLine = el("div", { class: "muted" }, "Место: …");
+  box.append(locLine);
+  api(`/locations/${it.location_id}`).then((loc) => {
+    locLine.textContent = `Место: ${loc.name || "#" + it.location_id}`;
+  }).catch(() => { locLine.textContent = `Место: #${it.location_id}`; });
+  if (it.worn) {
+    box.append(el("div", { class: "muted" }, `Слот: ${it.slot || "—"}`));
+  }
+  if (wearable) {
+    box.append(el("button", {
+      id: "inv-wear", type: "button", onclick: () => wearToggle(it.id),
+    }, it.worn ? "Снять" : "Надеть"));
+  }
+  if (!isListed) {
+    box.append(invSellRow(it.id));
+  }
+  return box;
+}
+
+function invItemRow(it, listed) {
+  const isOpen = S.invExpanded === it.id;
+  const wearable = INV_WEARABLE_TYPES.includes(it.object_type);
+  const isListed = listed[it.id] != null;
+  const row = el("div", {
+    class: "inv-item", "data-object-id": String(it.id),
+    onclick: () => { S.invExpanded = isOpen ? null : it.id; viewInventory(); },
+  },
+    el("span", { class: "inv-item-name" }, `${it.object_type} ×${it.quantity}`),
+    it.worn === true ? el("span", { class: "badge worn" }, `надето ${it.slot || ""}`) : null,
+    isListed ? el("span", { class: "muted" }, `Выставлено: ${listed[it.id]} ₽`) : null,
+    el("span", { class: "muted" }, `#${it.id}`));
+  return el("div", {},
+    row,
+    isOpen ? invDetail(it, wearable, isListed) : null);
+}
+
+function renderInventory(items, listed) {
+  const groups = new Map();
+  for (const it of items) {
+    const cat = invCategoryRu(it.object_type);
+    if (!groups.has(cat)) groups.set(cat, []);
+    groups.get(cat).push(it);
+  }
+  const body = items.length
+    ? el("div", { class: "inv-groups" },
+        ...[...groups.entries()].map(([cat, rows]) =>
+          el("div", { class: "inv-group" },
+            el("h3", {}, `${cat} · ${rows.length}`),
+            ...rows.map((it) => invItemRow(it, listed)))))
+    : el("div", { class: "muted" }, "Пусто — купите что-нибудь во Владивостоке");
+  app.replaceChildren(topbar("#/inventory"),
+    el("div", { class: "panel" },
+      el("h2", {}, "Инвентарь"),
+      body,
+      el("p", { class: "muted" },
+        "Использование предметов выполняется игровыми действиями (EAT/DRINK).")));
+}
+
+
+/* ---------- #92 (A10): Дела — tasks / journal / opportunities ---------- */
+
+function mapLink(locId) {
+  // «Показать на карте» goes through the existing focus mechanism:
+  // S.mapFocusLocationId is consumed by buildLivingMap on the world view.
+  // B2-review F1: pollEvents would clobber a foreign focus within one poll
+  // tick — set a manual flag that survives polls and releases when the
+  // player physically moves (anchor mismatch).
+  return el("button", {
+    type: "button", class: "map-link",
+    onclick: () => {
+      S.mapFocusManual = true;
+      S.mapFocusAnchor = S.character.location_id;
+      S.mapFocusLocationId = locId;
+      location.hash = "#/world";
+      viewWorld();
+    },
+  }, "Показать на карте");
+}
+
+function taskTargetLocationId(t) {
+  // Authoritative task params only: MOVE carries {path: [...]}, other tasks
+  // may carry location_id; numeric target_id is a location pointer. The
+  // client never guesses a destination that the backend did not send.
+  const p = t.parameters || {};
+  if (Array.isArray(p.path) && p.path.length) return p.path[p.path.length - 1];
+  if (p.location_id != null) return p.location_id;
+  if (typeof t.target_id === "string" && /^\d+$/.test(t.target_id)) {
+    return Number(t.target_id);
+  }
+  return null;
+}
+
+function taskRow(t) {
+  const locId = taskTargetLocationId(t);
+  const loc = locId != null
+    ? (S.mapLocations || []).find((l) => l.id == locId) : null;
+  const params = t.parameters || {};
+  const reason = params.reason || params.object_type || "";
+  return el("div", { class: "task-row" },
+    el("span", { class: "status" }, t.status || ""),
+    el("span", {}, t.task_type || ""),
+    t.source ? el("span", { class: "muted" }, ` · ${t.source}`) : null,
+    t.ends_at != null ? el("span", { class: "muted" }, ` · до ${dayTime(t.ends_at)}`) : null,
+    t.completed_at != null
+      ? el("span", { class: "muted" }, ` · завершено ${dayTime(t.completed_at)}`) : null,
+    reason ? el("span", { class: "muted" }, ` · ${reason}`) : null,
+    loc ? mapLink(loc.id) : null);
+}
+
+async function viewTasks() {
+  location.hash = "#/tasks";
+  app.replaceChildren(topbar("#/tasks"), el("div", { class: "muted" }, "Загрузка…"));
+  try {
+    // Cold-load safety: #/tasks can be the first route after reload — the
+    // by-user hydration omits location_id, so read the authoritative
+    // character first (same pattern as viewChat).
+    if (S.character.location_id == null) {
+      const me = await api(`/characters/${S.character.id}`);
+      S.character = { ...S.character, ...me };
+    }
+    const tasks = await api(`/characters/${S.character.id}/tasks`);
+    const goals = await api(`/characters/${S.character.id}/goals`);
+    let opps = [];
+    let desire = null;
+    try {
+      const d = await api(`/characters/${S.character.id}/desire/opportunities`);
+      opps = d.opportunities || [];
+      desire = d.desire;
+    } catch (e) { /* desire layer unavailable — sections stay explicitly empty */ }
+    S.mapLocations = await api("/locations");
+    renderTasks(tasks, goals, opps, desire);
+  } catch (e) { toast(e.message, true); }
+}
+
+function renderTasks(tasks, goals, opps, desire) {
+  // #92: the three sections read ONLY backend state — no client-side
+  // progress calculation, terminal states come from the read model.
+  const active = [...(tasks.active || []), ...(tasks.planned || [])];
+  const history = (tasks.recent_terminal || []).slice(0, 20);
+
+  const activeBox = el("div", { class: "panel", id: "tasks-active" },
+    el("h2", {}, "Активные"),
+    active.length
+      ? active.map((t) => taskRow(t))
+      : el("div", { class: "muted" }, "Нет активных задач"));
+
+  const historyBox = el("div", { class: "panel", id: "tasks-history" },
+    el("h2", {}, "История"),
+    history.length
+      ? history.map((t) => taskRow(t))
+      : el("div", { class: "muted" }, "История пуста"));
+
+  // Opportunities are fed by the Desire planner (#90) and are semantically
+  // separate from tasks; empty states are explicit.
+  const oppsBox = el("div", { class: "panel", id: "tasks-opps" },
+    el("h2", {}, "Возможности"),
+    desire == null
+      ? el("div", { class: "muted" }, "Желание не задано — задайте его в профиле")
+      : (opps.length
+        ? opps.map((o) => el("div", { class: "opp" },
+            el("div", {}, o.title || ""),
+            o.reason ? el("div", { class: "muted" }, o.reason) : null,
+            o.source ? el("div", { class: "muted" }, `Источник: ${o.source}`) : null,
+            o.link ? el("a", { href: o.link }, "Открыть") : null))
+        : el("div", { class: "muted" }, "Пока нет возможностей")));
+
+  // The short-term CharacterGoal is its own block, explicitly distinct
+  // from the long-term Desire (which lives in the profile).
+  const currentGoal = (goals || []).find((g) => g.status === "queued" || g.status === "active")
+    || (goals || [])[0] || null;
+  const goalBox = el("div", { class: "panel", id: "tasks-goal" },
+    el("h2", {}, "Ближняя цель"),
+    currentGoal
+      ? el("div", {},
+          el("div", {}, currentGoal.source_text || ""),
+          el("div", { class: "muted" },
+            `${currentGoal.goal_type || ""} · ${currentGoal.status || ""}`))
+      : el("div", { class: "muted" }, "Ближняя цель не задана"));
+
+  app.replaceChildren(topbar("#/tasks"),
+    el("div", { class: "grid" }, activeBox, goalBox, oppsBox, historyBox));
+}
+
+
+/* #90: long-term Desire — one active desire, replace/abandon here. Kept
+   strictly separate from the short-term CharacterGoal shown on #/tasks. */
+function profileDesireBlock() {
+  const line = el("div", { class: "muted", id: "profile-desire" }, "Желание: …");
+  const status = el("div", { class: "muted" });
+  const input = el("input", {
+    placeholder: "Новое желание — например: найти друзей",
+    maxlength: "500",
+  });
+  function refresh() {
+    api(`/characters/${S.character.id}/desire`).then((r) => {
+      const d = r.desire;
+      if (!d) { line.textContent = "Желание: не задано"; return; }
+      const cat = (d.interpretation && d.interpretation.title_ru) || d.catalog_key || "—";
+      line.textContent = "Желание: " + d.source_text + " / каталог: " + cat;
+    }).catch(() => { line.textContent = "Желание: недоступно"; });
+  }
+  const saveBtn = el("button", {
+    onclick: async () => {
+      // B2-review F2: guard against double-submit (two active desires race).
+      if (saveBtn.disabled) return;
+      saveBtn.disabled = true;
+      try {
+        const r = await api(`/characters/${S.character.id}/desire`,
+          { method: "POST", body: { text: input.value } });
+        if (r && r.clarification) {
+          status.textContent = r.clarification;  // unsupported: explicit reason, no mutation
+        } else {
+          status.textContent = "Желание обновлено";
+          // null coerces to "" (LegacyNullToEmptyString); spelled without the
+          // chat draft-clear literal so the m156 pin keeps counting exactly
+          // the two chat sites.
+          input.value = null;
+        }
+        refresh();
+      } catch (e) { toast(e.message, true); }
+      finally { saveBtn.disabled = false; }
+    },
+  }, "Задать желание");
+  const dropBtn = el("button", {
+    onclick: async () => {
+      try {
+        await api(`/characters/${S.character.id}/desire`, { method: "DELETE" });
+        status.textContent = "Желание оставлено";
+        refresh();
+      } catch (e) { toast(e.message, true); }
+    },
+  }, "Отказаться от желания");
+  refresh();
+  return el("div", { class: "profile-desire-box" },
+    line,
+    el("div", { style: "margin-top:6px; display:flex; gap:6px" }, input, saveBtn),
+    dropBtn,
+    status);
+}
 
 /* ---------- profile (§77) ---------- */
 
@@ -1597,6 +1879,7 @@ async function viewProfile() {
           }).catch(() => { rolesLine.textContent = "Роли: недоступны"; });
           return rolesLine;
         })(),
+        profileDesireBlock(),
         el("div", { style: "margin-top:8px" },
           el("button", { onclick: async () => {
             await api("/auth/logout", { method: "POST", body: {} });

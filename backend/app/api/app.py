@@ -100,6 +100,12 @@ def create_app(settings, session_factory: sessionmaker):
     # live driver replaces an external cron-driven `vl1 simulate`.
     @contextlib.asynccontextmanager
     async def _lifespan(_app):
+        # B2-review F3: alpha schema self-heal — a pre-existing dev DB created
+        # before new alpha tables (e.g. character_desires) must not 500 on the
+        # desire endpoints until the next bootstrap. create_all is idempotent
+        # and additive-only (no destructive migration by design).
+        from app.db.models import Base
+        Base.metadata.create_all(bind=session_factory.kw["bind"])
         tick_task = None
         if settings.world.live_tick_enabled:
             from app.api.ticker import start_tick_driver
@@ -630,7 +636,7 @@ def create_app(settings, session_factory: sessionmaker):
             session.query(CharacterTask)
             .filter(CharacterTask.character_id == cid, CharacterTask.completed_at.isnot(None))
             .order_by(CharacterTask.completed_at.desc())
-            .limit(10)
+            .limit(20)  # #92: journal/history bounded to the last N=20
             .all()
         )
 
@@ -1270,6 +1276,118 @@ def create_app(settings, session_factory: sessionmaker):
             for g in goals
         ]
 
+    # ---------- Desire (#90 [A8]) — long-term layer, SEPARATE from goals ----
+
+    class DesireIn(BaseModel):
+        text: str
+
+    def _desire_to_dict(d) -> dict:
+        import json as _json
+
+        try:
+            interp = (_json.loads(d.interpretation)
+                      if isinstance(d.interpretation, str) else d.interpretation)
+        except (ValueError, TypeError):
+            interp = {}
+        return {
+            "id": d.id, "source_text": d.source_text,
+            "catalog_key": d.catalog_key, "status": d.status,
+            "interpretation": interp or {},
+            "created_at": d.created_at, "updated_at": d.updated_at,
+            "replaced_by": d.replaced_by,
+        }
+
+    def _active_desire(session: Session, world_id: str, cid: str):
+        from app.db.models import CharacterDesire
+
+        return (
+            session.query(CharacterDesire)
+            .filter_by(world_id=world_id, character_id=cid, status="active")
+            .order_by(CharacterDesire.id.desc())
+            .first()
+        )
+
+    @app.post("/characters/{cid}/desire", status_code=201)
+    def post_desire(
+        cid: str, body: DesireIn,
+        user: User = Depends(current_user), session: Session = Depends(db)
+    ):
+        """Create/replace the ONE active desire. Unsupported text → HTTP 200
+        with an explicit clarification and NO row (scene_act ok:false
+        pattern #87: the reason is data, not an error)."""
+        from app.db.models import CharacterDesire
+        from app.desire.desire import interpret_desire
+
+        character = _owned_character(session, user, cid)
+        text = (body.text or "").strip()
+        if len(text) > 500:
+            raise HTTPException(status_code=422, detail="text must be 1..500 chars")
+
+        interpretation = interpret_desire(text)
+        if interpretation.get("catalog_key") is None:
+            return JSONResponse(status_code=200, content={
+                "desire": None, "catalog_key": None,
+                "clarification": interpretation.get("clarification", ""),
+            })
+
+        now_ts = _world_now(session)
+        current = _active_desire(session, character.world_id, cid)
+        row = CharacterDesire(
+            world_id=character.world_id, character_id=cid,
+            source_text=text, catalog_key=interpretation["catalog_key"],
+            status="active", interpretation=interpretation,
+            created_at=now_ts, updated_at=now_ts,
+        )
+        session.add(row)
+        session.flush()
+        if current is not None:
+            current.status = "replaced"
+            current.replaced_by = row.id
+            current.updated_at = now_ts
+        session.commit()
+        return {"desire": _desire_to_dict(row), "interpretation": interpretation}
+
+    @app.get("/characters/{cid}/desire")
+    def get_desire(
+        cid: str, user: User = Depends(current_user), session: Session = Depends(db)
+    ):
+        """Active desire or the explicit empty state {desire: null}."""
+        character = _owned_character(session, user, cid)
+        row = _active_desire(session, character.world_id, cid)
+        return {"desire": _desire_to_dict(row) if row is not None else None}
+
+    @app.delete("/characters/{cid}/desire")
+    def delete_desire(
+        cid: str, user: User = Depends(current_user), session: Session = Depends(db)
+    ):
+        """Abandon the active desire (kept as a terminal row; 404 if none)."""
+        character = _owned_character(session, user, cid)
+        row = _active_desire(session, character.world_id, cid)
+        if row is None:
+            raise HTTPException(status_code=404, detail="no active desire")
+        row.status = "abandoned"
+        row.updated_at = _world_now(session)
+        session.commit()
+        return {"desire": _desire_to_dict(row)}
+
+    @app.get("/characters/{cid}/desire/opportunities")
+    def get_desire_opportunities(
+        cid: str, user: User = Depends(current_user), session: Session = Depends(db)
+    ):
+        """Bounded, read-only opportunities from the desire planner."""
+        from app.desire.desire import build_opportunities
+
+        character = _owned_character(session, user, cid)
+        row = _active_desire(session, character.world_id, cid)
+        opportunities = (
+            build_opportunities(session, character.world_id, cid, row)
+            if row is not None else []
+        )
+        return {
+            "desire": _desire_to_dict(row) if row is not None else None,
+            "opportunities": opportunities,
+        }
+
     # ---------- Health (deploy runbook §6) ----------
 
     @app.get("/health")
@@ -1542,6 +1660,7 @@ def create_app(settings, session_factory: sessionmaker):
             out.append({
                 "id": o.id, "object_type": o.object_type,
                 "quantity": o.quantity, "location_id": o.location_id,
+                "condition": o.condition,
                 "worn": meta.get("worn") is True,
                 "slot": meta.get("slot") if isinstance(meta.get("slot"), str) else None,
             })
