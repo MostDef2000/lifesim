@@ -1,0 +1,276 @@
+name: deploy
+
+# LIFESIM production deploy (replaces the manual deploy/README.md §9 flow;
+# adapted from the PROVEN stroy pattern, stroy issue #130).
+#
+# Trust model (honest):
+#   * workflow_dispatch only; the gate job refuses any ref but refs/heads/main.
+#   * Eligibility is bound to GITHUB_TOKEN reads of the Actions API plus a
+#     local `git merge-base --is-ancestor` against origin/main. There is NO
+#     artifact signing: anyone able to push to main (and thus produce a green
+#     ci.yml push-run) is trusted. Single-owner repo => accepted.
+#   * The gate selects the LATEST completed+success ci.yml push-run for the
+#     exact input SHA and requires its jobs to succeed. lifesim ci.yml defines
+#     jobs `gate` (every push to main) and `slow` (workflow_dispatch-only,
+#     gated by `run_slow`), so on push runs `slow` is `skipped` by design and
+#     is accepted as such; any other non-success conclusion fails the gate.
+#     Every API/HTTP error fails closed.
+#   * Human gate: the owner confirms the deploy in the dev chat BEFORE the
+#     orchestrator dispatches (owner decision 2026-10-10). The `production`
+#     environment therefore intentionally has NO protection rules / required
+#     reviewers; GitHub creates the environment implicitly on first run.
+#   * Host access is a SINGLE forced command over SSH
+#     (`lifesim-deploy-v1 <sha>`) executed by deploy/deploy-wrapper on the
+#     server. Host keys are pinned from the repository VARIABLE
+#     LIFESIM_SSH_KNOWN_HOSTS — ssh-keyscan is FORBIDDEN (TOFU). No secret
+#     values are ever printed; the SSH transcript artifact contains only
+#     wrapper log lines (shas, HTTP codes, paths).
+#
+# Rollback: automatic on the host (wrapper redeploys the previous sha and
+# prints DEPLOY_ROLLED_BACK); operator-level rollback = re-dispatch the
+# previous sha (printed in DEPLOYMENT_ACCEPTED and stored in
+# /opt/lifesim/deploy-state/deployment-manifest.json on the host).
+
+on:
+  workflow_dispatch:
+    inputs:
+      deploy_sha:
+        description: "Full 40-hex commit SHA already merged to main"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: lifesim-production
+  cancel-in-progress: false
+
+jobs:
+  gate:
+    runs-on: ubuntu-24.04
+    outputs:
+      sha: ${{ steps.validate.outputs.sha }}
+      run_id: ${{ steps.select.outputs.run_id }}
+      run_url: ${{ steps.select.outputs.run_url }}
+    steps:
+      - name: Require default branch
+        run: |
+          if [ "${GITHUB_REF}" != "refs/heads/main" ]; then
+            echo "::error::deploy must be dispatched from refs/heads/main (got ${GITHUB_REF})"
+            exit 1
+          fi
+
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          fetch-depth: 0
+
+      - name: Validate SHA and ancestry
+        id: validate
+        env:
+          SHA: ${{ inputs.deploy_sha }}
+        run: |
+          set -euo pipefail
+          # Fail closed on anything but a full lowercase 40-hex commit SHA.
+          if ! [[ "${SHA}" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "::error::deploy_sha must be a full 40-hex lowercase commit SHA (got: ${SHA})"
+            exit 1
+          fi
+          git fetch --no-tags origin +refs/heads/main:refs/remotes/origin/main
+          git merge-base --is-ancestor "${SHA}" origin/main
+          echo "sha=${SHA}" >> "$GITHUB_OUTPUT"
+
+      - name: Select trusted ci.yml run
+        id: select
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          SHA: ${{ steps.validate.outputs.sha }}
+        run: |
+          set -euo pipefail
+          # -f: any non-2xx API response fails the gate (fail closed).
+          curl -fsSL \
+            -H "Authorization: Bearer ${GH_TOKEN}" \
+            -H "Accept: application/vnd.github+json" \
+            -H "X-GitHub-Api-Version: 2022-11-28" \
+            "https://api.github.com/repos/${REPO}/actions/workflows/ci.yml/runs?head_sha=${SHA}&event=push&branch=main&status=completed&per_page=100" \
+            -o "${RUNNER_TEMP}/runs.json"
+          python3 - "${RUNNER_TEMP}/runs.json" "${SHA}" > "${RUNNER_TEMP}/selected.json" <<'PY'
+          import json, re, sys
+
+          path, sha = sys.argv[1], sys.argv[2]
+          if not re.fullmatch(r"[0-9a-f]{40}", sha):
+              sys.exit("GATE-ERR: sha must be 40 lowercase hex")
+          try:
+              with open(path, encoding="utf-8") as fh:
+                  data = json.load(fh)
+          except (OSError, ValueError) as exc:
+              sys.exit(f"GATE-ERR: runs payload unreadable: {exc}")
+          runs = data.get("workflow_runs") if isinstance(data, dict) else None
+          if not isinstance(runs, list):
+              sys.exit("GATE-ERR: runs payload malformed (no workflow_runs list)")
+          candidates = [
+              run
+              for run in runs
+              if isinstance(run, dict)
+              and run.get("head_sha") == sha
+              and run.get("event") == "push"
+              and run.get("head_branch") == "main"
+              and run.get("status") == "completed"
+              and run.get("conclusion") == "success"
+          ]
+          if not candidates:
+              sys.exit("GATE-ERR: no completed+success ci.yml push-run for this sha on main")
+
+          def key(run):
+              run_id = run.get("id")
+              return (str(run.get("created_at") or ""), int(run_id) if isinstance(run_id, int) else 0)
+
+          best = max(candidates, key=key)
+          print(json.dumps({
+              "id": best.get("id"),
+              "url": best.get("html_url"),
+              "run_number": best.get("run_number"),
+              "created_at": best.get("created_at"),
+          }))
+          PY
+          RUN_ID="$(python3 -c 'import json,sys;print(json.load(open(sys.argv[1]))["id"])' "${RUNNER_TEMP}/selected.json")"
+          RUN_URL="$(python3 -c 'import json,sys;print(json.load(open(sys.argv[1]))["url"])' "${RUNNER_TEMP}/selected.json")"
+          echo "run_id=${RUN_ID}" >> "$GITHUB_OUTPUT"
+          echo "run_url=${RUN_URL}" >> "$GITHUB_OUTPUT"
+
+      - name: Verify every ci.yml job succeeded
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          RUN_ID: ${{ steps.select.outputs.run_id }}
+        run: |
+          set -euo pipefail
+          # per_page=100 covers ci.yml (2 jobs); fail closed on truncated
+          # pagination or empty/error payloads.
+          curl -fsSL \
+            -H "Authorization: Bearer ${GH_TOKEN}" \
+            -H "Accept: application/vnd.github+json" \
+            -H "X-GitHub-Api-Version: 2022-11-28" \
+            "https://api.github.com/repos/${REPO}/actions/runs/${RUN_ID}/jobs?filter=latest&per_page=100" \
+            -o "${RUNNER_TEMP}/jobs.json"
+          python3 - "${RUNNER_TEMP}/jobs.json" <<'PY'
+          import json, sys
+
+          try:
+              with open(sys.argv[1], encoding="utf-8") as fh:
+                  data = json.load(fh)
+          except (OSError, ValueError) as exc:
+              sys.exit(f"GATE-ERR: jobs payload unreadable: {exc}")
+          if not isinstance(data, dict):
+              sys.exit("GATE-ERR: jobs payload not an object")
+          if data.get("incomplete") is True:
+              sys.exit("GATE-ERR: jobs payload marked incomplete (pagination)")
+          jobs = data.get("jobs")
+          if not isinstance(jobs, list) or not jobs:
+              sys.exit("GATE-ERR: no jobs returned")
+          total = data.get("total_count")
+          if isinstance(total, int) and not isinstance(total, bool) and total > len(jobs):
+              sys.exit(f"GATE-ERR: pagination incomplete: {len(jobs)} of {total} jobs fetched")
+          # ci.yml (lifesim): `gate` runs on every push to main; `slow` is
+          # workflow_dispatch-only (input run_slow) => conclusion `skipped`
+          # on push runs is expected and accepted. Anything else that is not
+          # `success` fails the gate.
+          required = "gate"
+          accepted_other = {"success", "skipped"}
+          seen = []
+          for job in jobs:
+              if not isinstance(job, dict) or not isinstance(job.get("name"), str) or not job["name"]:
+                  sys.exit("GATE-ERR: malformed job entry")
+              seen.append((job["name"], job.get("conclusion")))
+          gate = [conclusion for name, conclusion in seen if name == required]
+          if not gate:
+              sys.exit(f"GATE-ERR: required job missing: {required}")
+          for conclusion in gate:
+              if conclusion != "success":
+                  sys.exit(f"GATE-ERR: job {required} conclusion={conclusion!r} (want success)")
+          for name, conclusion in seen:
+              if name != required and conclusion not in accepted_other:
+                  sys.exit(f"GATE-ERR: job {name} conclusion={conclusion!r} (want success or skipped)")
+          print(f"jobs-ok: {required} succeeded; all {len(seen)} job(s) success/skipped")
+          PY
+
+  deploy:
+    needs: gate
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    # Owner decision 2026-10-10: NO protection rules on this environment —
+    # the human gate is the chat confirmation before dispatch, not a GitHub
+    # reviewer gate. Do not add required reviewers without a new owner
+    # decision. The environment is created implicitly on first run.
+    environment: production
+    env:
+      DEPLOY_SHA: ${{ needs.gate.outputs.sha }}
+      LIFESIM_HOST: ${{ secrets.LIFESIM_HOST }}
+      LIFESIM_USER: ${{ secrets.LIFESIM_USER }}
+    steps:
+      # Defense in depth: never interpolate an unvalidated value into the
+      # forced command, even though the gate already validated it.
+      - name: Guard SHA again
+        run: |
+          set -euo pipefail
+          [[ "${DEPLOY_SHA}" =~ ^[0-9a-f]{40}$ ]] || { echo "::error::bad sha from gate: ${DEPLOY_SHA}"; exit 1; }
+
+      - name: Configure SSH
+        env:
+          LIFESIM_SSH_PRIVATE_KEY: ${{ secrets.LIFESIM_SSH_PRIVATE_KEY }}
+          # Host keys are pinned from a repo variable; ssh-keyscan is FORBIDDEN.
+          LIFESIM_SSH_KNOWN_HOSTS: ${{ vars.LIFESIM_SSH_KNOWN_HOSTS }}
+        run: |
+          set -euo pipefail
+          install -m 700 -d "$HOME/.ssh"
+          printf '%s\n' "$LIFESIM_SSH_PRIVATE_KEY" > "$HOME/.ssh/id_deploy"
+          chmod 600 "$HOME/.ssh/id_deploy"
+          printf '%s\n' "$LIFESIM_SSH_KNOWN_HOSTS" > "$HOME/.ssh/known_hosts"
+          chmod 600 "$HOME/.ssh/known_hosts"
+          test -s "$HOME/.ssh/known_hosts"
+
+      - name: Run forced deploy command on host
+        run: |
+          set -euo pipefail
+          # Single forced command; the wrapper on the host does fetch, sha
+          # verification, SQLite backup, checkout, pip install, service
+          # restart and probes, with automatic rollback on failure. pipefail
+          # propagates a non-zero wrapper exit through tee, and the full
+          # transcript (stdout+stderr) is kept for the artifact step.
+          ssh -i "$HOME/.ssh/id_deploy" -o BatchMode=yes -o StrictHostKeyChecking=yes \
+            -o UserKnownHostsFile="$HOME/.ssh/known_hosts" -o ConnectTimeout=15 \
+            "${LIFESIM_USER}@${LIFESIM_HOST}" "lifesim-deploy-v1 ${DEPLOY_SHA}" \
+            2>&1 | tee "${RUNNER_TEMP}/deploy-transcript.log"
+
+      - name: Verify deployment accepted marker
+        run: |
+          set -euo pipefail
+          # The wrapper must print the acceptance marker even when it exits 0:
+          # a missing marker means the host contract is broken; fail the job.
+          if ! grep -Fq "DEPLOYMENT_ACCEPTED sha=${DEPLOY_SHA}" "${RUNNER_TEMP}/deploy-transcript.log"; then
+            echo "::error::DEPLOYMENT_ACCEPTED marker for ${DEPLOY_SHA} missing from host transcript"
+            exit 1
+          fi
+          {
+            echo "### Deploy accepted by host"
+            echo '```'
+            grep -F "DEPLOYMENT_ACCEPTED sha=${DEPLOY_SHA}" "${RUNNER_TEMP}/deploy-transcript.log"
+            echo '```'
+            echo "Trusted CI run: ${{ needs.gate.outputs.run_url }}"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload SSH transcript
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: deploy-transcript-${{ needs.gate.outputs.sha }}
+          path: ${{ runner.temp }}/deploy-transcript.log
+          retention-days: 14
+          # If the job failed before SSH (e.g. bad secrets), there is no
+          # transcript; any wrapper output that DID happen is always captured.
+          if-no-files-found: ignore
+          # Re-running the same dispatch must replace the prior artifact
+          # rather than fail on a name collision.
+          overwrite: true
