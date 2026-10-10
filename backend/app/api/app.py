@@ -687,6 +687,26 @@ def create_app(settings, session_factory: sessionmaker):
             })
         return out
 
+    @app.get("/characters/{cid}/roles")
+    def get_character_roles(
+        cid: str, user: User = Depends(current_user), session: Session = Depends(db)
+    ):
+        # #89 (A7): public roles read model — derive-on-read from
+        # authoritative rows; any authenticated user may read (public facts),
+        # unlike write paths which keep _owned_character.
+        from app.social.roles import derive_roles
+
+        character = (
+            session.query(Character)
+            .filter_by(world_id=state["settings"].world.world_id, id=cid)
+            .first()
+        )
+        if character is None:
+            raise HTTPException(status_code=404, detail="character not found")
+        return {
+            "character_id": cid,
+            "roles": derive_roles(session, character.world_id, cid),
+        }
 
     @app.post("/characters/{cid}/control")
     def set_control(
@@ -1641,8 +1661,11 @@ def create_app(settings, session_factory: sessionmaker):
         ]
         reply = llm_reply(session, state["settings"], row.world_id, row, history, context, content)
         if reply is None:
+            source = "fallback"
             player_name = user_char.first_name
             reply = fallback_reply(context, player_name)
+        else:
+            source = "llm"
         suggestions = suggested_responses(context)
 
         session.add(DialogueMessage(
@@ -1654,6 +1677,9 @@ def create_app(settings, session_factory: sessionmaker):
             "npc_reply": reply,
             "suggested_responses": suggestions,
             "session_id": row.id,
+            # #88 (A6): which path produced the reply — UI surfaces
+            # «LLM недоступен, отвечает fallback» from this flag.
+            "source": source,
         }
 
     @app.get("/dialogue/{session_id}")
