@@ -575,8 +575,8 @@ def test_ui_legacy_pins_intact():
     assert js.count('"chat-msg-input"') == 2
     assert js.count('"chat-roles"') == 1
     assert js.count("/characters/${S.character.id}/relationships") == 1
-    assert js.count("AUTONOMOUS_HINT") == 7
-    assert js.count("isAutonomousRefusal") == 5
+    assert js.count("AUTONOMOUS_HINT") == 8  # 1 decl + 7 usages (#93 scene-act)
+    assert js.count("isAutonomousRefusal") == 6  # +1 (#93 scene-act catch)
     assert js.count('} else { toast(e.message, true); }') == 2
     assert js.count('"Идти"') == 1
     assert js.count("/travel/plan") == 1

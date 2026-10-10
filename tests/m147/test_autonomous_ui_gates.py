@@ -103,15 +103,15 @@ def test_autonomous_ui_gate_pins():
     # note (m121), moveTo gate, doAction catch, moveTo catch, viewExternal ×2.
     assert js.count(AUTONOMOUS_HINT_BLOCK) == 1
     assert js.count("Персонаж действует сам — переключите режим в Профиле") == 1
-    assert js.count("AUTONOMOUS_HINT") == 7  # 1 decl + 6 usages
+    assert js.count("AUTONOMOUS_HINT") == 8  # 1 decl + 7 usages (#93 scene-act)
     assert js.count("toast(AUTONOMOUS_HINT);") == 1
     assert js.count("toast(AUTONOMOUS_HINT, true);") == 3
 
     # ---------- §61 refusal matcher (single source for all catches) ----------
     assert js.count('String(e.message ?? e.detail ?? "").includes('
                     '"character is AUTONOMOUS")') == 1
-    assert js.count("isAutonomousRefusal") == 5  # 1 decl + 4 catch usages
-    # (doAction ×1, moveTo ×1, viewExternal ×2: err.textContent + toast)
+    assert js.count("isAutonomousRefusal") == 6  # 1 decl + 5 catch usages
+    # (doAction ×1, moveTo ×1, viewExternal ×2, #93 scene-act ×1)
     # The inline check is gone (single source through the helper).
     assert 'String(e.message).includes("character is AUTONOMOUS")' not in js
 
