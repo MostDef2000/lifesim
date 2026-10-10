@@ -518,6 +518,26 @@ class CharacterGoal(Base):
     created_at = Column(Integer, nullable=False)
     updated_at = Column(Integer, nullable=False)
 
+# 33. character_desires (#90 [A8]): long-term Desire layer — separate from
+# the short-term CharacterGoal above. ONE active desire per character is
+# enforced in service logic (app/desire/desire.py + the POST endpoint):
+# SQLite has no partial unique index, so creating a new active desire marks
+# the previous one 'replaced' (replaced_by → the new row id); abandoning
+# marks it 'abandoned'. Terminal rows are kept for the audit trail.
+class CharacterDesire(Base):
+    __tablename__ = "character_desires"
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    world_id = Column(String, ForeignKey("worlds.id"), nullable=False)
+    character_id = Column(String, ForeignKey("characters.id"), nullable=False)
+    source_text = Column(String(500), nullable=False)
+    catalog_key = Column(String, nullable=True)
+    status = Column(String, nullable=False, default="active")  # active|replaced|abandoned
+    interpretation = Column(JSON, nullable=False, default=dict)
+    created_at = Column(Integer, nullable=False)
+    updated_at = Column(Integer, nullable=False)
+    replaced_by = Column(Integer, nullable=True)  # CharacterDesire.id
+
+
 # 31. dialogue_sessions (M5, SPEC §63)
 class DialogueSession(Base):
     __tablename__ = "dialogue_sessions"

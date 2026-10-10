@@ -1218,3 +1218,19 @@ button.danger:hover { background: #93301f; }
 .chat-bar { display: flex; gap: 6px; margin-top: 8px; }
 #chat-msg-input { flex: 1; min-width: 0; }
 .profile-roles { margin-top: 8px; }
+
+/* #91 Inventory alpha + #92 Дела screen + #90 Desire line (appended at the
+   END after the pinned media blocks — the blocks above stay byte-exact). */
+.inv-group { margin-top: 10px; }
+.inv-group h3 { margin: 0 0 4px 0; font-size: 1em; }
+.inv-item { display: flex; gap: 8px; align-items: center; padding: 4px 0; border-bottom: 1px solid var(--w-line); cursor: pointer; }
+.inv-item:hover { background: rgba(0, 0, 0, 0.03); }
+.inv-item-name { flex: 1; min-width: 0; }
+#inv-detail { padding: 6px 0 8px 12px; display: flex; flex-direction: column; gap: 4px; }
+.inv-sell-row { display: inline-flex; gap: 6px; align-items: center; }
+.inv-sell-row input { width: 90px; }
+.task-row { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; padding: 4px 0; border-bottom: 1px solid var(--w-line); }
+.opp { border-top: 1px solid var(--w-line); padding: 6px 0; display: flex; flex-direction: column; gap: 2px; }
+.opp a { align-self: flex-start; }
+.profile-desire-box { margin-top: 8px; display: flex; flex-direction: column; gap: 6px; }
+.map-link { align-self: flex-start; }
