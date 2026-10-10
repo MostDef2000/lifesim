@@ -8,7 +8,8 @@ const S = { user: null, character: null, world: null, ws: null, wsTries: 0,
   feed: [], cursor: 0, pollTimer: null, canonicalPortraitId: null, authProbed: false, visualDisabled: false,
   mapLod: "island", mapQuality: "balanced",
   mapReducedMotion: window.matchMedia("(prefers-reduced-motion: reduce)").matches,
-  mapFocusLocationId: null, mapLocations: [], travel: null, scene: null, sceneAct: null };
+  mapFocusLocationId: null, mapLocations: [], travel: null, scene: null, sceneAct: null,
+  sceneActDraft: null };
 
 /* ---------- helpers ---------- */
 
@@ -29,6 +30,16 @@ const AUTONOMOUS_HINT = "Персонаж действует сам — пере
 // catch so a stale-state 409 still speaks the localized hint.
 const isAutonomousRefusal = (e) =>
   String(e.message ?? e.detail ?? "").includes("character is AUTONOMOUS");
+
+/* #93 (A11): shared load-failure state for alpha-critical screens — the
+   failed view keeps its topbar, explains the failure, and offers an explicit
+   retry; a transient network error never dead-ends on a silent «Загрузка…». */
+const RETRY_HINT = "Проверьте связь и повторите";
+function loadRetryNode(loading, retry) {
+  loading.replaceChildren(
+    el("span", { class: "muted" }, "Загрузка не удалась. " + RETRY_HINT),
+    el("button", { type: "button", onclick: retry }, "Повторить"));
+}
 
 async function api(path, opts = {}) {
   const res = await fetch(path, {
@@ -438,6 +449,11 @@ function fillScenePanel(box) {
     for (const line of sceneSummaryLines(data)) {
       kids.push(el("div", { class: "muted" }, line));
     }
+    if (scene.state === "fallback") {
+      // #93: Flux down → fallback data + an explicit retry affordance.
+      kids.push(el("button", { type: "button", onclick: inspectSurroundings },
+        "Повторить осмотр"));
+    }
     kids.push(el("button", { type: "button", onclick: backToMap }, "К карте"));
   }
   // #87 (A5): the free-text scene action bar + the last result line are part
@@ -484,6 +500,7 @@ function sceneActBar() {
   return el("div", { class: "scene-act" },
     el("input", {
       id: "scene-act-input", type: "text",
+      value: S.sceneActDraft || "",
       placeholder: "Что вы делаете? Например: поговорить с Ивановым",
       onkeydown: (ev) => { if (ev.key === "Enter") submitSceneAct(); },
     }),
@@ -541,6 +558,7 @@ async function submitSceneAct() {
   try {
     const r = await api("/scene/act", { method: "POST", body: { text } });
     S.sceneAct = r;
+    S.sceneActDraft = null;
     // Committed result → visual refresh: re-inspect ONLY from ready/fallback
     // (A4 invariant: never reset S.scene, never re-render the whole world —
     // travel/arrival invalidation stays in renderWorld). Idle keeps the
@@ -554,7 +572,10 @@ async function submitSceneAct() {
   } catch (e) {
     // Same error phrasing as the A3 travel bar (409/401/4xx surfaces).
     S.sceneAct = { ok: false, detail: travelErrorText(e) };
+    // #93: a recoverable error keeps the typed draft (chat-draft pattern).
+    S.sceneActDraft = text;
     renderScenePanel();
+    toast(e.message, true);
   } finally {
     if (go) go.disabled = false;
   }
@@ -593,7 +614,8 @@ function topbar(active) {
 
 async function viewWorld() {
   location.hash = "#/world";
-  app.replaceChildren(topbar("#/world"), el("div", { class: "muted" }, "Загрузка…"));
+  const loading = el("div", { class: "muted" }, "Загрузка…");
+  app.replaceChildren(topbar("#/world"), loading);
   try {
     S.world = await api("/world");
     try { S.weather = await api("/weather"); } catch { S.weather = null; }
@@ -613,7 +635,11 @@ async function viewWorld() {
     
     renderWorld(locs, tasksData);
     startFeed();
-  } catch (e) { toast(e.message, true); }
+  } catch (e) {
+    // #93: transient failure — explicit retry instead of a dead «Загрузка…».
+    loadRetryNode(loading, () => viewWorld());
+    toast(e.message, true);
+  }
 }
 
 function needBar(label, value) {
@@ -1351,7 +1377,8 @@ function connectWs() {
 
 async function viewChat() {
   location.hash = "#/chat";
-  app.replaceChildren(topbar("#/chat"), el("div", { class: "muted" }, "Загрузка…"));
+  const loading = el("div", { class: "muted" }, "Загрузка…");
+  app.replaceChildren(topbar("#/chat"), loading);
   try {
     // Cold-load safety: #/chat can be the first route after reload — the
     // by-user hydration omits location_id, so read the authoritative
@@ -1377,7 +1404,11 @@ async function viewChat() {
       catch (e) { S.chatSessionId = null; sess = null; }
     }
     renderChat(sess);
-  } catch (e) { toast(e.message, true); }
+  } catch (e) {
+    // #93: transient failure — explicit retry instead of a dead «Загрузка…».
+    loadRetryNode(loading, () => viewChat());
+    toast(e.message, true);
+  }
 }
 
 function renderChat(session) {
@@ -1564,7 +1595,8 @@ function invCategoryRu(objectType) {
 
 async function viewInventory() {
   location.hash = "#/inventory";
-  app.replaceChildren(topbar("#/inventory"), el("div", { class: "muted" }, "Загрузка…"));
+  const loading = el("div", { class: "muted" }, "Загрузка…");
+  app.replaceChildren(topbar("#/inventory"), loading);
   try {
     const inv = await api(`/characters/${S.character.id}/inventory`);
     const items = Array.isArray(inv) ? inv : (inv.items || []);
@@ -1577,7 +1609,11 @@ async function viewInventory() {
       (Array.isArray(offers) ? offers : []).forEach((o) => { listed[o.object_id] = o.price; });
     } catch (e) { /* market read failed: POST errors still surface below */ }
     renderInventory(items, listed);
-  } catch (e) { toast(e.message, true); }
+  } catch (e) {
+    // #93: transient failure — explicit retry instead of a dead «Загрузка…».
+    loadRetryNode(loading, () => viewInventory());
+    toast(e.message, true);
+  }
 }
 
 async function wearToggle(objectId) {
@@ -1723,7 +1759,8 @@ function taskRow(t) {
 
 async function viewTasks() {
   location.hash = "#/tasks";
-  app.replaceChildren(topbar("#/tasks"), el("div", { class: "muted" }, "Загрузка…"));
+  const loading = el("div", { class: "muted" }, "Загрузка…");
+  app.replaceChildren(topbar("#/tasks"), loading);
   try {
     // Cold-load safety: #/tasks can be the first route after reload — the
     // by-user hydration omits location_id, so read the authoritative
@@ -1743,7 +1780,11 @@ async function viewTasks() {
     } catch (e) { /* desire layer unavailable — sections stay explicitly empty */ }
     S.mapLocations = await api("/locations");
     renderTasks(tasks, goals, opps, desire);
-  } catch (e) { toast(e.message, true); }
+  } catch (e) {
+    // #93: transient failure — explicit retry instead of a dead «Загрузка…».
+    loadRetryNode(loading, () => viewTasks());
+    toast(e.message, true);
+  }
 }
 
 function renderTasks(tasks, goals, opps, desire) {
@@ -1831,7 +1872,11 @@ function profileDesireBlock() {
           input.value = null;
         }
         refresh();
-      } catch (e) { toast(e.message, true); }
+      } catch (e) {
+        // #93: recoverable save failure keeps the typed desire + hints retry.
+        status.textContent = "Не удалось сохранить желание. " + RETRY_HINT;
+        toast(e.message, true);
+      }
       finally { saveBtn.disabled = false; }
     },
   }, "Задать желание");
