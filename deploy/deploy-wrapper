@@ -224,13 +224,17 @@ deploy_v1() {
     # гарантирует гейт в GitHub Actions (trusted push-run ci.yml существует
     # только для push'ей в main, т.е. head_sha такого run'а — first-parent
     # коммит main). Плюс обычная проверка достижимости — на случай ручного
-    # перезапуска обёртки с сервера.
+    # перезапуска обёртки с сервера. Проверка делается capture-then-match, а не
+    # пайпом с grep -q: grep -q закрывает пайп после первого совпадения,
+    # многострочный git rev-list получает SIGPIPE (exit 141), и pipefail валит
+    # проверку даже при совпадении.
     as_app "$GIT_BIN" -C "$APP_DIR" merge-base --is-ancestor "$sha" refs/remotes/origin/main \
         || err "sha ${sha} is not an ancestor of origin/main"
-    if ! as_app "$GIT_BIN" -C "$APP_DIR" rev-list --first-parent refs/remotes/origin/main \
-            | grep -qx "$sha"; then
-        err "sha ${sha} is not on the first-parent chain of origin/main"
-    fi
+    local chain
+    chain="$(as_app "$GIT_BIN" -C "$APP_DIR" rev-list --first-parent refs/remotes/origin/main)" \
+        || err "cannot enumerate first-parent chain of origin/main"
+    grep -qx "$sha" <<<"$chain" \
+        || err "sha ${sha} is not on the first-parent chain of origin/main"
     log "sha verified on origin/main: ${sha}"
 
     # previous-sha = живая ревизия чекаута (то, что обслуживается сейчас):
