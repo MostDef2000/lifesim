@@ -75,7 +75,16 @@ PROBE_ATTEMPTS="${LIFESIM_DEPLOY_PROBE_ATTEMPTS:-30}"   # 30 * 2s ≈ 60s про
 LOCK_WAIT="${LIFESIM_DEPLOY_LOCK_WAIT:-300}"            # сек ожидания flock
 APP_USER="lifesim"   # фиксировано схемой сервера; не переопределяется
 
-on_err() { echo "WRAP-ERR: unexpected failure at line ${LINENO}" >&2; exit 1; }
+on_err() {
+    local ec=$?
+    # ${BASH_LINENO[1]} — строка отказа в кадре вызывающего (сам трап — кадр 0);
+    # ${LINENO} внутри трапа указывает на строку трапа — отсюда бессмысленное
+    # «unexpected failure at line 78» в зелёном ране 38117968717: трап стрелял
+    # из сабшелла process substitution (find получал EACCES на 0750-каталоге
+    # бэкапов), а exit 1 убивал только этот сабшелл — родитель продолжал.
+    echo "WRAP-ERR: unexpected failure (status ${ec}): ${BASH_COMMAND:-?} at line ${BASH_LINENO[1]:-unknown}" >&2
+    exit 1
+}
 trap on_err ERR
 
 err() { echo "WRAP-ERR: $*" >&2; exit 1; }
@@ -179,21 +188,39 @@ write_manifest() {
     mv -f -- "$tmp" "$STATE_MANIFEST" || err "cannot install manifest"
 }
 
-# Держим KEEP_BACKUPS свежих pre-deploy-*.db (по mtime). Каталог бэкапов
-# принадлежит lifesim (§9.1), поэтому rm от имени deploy не имеет прав —
-# удаление идёт через as_app (грант rm в sudoers, §9.1 шаг 4). Пустой
-# список ("ещё нет бэкапов") — не ошибка; реальный сбой удаления
-# (включая отказ sudoers) не глушится.
+# Держим KEEP_BACKUPS свежих pre-deploy-*.db. Каталог бэкапов принадлежит
+# lifesim с режимом 0750 — deploy не может ни перечислить его содержимое
+# (find/stat молча дают пустоту), ни удалить файлы напрямую: перечисление
+# идёт через уже выданный грант git (ls-files --others видит и игнорируемые
+# файлы, работает от lifesim), удаление — через грант rm от lifesim.
+# Pathspec "${rel_backups}/pre-deploy-*.db" ограничивает перечисление только
+# pre-deploy-бэкапами — чужие файлы в каталоге бэкапов не занимают keep-слоты.
+# Имена содержат метку времени %F-%H%M, поэтому лексикографическая сортировка
+# совпадает с хронологической. Пустой список ("нечего удалять") — не ошибка;
+# сбой перечисления или удаления — явная ошибка, не глушится.
 prune_backups() {
-    local victim
-    while IFS= read -r victim; do
-        [ -n "$victim" ] || continue
+    local list victims rel_backups rel victim
+    rel_backups="${BACKUPS_DIR#"$APP_DIR"/}"
+    if [[ "$rel_backups" = "$BACKUPS_DIR" ]]; then
+        # drill-конфиг уводит каталог бэкапов из чек-аута (strip не сматчился,
+        # путь остался абсолютным) — через грант git его не перечислить; prune
+        # деградирует в no-op с явным логом.
+        log "prune skipped: backups dir is outside the worktree (drill config)"
+        return 0
+    fi
+    list="$(as_app "$GIT_BIN" -C "$APP_DIR" ls-files --others -- "${rel_backups}/pre-deploy-*.db")" \
+        || err "cannot enumerate backups (git ls-files failed)"
+    victims="$(printf '%s\n' "$list" | sort -r | tail -n +"$((KEEP_BACKUPS + 1))")"
+    while IFS= read -r rel; do
+        [ -n "$rel" ] || continue
+        case "${rel##*/}" in pre-deploy-*.db) ;; *) continue ;; esac
+        victim="${APP_DIR}/${rel#./}"
         as_app "$RM_BIN" -f -- "$victim" || {
             echo "WRAP-ERR: cannot prune backup ${victim}" >&2
             return 1
         }
-    done < <(find "$BACKUPS_DIR" -maxdepth 1 -type f -name 'pre-deploy-*.db' -printf '%T@ %p\n' 2>/dev/null \
-        | sort -rn | tail -n +"$((KEEP_BACKUPS + 1))" | cut -d' ' -f2-)
+        log "pruned old backup: ${rel}"
+    done <<<"$victims"
     return 0
 }
 
@@ -296,8 +323,19 @@ status_v1() {
     echo "== disk =="
     df -h "$APP_DIR" 2>/dev/null || true
     echo "== backups (последние 5) =="
-    find "$BACKUPS_DIR" -maxdepth 1 -type f -name 'pre-deploy-*.db' -printf '%TY-%Tm-%Td %TH:%TM %p\n' 2>/dev/null \
-        | sort -r | head -5 || true
+    local sbrel sblist
+    sbrel="${BACKUPS_DIR#"$APP_DIR"/}"
+    if [[ "$sbrel" = "$BACKUPS_DIR" ]]; then
+        echo "(каталог бэкапов вне чек-аута — drill-конфиг; перечисление недоступно)"
+    else
+        sblist="$(as_app "$GIT_BIN" -C "$APP_DIR" ls-files --others -- "${sbrel}/pre-deploy-*.db" 2>/dev/null \
+            | sort -r | head -5)" || true
+        if [ -n "$sblist" ]; then
+            printf '%s\n' "$sblist"
+        else
+            echo "(нет видимых бэкапов — перечисление через lifesim недоступно или каталог пуст)"
+        fi
+    fi
 }
 
 # ---------------------------------------------------------------------------- #
