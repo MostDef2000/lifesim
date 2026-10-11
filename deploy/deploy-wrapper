@@ -253,8 +253,18 @@ deploy_v1() {
     stamp="$(date +%F-%H%M)"
     backup_path="${BACKUPS_DIR}/pre-deploy-${stamp}.db"
     log "sqlite backup -> ${backup_path}"
-    as_app "$SQLITE_BIN" "$DB_PATH" ".backup '${backup_path}'" || err "sqlite backup failed"
-    [ -s "$backup_path" ] || err "sqlite backup is empty: ${backup_path}"
+    as_app "$SQLITE_BIN" "$DB_PATH" ".backup ${backup_path}" || err "sqlite backup failed"
+    # Backups dir is lifesim:0750 — deploy cannot stat inside it, so the size
+    # check must run as lifesim. git is already sudoers-granted as lifesim with
+    # `-C /opt/lifesim *`; hash-object (no -w) reads the file and prints its
+    # blob sha — the canonical empty-blob sha flags a missing/empty/unreadable
+    # backup without weakening the no-eval design.
+    local backup_hash empty_hash
+    backup_hash="$(as_app "$GIT_BIN" -C "$APP_DIR" hash-object "$backup_path")" \
+        || err "cannot read sqlite backup for verification: ${backup_path}"
+    empty_hash="$(printf '' | "$GIT_BIN" hash-object --stdin)"
+    [ "$backup_hash" != "$empty_hash" ] \
+        || err "sqlite backup is empty: ${backup_path}"
 
     # ---- мутирующая фаза: любая неудача => автоматический откат ----
     if deploy_mutate "$sha"; then
