@@ -16,6 +16,10 @@ __pycache__/
 .venv/
 venv/
 .pytest_cache/
+# pip build-isolation subprocess ignores the parent's --no-cache-dir and writes
+# $HOME/.cache/pip; lifesim's HOME IS /opt/lifesim (bootstrap §1) → cache lands
+# in the checkout. pip dedupes it — bounded, reused across deploys. Ignored, not killed.
+.cache/
 build/
 dist/
 

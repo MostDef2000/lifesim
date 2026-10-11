@@ -93,7 +93,10 @@ log() { echo "WRAP: $*"; }
 # Все шаги с файлами приложения выполняются от имени lifesim. -H пинит HOME
 # к домашнему каталогу lifesim по /etc/passwd — по bootstrap §1 это сам
 # /opt/lifesim. Без -H HOME недетерминирован (унаследованный от deploy), с -H
-# — известен; производителя незатреканного .cache/ (pip) убивает --no-cache-dir,
+# — известен. --no-cache-dir отключает кэш у самого pip, но PEP 517 сабпроцесс
+# build-isolation (hatchling) флаг родителя не наследует и пишет $HOME/.cache/pip;
+# HOME lifesim по passwd = /opt/lifesim, поэтому кэш попадает в чек-аут.
+# Директория игнорируется (.gitignore), кэш дедуплицирован и переиспользуется.
 # -H просто делает окружение as_app предсказуемым. -H — опция sudo, на матчинг
 # Cmnd в sudoers не влияет (формы грантов не меняются).
 as_app() { sudo -n -H -u "$APP_USER" "$@"; }
@@ -152,9 +155,10 @@ deploy_mutate() {
     sudo -n "$SYSTEMCTL_BIN" restart "$SERVICE" || return 1
     probes_ok || return 1
 
-    # Гигиена чек-аута: untracked-артефакты (например .cache/ от pip при утечке
-    # HOME) пишем в лог, но ошибкой деплоя не считаем. Перечисление — через
-    # грант (status как deploy может быть слеп, как find в prune до #165).
+    # Гигиена чек-аута: untracked-артефакты (артефакты инструментов, попавшие
+    # в чек-аут через HOME) пишем в лог, но ошибкой деплоя не считаем.
+    # Перечисление — через грант (status как deploy может быть слеп, как find
+    # в prune до #165); игнорируемое (.gitignore) status не показывает.
     local status_out untracked="" hygiene_line
     if status_out="$(as_app "$GIT_BIN" -C "$APP_DIR" status --porcelain 2>/dev/null)"; then
         while IFS= read -r hygiene_line; do
