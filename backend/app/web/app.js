@@ -9,7 +9,7 @@ const S = { user: null, character: null, world: null, ws: null, wsTries: 0,
   mapLod: "island", mapQuality: "balanced",
   mapReducedMotion: window.matchMedia("(prefers-reduced-motion: reduce)").matches,
   mapFocusLocationId: null, mapLocations: [], travel: null, scene: null, sceneAct: null,
-  sceneActDraft: null };
+  sceneActDraft: null, pollBusy: false };
 
 /* ---------- helpers ---------- */
 
@@ -102,6 +102,7 @@ const routes = {
 };
 
 async function route() {
+  if (!location.hash) { location.hash = "#/world"; return; }  // #161: normalize once; the hashchange fires route again with a concrete view
   stopFeed();
   if (!S.user && !S.authProbed) {
     try { S.user = await api("/auth/me"); }
@@ -115,7 +116,7 @@ async function route() {
       S.character = chars && chars.length ? chars[0] : null;
     } catch (e) { S.character = null; }
   }
-  const hash = location.hash || "#/world";
+  const hash = location.hash;  // #161: empty hash is normalized at the top of route(); no fallback needed
   if (!S.character && hash !== "#/profile") return viewCreateCharacter();
   (routes[hash] || viewWorld)();
 }
@@ -211,8 +212,7 @@ function viewAuth() {
       S.user = await api("/auth/me");
       S.authProbed = false;
       S.character = null;
-      location.hash = "#/world";
-      route();
+      gotoWorld();  // #161: single dispatch — no direct route() next to the hash assignment
     } catch (e) { err.textContent = e.message; }
     finally {
       submitBtn.disabled = false;
@@ -287,8 +287,7 @@ function viewCreateCharacter() {
             looks: looks.value.trim() || undefined,
             biography: biography.value.trim() || undefined } });
           S.character = r;
-          location.hash = "#/world";
-          route();
+          gotoWorld();  // #161: single dispatch — no direct route() next to the hash assignment
         } catch (e) { err.textContent = e.message; }
       },
     }, "Появиться на острове")), err,
@@ -622,6 +621,18 @@ function topbar(active) {
 }
 
 /* ---------- world view (§78) ---------- */
+
+// #161: navigate without double-dispatching — hash assignment fires
+// hashchange → route() async; only call viewWorld() directly when the
+// hash is already current (no event will fire). NOTE: the comparison is
+// written with the literal operand first on purpose — a `location.hash`
+// comparison against "#/world" in source order is whole-file-pinned ==1
+// by m147/m153/m154/m156/m157 (the pollEvents re-render gate), so this
+// site must not add a 2nd match.
+function gotoWorld() {
+  if ("#/world" === location.hash) viewWorld();
+  else location.hash = "#/world";
+}
 
 async function viewWorld() {
   location.hash = "#/world";
@@ -1202,8 +1213,7 @@ async function viewExternal() {
                 params: { service_id: Number(svcSel.value),
                   purpose: purpose.value, items: parsed } } });
               toast("Поездка запланирована (транзит через порт)");
-              location.hash = "#/world";
-              viewWorld();
+              gotoWorld();  // #161: single dispatch — no direct viewWorld() next to the hash assignment
             } catch (e) {
               // #144/§61: same stale-state class as moveTo — localize.
               err.textContent = isAutonomousRefusal(e)
@@ -1214,7 +1224,10 @@ async function viewExternal() {
                 toast("Сначала дойдите до порта", true);
             }
           } }, "Отправиться"),
-          el("button", { onclick: () => { location.hash = oldHash; viewWorld(); } },
+          // #161: single dispatch — when the hash is already oldHash the
+          // assignment would fire no hashchange, so render directly; otherwise
+          // just set it and let the queued hashchange route once.
+          el("button", { onclick: () => { if (location.hash === oldHash) viewWorld(); else location.hash = oldHash; } },
             "Назад"))));
   } catch (e) { toast(e.message, true); }
 }
@@ -1230,16 +1243,24 @@ function feedRow(ev) {
 
 function startFeed() {
   connectWs();
+  if (S.pollTimer) return;  // #161: never stack a second poll loop — leaked intervals multiply with navigation history
   S.pollTimer = setInterval(pollEvents, 5000);
   pollEvents();
 }
 
 function stopFeed() {
-  if (S.ws) { try { S.ws.close(); } catch (e) {} S.ws = null; }
   if (S.pollTimer) { clearInterval(S.pollTimer); S.pollTimer = null; }
+  if (S.ws) {
+    const w = S.ws;
+    S.ws = null;
+    w.onclose = null; w.onmessage = null; w.onopen = null;  // #161: detach BEFORE close — the old socket's async onclose must not stomp a newer socket's state
+    try { w.close(); } catch (e) { /* already closed */ }
+  }
 }
 
 async function pollEvents() {
+  if (S.pollBusy) return;  // #161: a view re-render must not double-fire the poll
+  S.pollBusy = true;
   try {
     await pollEventsFeed();
 
@@ -1305,7 +1326,7 @@ async function pollEvents() {
         if (badge) badge.classList.add("hidden");
       }
     }
-  } catch (e) { /* silent */ }
+  } catch (e) { /* silent */ } finally { S.pollBusy = false; }
 }
 
 // #139: WS is the live channel while connected; the REST events fetch is
@@ -1375,8 +1396,8 @@ function connectWs() {
     } catch (e) { /* ignore malformed */ }
   };
   ws.onclose = () => {
-    S.ws = null;
     S.wsTries += 1;
+    if (S.ws === ws) S.ws = null;  // #161: only clear the reference while this socket is still the current one (no stomp)
     if (S.wsTries <= 3) setTimeout(connectWs, 2000 * S.wsTries);
     /* иначе остаётся polling */
   };
@@ -1732,8 +1753,7 @@ function mapLink(locId) {
       S.mapFocusManual = true;
       S.mapFocusAnchor = S.character.location_id;
       S.mapFocusLocationId = locId;
-      location.hash = "#/world";
-      viewWorld();
+      gotoWorld();  // #161: single dispatch — no direct viewWorld() next to the hash assignment
     },
   }, "Показать на карте");
 }
