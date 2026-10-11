@@ -34,3 +34,9 @@ This project runs inside the Docker sandbox described by the global contract `~/
 ## Project-specific rules
 
 Add architecture, runtime contours, protected paths, test commands, release policy, and deployment authority here as the project evolves.
+
+## Deploy contract
+
+- Lane A (routine app deploys): dispatch of `.github/workflows/deploy.yml` (forced-command wrapper on the VPS) per the DEPLOY-TRIGGER protocol after explicit owner confirmation in chat — full 40-hex SHA from origin/main, green CI, acceptance probes, rollback.
+- The unified deploy contract is documented in the workspace repo: `specs/deploy-unification/`.
+- Infra/stateful changes (systemd, nginx, migrations, secrets) — sysadmin lane B.
