@@ -18,7 +18,7 @@
 #     файлов), venv /opt/lifesim/.venv, systemd-юнит `lifesim`, Caddy на краю;
 #   * обёртка выполняется от пользователя deploy и НИКОГДА не предполагает
 #     root: шаги, трогающие файлы приложения (git/pip/sqlite3), идут через
-#     `sudo -n -u lifesim <точный_бинарный_путь> ...`, рестарт юнита — через
+#     `sudo -n -H -u lifesim <точный_бинарный_путь> ...`, рестарт юнита — через
 #     `sudo -n /usr/bin/systemctl restart lifesim`;
 #   * /opt/lifesim/deploy-state — принадлежит deploy (lock + state-файлы):
 #       apply.lock                  — flock single-flight
@@ -90,8 +90,13 @@ trap on_err ERR
 err() { echo "WRAP-ERR: $*" >&2; exit 1; }
 log() { echo "WRAP: $*"; }
 
-# Все шаги с файлами приложения выполняются от имени lifesim.
-as_app() { sudo -n -u "$APP_USER" "$@"; }
+# Все шаги с файлами приложения выполняются от имени lifesim. -H пинит HOME
+# к домашнему каталогу lifesim по /etc/passwd — по bootstrap §1 это сам
+# /opt/lifesim. Без -H HOME недетерминирован (унаследованный от deploy), с -H
+# — известен; производителя незатреканного .cache/ (pip) убивает --no-cache-dir,
+# -H просто делает окружение as_app предсказуемым. -H — опция sudo, на матчинг
+# Cmnd в sudoers не влияет (формы грантов не меняются).
+as_app() { sudo -n -H -u "$APP_USER" "$@"; }
 
 require_sha() {
     [[ "$1" =~ ^[0-9a-f]{40}$ ]] || err "invalid sha: expected 40 lowercase hex"
@@ -140,10 +145,34 @@ deploy_mutate() {
     log "git checkout --detach ${sha}"
     as_app "$GIT_BIN" -C "$APP_DIR" checkout --detach "$sha" || return 1
     log "pip install -e . uvicorn"
-    as_app "$PIP_BIN" install --editable "$APP_DIR" uvicorn || return 1
+    # Деплой-инсталлы одноразовые: колесный кэш не даёт попаданий и только
+    # копится на маленьком VPS — отключаем чтение и запись кэша целиком.
+    as_app "$PIP_BIN" install --no-cache-dir --editable "$APP_DIR" uvicorn || return 1
     log "systemctl restart ${SERVICE}"
     sudo -n "$SYSTEMCTL_BIN" restart "$SERVICE" || return 1
     probes_ok || return 1
+
+    # Гигиена чек-аута: untracked-артефакты (например .cache/ от pip при утечке
+    # HOME) пишем в лог, но ошибкой деплоя не считаем. Перечисление — через
+    # грант (status как deploy может быть слеп, как find в prune до #165).
+    local status_out untracked="" hygiene_line
+    if status_out="$(as_app "$GIT_BIN" -C "$APP_DIR" status --porcelain 2>/dev/null)"; then
+        while IFS= read -r hygiene_line; do
+            [ -n "$hygiene_line" ] || continue
+            case "$hygiene_line" in
+                '??'*) untracked+="${hygiene_line#\?\? }"$'\n' ;;
+            esac
+        done <<<"$status_out"
+    else
+        log "hygiene check unavailable: git status failed"
+        return 0  # дальше только отчёт по untracked — при сбое status делать его не на чем
+    fi
+    if [ -n "$untracked" ]; then
+        log "note: untracked in checkout:"
+        printf '%s' "$untracked" | sed 's/^/WRAP:   /'
+    else
+        log "checkout clean (no untracked entries)"
+    fi
     return 0
 }
 
@@ -156,7 +185,7 @@ rollback() {
         echo "WRAP-ERR: rollback checkout failed" >&2
         rc=1
     fi
-    if ! as_app "$PIP_BIN" install --editable "$APP_DIR" uvicorn; then
+    if ! as_app "$PIP_BIN" install --no-cache-dir --editable "$APP_DIR" uvicorn; then
         echo "WRAP-ERR: rollback pip install failed" >&2
         rc=1
     fi
