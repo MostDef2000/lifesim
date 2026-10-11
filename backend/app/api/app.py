@@ -6,6 +6,7 @@ The API layer is additive: headless simulation never imports this module
 
 import asyncio
 import contextlib
+import logging
 import os
 from typing import Any
 
@@ -71,8 +72,38 @@ def _masked_validation_handler(request, exc):
         sanitized.append(jsonable_encoder(err))
     return JSONResponse(status_code=422, content={"detail": sanitized})
 
+def _setup_app_logging():
+    """#155: route application logs to stderr so uvicorn entrypoints work.
+
+    `uvicorn app.run:app` and `vl1 serve` configure no application logging:
+    the root logger ran on lastResort (WARNING+), so INFO lines from
+    vl1.ticker ("live tick driver started", lock-contention warning) never
+    reached stdout/stderr and therefore journalctl. The `vl1` logger (covers
+    vl1.ticker and future vl1.*) gets a stderr StreamHandler (12-factor) with
+    propagate=False — deterministic routing, root/lastResort never
+    duplicates. uvicorn.* loggers are NOT touched: uvicorn configures its
+    own access logs with propagate=False, and inflating the journal is an
+    explicit non-goal of #155. Idempotent across repeated create_app()
+    calls (tests build many apps): the handler carries a private _vl1
+    marker and is only added once.
+    """
+    logger = logging.getLogger("vl1")
+    if not any(getattr(h, "_vl1", False) for h in logger.handlers):
+        handler = logging.StreamHandler()  # stderr (12-factor)
+        handler.setFormatter(
+            logging.Formatter("%(asctime)s %(name)s %(levelname)s %(message)s"))
+        handler._vl1 = True  # private idempotency marker
+        logger.addHandler(handler)
+    logger.setLevel(logging.INFO)
+    logger.propagate = False
+
+
 def create_app(settings, session_factory: sessionmaker):
     """Build the FastAPI app bound to a sessionmaker and the given Settings."""
+    # #155: both uvicorn entrypoints build the app through this factory
+    # (`vl1 serve` via cli.py, `uvicorn app.run:app` via run._build), so the
+    # logging setup lives here — one seam covers both entrypoints.
+    _setup_app_logging()
     from fastapi import Depends, FastAPI, HTTPException, Request, Response
     from fastapi.exceptions import RequestValidationError
     from fastapi.responses import JSONResponse

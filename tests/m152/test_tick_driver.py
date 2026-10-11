@@ -264,8 +264,18 @@ def test_repeated_ticks_never_double_apply(world):
     settings, app, client, factory = world
     wid = settings.world.world_id
     _register_and_login(client, "mono151")
+    # Setup race guard: the live driver can tick BETWEEN POST /characters and
+    # the DIRECT switch, and a fresh player character defaults to AUTONOMOUS
+    # (§61) — a tick in that window legally runs its utility AI (routine
+    # DRINK / autonomous MOVEs), logging extra CHARACTER_MOVED events for
+    # this very character that _arrivals() below would count as a second
+    # arrival. The engine is correct; the test was racy. Freezing the world
+    # for the whole setup makes it deterministic (step_world_live no-ops on
+    # is_paused, so no tick can touch the character before it is DIRECT).
+    _set_paused(factory, wid, True)
     cid = _make_character(client, "Mono Mover")
     target_id, task_id = _create_move(client, factory, cid, wid)
+    _set_paused(factory, wid, False)
 
     assert _wait_until(lambda: _char_loc(factory, cid) == target_id)
 
