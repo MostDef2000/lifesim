@@ -46,8 +46,14 @@ MOVE_GATE_BLOCK = (
     "  }"
 )
 
+# #177 amended this block (liveness gate: backlog replay from cursor 0 on
+# every (re)connect must not reload the world view) — the literal below is
+# the new truthful bytes; the count/ordering assertions are unchanged.
 CONTROL_CHANGED_BLOCK = (
-    '          if (fresh.some((e) => e.event_type === "CONTROL_CHANGED")\n'
+    '          if (fresh.some((e) => e.event_type === "CONTROL_CHANGED"\n'
+    '              && e.id > S.bootCursor\n'
+    '              && S.world && typeof e.game_timestamp === "number"\n'
+    '              && e.game_timestamp >= S.world.game_timestamp - 15)\n'
     '            && location.hash === "#/world") {\n'
     "            viewWorld();\n"
     "          }"

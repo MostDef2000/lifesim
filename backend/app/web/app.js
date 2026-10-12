@@ -10,7 +10,8 @@ const S = { user: null, character: null, world: null, ws: null, wsTries: 0,
   mapLod: "island", mapQuality: "balanced",
   mapReducedMotion: window.matchMedia("(prefers-reduced-motion: reduce)").matches,
   mapFocusLocationId: null, mapLocations: [], travel: null, scene: null, sceneAct: null,
-  sceneActDraft: null, pollBusy: false, shopConfirm: null, chatDraft: "" };
+  sceneActDraft: null, pollBusy: false, shopConfirm: null, chatDraft: "",
+  bootCursor: Infinity };  // #177: replay gate — set once from the first REST history fill; Infinity = "no live events until proven"
 
 /* ---------- helpers ---------- */
 
@@ -1403,6 +1404,18 @@ async function pollEventsFeed() {
       // #82 (A3): REST fallback path mirrors the WS arrival hook.
       if (fresh.some((e) => isOwnMoveEvent(e))) onOwnArrival();
     }
+    // #177: the replay boundary is captured from the REST RESPONSE, not
+    // from `fresh` — the first WS batch (same ids, server replays from
+    // cursor 0) can win the race and empty the dedup set, but the response
+    // still defines where replay ends. `events` is bounded by the server
+    // limit (100), so the spread is safe.
+    if (S.bootCursor === Infinity) {
+      S.bootCursor = Math.max(...events.map((e) => e.id));
+    }
+  } else if (S.cursor === 0) {
+    // #177: fresh world with no events yet — everything from id 1 on is
+    // live; the boundary is zero.
+    S.bootCursor = 0;
   }
 }
 
@@ -1434,13 +1447,26 @@ function connectWs() {
           // when the world view is actually on screen (never hijack
           // #/profile or #/chat); viewWorld() only reads state, so no
           // event/POST feedback loop is possible.
-          if (fresh.some((e) => e.event_type === "CONTROL_CHANGED")
+          // #177: the WS replays the whole backlog from cursor 0 on every
+          // (re)connect; a replayed CONTROL_CHANGED must not reload the
+          // world view. React only to LIVE events: id beyond the boot
+          // replay marker and logged within a small window of the current
+          // game time (covers backlogs larger than the REST fetch window).
+          if (fresh.some((e) => e.event_type === "CONTROL_CHANGED"
+              && e.id > S.bootCursor
+              && S.world && typeof e.game_timestamp === "number"
+              && e.game_timestamp >= S.world.game_timestamp - 15)
             && location.hash === "#/world") {
             viewWorld();
           }
           // #82 (A3): own arrival completes the travel state machine
-          // (travelling → arrived) and re-renders the map.
-          if (fresh.some((e) => isOwnMoveEvent(e))) onOwnArrival();
+          // (travelling → arrived) and re-renders the map. #177: the
+          // liveness gate below keeps historical own-MOVE replay from
+          // churning the map.
+          if (fresh.some((e) => isOwnMoveEvent(e)
+              && e.id > S.bootCursor
+              && S.world && typeof e.game_timestamp === "number"
+              && e.game_timestamp >= S.world.game_timestamp - 15)) onOwnArrival();
         }
       }
     } catch (e) { /* ignore malformed */ }

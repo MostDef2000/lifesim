@@ -139,7 +139,9 @@ def test_ws_close_never_drives_the_banner():
 def test_chat_draft_survival_pins():
     js = _read(APP_JS)
     # The draft state exists exactly once in the S initializer.
-    assert js.count("chatDraft: \"\" };") == 1
+    # #177 appended bootCursor as the LAST property after chatDraft — the
+    # init tail moved; literal updated to the new truthful bytes.
+    assert js.count("chatDraft: \"\",\n  bootCursor: Infinity };") == 1
     # Seeded on every composer render (NPC switch / re-render keeps text).
     assert js.count("input.value = S.chatDraft || \"\";") == 1
     # Kept in sync on every keystroke (el()-created node, addEventListener —
