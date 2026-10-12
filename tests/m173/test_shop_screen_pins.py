@@ -180,7 +180,10 @@ def test_shop_honesty_negative_pins():
     # No premature-create mechanism: the confirm panel is the only buy path
     # (assignments: set on «Купить», cleared on success / cancel).
     assert js.count("S.shopConfirm = ") == 3
-    assert js.count("shopConfirm: null }") == 1
+    # #175 appended chatDraft after shopConfirm in the S initializer — the
+    # closing brace moved; the init tail is pinned byte-exactly at its new
+    # shape (the confirm field is still the single null initializer).
+    assert js.count("shopConfirm: null, chatDraft: \"\" };") == 1
     # Adversarial-review P0 fix: the confirm step reads LIVE S.shopConfirm
     # everywhere — composeHome branches on the live flag and confirmPanel
     # finds by the live flag. The render-time capture (const confirmId)

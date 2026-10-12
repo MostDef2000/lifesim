@@ -68,9 +68,13 @@ Fix pins (this file):
    B3/resilience byte pins (m158 test_ui_transient_failure_catch_pins) must
    survive the #161 edits untouched. NOTE: the round-1 work order said pin
    `S.sceneActDraft == 5`, but the true byte count of `S.sceneActDraft` is 4
-   (pre- AND post-fix) — the m158 oracle (line 384) pins `sceneActDraft == 5`
+   (pre- AND post-#161-fix) — the m158 oracle pins `sceneActDraft == 5`
    without the prefix (4× S.sceneActDraft + 1× `sceneActDraft: null` init).
-   Both facts are pinned here: sceneActDraft == 5 AND S.sceneActDraft == 4.
+   #175 later added the scene-act oninput capture: the counts are now
+   sceneActDraft == 6 AND S.sceneActDraft == 5. #175 also raised the
+   loadRetryNode call sites 6 → 8 (viewExternal + viewAdmin) and rewrote the
+   pollEvents silent catch (failure counting + connection banner) — the old
+   byte literal is pinned == 0, the new finally/counter shape is pinned.
 
 No conftest changes; no backend/API/config changes; XSS hygiene untouched
 (innerHTML stays == 0).
@@ -195,9 +199,15 @@ def test_pollevents_inflight_guard():
     assert JS.count("S.pollBusy") == 3
     assert JS.count("pollBusy") == 4
     # The finally must release the flag on the same statement chain as the
-    # existing silent catch.
+    # catch. #175 rewrote the formerly silent catch (it now counts consecutive
+    # failures and drives the connection banner) — the old byte literal is
+    # gone on purpose; the finally chain and the new failure-counter shape
+    # are pinned instead.
     assert JS.count("} catch (e) { /* silent */ }"
-                    " finally { S.pollBusy = false; }") == 1
+                    " finally { S.pollBusy = false; }") == 0
+    assert JS.count("finally { S.pollBusy = false; }") == 1
+    assert JS.count("S.pollFails += 1;") == 1
+    assert JS.count("S.pollFails = 0;") == 1
 
 
 # ---------- 5. B3/resilience byte pins survive the #161 edits ----------
@@ -208,14 +218,17 @@ def test_regression_byte_pins_of_b3_survive():
     fix must not disturb them."""
     # #170: viewDesire joins the #93 retry pattern → 5 alpha-critical sites.
     # #173: viewShop joins the #93 retry pattern → 6 alpha-critical sites.
-    assert JS.count("loadRetryNode(loading, () => view") == 6
+    # #175: viewExternal + viewAdmin drop their toast-only catches → 8.
+    assert JS.count("loadRetryNode(loading, () => view") == 8
     # #170 F2: the desire interpret-preview failure path reuses the shared
     # hint constant (m158 keeps the const def + profile-save literal).
     assert JS.count("RETRY_HINT") == 4
     assert JS.count("innerHTML") == 0
     assert JS.count("AUTONOMOUS_HINT") == 8
     assert JS.count("isAutonomousRefusal") == 6
-    # m158 oracle pins `sceneActDraft == 5` (4× S.sceneActDraft + 1× init
-    # field); the bare-S count itself is 4 — see module docstring.
-    assert JS.count("sceneActDraft") == 5
-    assert JS.count("S.sceneActDraft") == 4
+    # m158 oracle pins `sceneActDraft == 6` (5× S.sceneActDraft + 1× init
+    # field); the bare-S count itself is 5 — #175 added the oninput capture
+    # (draft saved on every keystroke, not only on submit). See module
+    # docstring for the pre-#175 counts.
+    assert JS.count("sceneActDraft") == 6
+    assert JS.count("S.sceneActDraft") == 5
