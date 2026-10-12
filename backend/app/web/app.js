@@ -98,7 +98,8 @@ function dayTime(ts) {
 
 const routes = {
   "#/login": viewAuth, "#/world": viewWorld, "#/chat": viewChat,
-  "#/inventory": viewInventory, "#/tasks": viewTasks, "#/profile": viewProfile, "#/admin": viewAdmin,
+  "#/inventory": viewInventory, "#/tasks": viewTasks, "#/desire": viewDesire,
+  "#/profile": viewProfile, "#/admin": viewAdmin,
 };
 
 async function route() {
@@ -601,7 +602,7 @@ function weatherLabel() {
 
 function topbar(active) {
   const tabs = [["#/world", "Мир"], ["#/chat", "Чат"], ["#/inventory", "Инвентарь"],
-    ["#/tasks", "Дела"], ["#/profile", "Профиль"]];
+    ["#/tasks", "Дела"], ["#/desire", "Цель"], ["#/profile", "Профиль"]];
   if (["admin", "developer", "moderator"].includes(S.user.role)) {
     tabs.push(["#/admin", "Админ"]);
   }
@@ -1837,18 +1838,26 @@ function renderTasks(tasks, goals, opps, desire) {
       : el("div", { class: "muted" }, "История пуста"));
 
   // Opportunities are fed by the Desire planner (#90) and are semantically
-  // separate from tasks; empty states are explicit.
+  // separate from tasks; empty states are explicit. #170: the dedicated
+  // #/desire screen is the canonical surface — the block links over and
+  // keeps working (deep link focuses the free-text field on arrival).
   const oppsBox = el("div", { class: "panel", id: "tasks-opps" },
     el("h2", {}, "Возможности"),
     desire == null
-      ? el("div", { class: "muted" }, "Желание не задано — задайте его в профиле")
+      ? el("div", { class: "muted" }, "Желание не задано — ",
+          el("a", { href: "#/desire",
+            onclick: () => { S.desireFocus = true; } },
+            "задайте его на экране «Цель»"))
       : (opps.length
         ? opps.map((o) => el("div", { class: "opp" },
             el("div", {}, o.title || ""),
             o.reason ? el("div", { class: "muted" }, o.reason) : null,
             o.source ? el("div", { class: "muted" }, `Источник: ${o.source}`) : null,
             o.link ? el("a", { href: o.link }, "Открыть") : null))
-        : el("div", { class: "muted" }, "Пока нет возможностей")));
+        : el("div", { class: "muted" }, "Пока нет возможностей")),
+    desire != null
+      ? el("a", { href: "#/desire", class: "muted tasks-desire-link" },
+          "Экран «Цель»") : null);
 
   // The short-term CharacterGoal is its own block, explicitly distinct
   // from the long-term Desire (which lives in the profile).
@@ -1867,6 +1876,287 @@ function renderTasks(tasks, goals, opps, desire) {
     el("div", { class: "grid" }, activeBox, goalBox, oppsBox, historyBox));
 }
 
+
+/* ---------- #170 (spec #64): Цель / желание — first-class screen ----------
+
+   UI layer over desire v1 (#90): ONE active desire per character, served by
+   the existing endpoints (the desire set/drop pair plus the bounded
+   opportunities read — see app.py desire section). Per VISUAL-BIBLE §47 and
+   #64 §3 the free-text textarea is THE primary control; suggestion chips
+   are shortcuts that only fill the field (never submit). Interpretation is
+   instant (deterministic LLM-off catalog, desire.py) so the PREVIEW shows
+   «как система поняла» immediately — no fake spinner — and the desire is
+   created only when the player confirms (interpret endpoint is read-only;
+   §4-5: confirm gates the mutation, not the reverse). Lifecycle: set /
+   replace / cancel; pause and history reads have no backend support yet
+   (terminal rows exist, no read endpoint) — omitted honestly, not faked. */
+
+const DESIRE_SUGGESTIONS = [
+  "Хочу завести отношения",
+  "Хочу открыть своё дело",
+  "Хочу стать мэром",
+  "Хочу больше путешествовать",
+  "Хочу построить большой дом",
+  "Хочу познакомиться с новыми людьми",
+];
+
+function desireStateFetch() {
+  // One authoritative read returns both the active desire and the planner's
+  // bounded opportunities (title/reason/source/link included).
+  return api(`/characters/${S.character.id}/desire/opportunities`);
+}
+
+async function refreshDesire() {
+  // Guarded refresh after a lifecycle action: re-render ONLY while the
+  // player is still on #/desire — navigating away mid-request must not
+  // yank them back (no hash assignment on this path).
+  if (location.hash !== "#/desire") return;
+  const r = await desireStateFetch();
+  if (location.hash === "#/desire") {
+    renderDesire(r.desire, r.opportunities || []);
+  }
+}
+
+async function viewDesire() {
+  location.hash = "#/desire";
+  const loading = el("div", { class: "muted" }, "Загрузка…");
+  app.replaceChildren(topbar("#/desire"), loading);
+  try {
+    // Cold-load safety: #/desire can be the first route after reload — the
+    // by-user hydration omits location_id, so read the authoritative
+    // character first (same pattern as viewChat / viewTasks); without it
+    // mapLink focus and the pollEvents anchor release misbehave.
+    if (S.character.location_id == null) {
+      const me = await api(`/characters/${S.character.id}`);
+      S.character = { ...S.character, ...me };
+    }
+    const r = await desireStateFetch();
+    renderDesire(r.desire, r.opportunities || []);
+  } catch (e) {
+    // #93: transient failure — explicit retry instead of a dead «Загрузка…».
+    loadRetryNode(loading, () => viewDesire());
+    toast(e.message, true);
+  }
+}
+
+function desireChipRow(field) {
+  // #64 §3 + §47: chips are examples, not limits — a click fills the
+  // free-text field and focuses it (chat-sugg pattern); nothing is sent.
+  // Real buttons (not spans): keyboard-operable for free, styled back to
+  // the dim .sugg look by the scoped .desire-chips .sugg rule.
+  return el("div", { class: "desire-chips", id: "desire-chips" },
+    ...DESIRE_SUGGESTIONS.map((s) => el("button", {
+      class: "sugg", type: "button",
+      onclick: () => { field.value = s; field.focus(); },
+    }, s)),
+    el("div", { class: "muted desire-chips-note" },
+      "Примеры — только подсказки: можно написать что угодно своими словами"));
+}
+
+function desireOppCard(o) {
+  // #64 §7: what is available, why it is linked (reason), source, next
+  // action. Links go through the opportunity's authoritative link (#/chat,
+  // #/world, #/inventory, #/profile); a location pointer in the action
+  // params gets the existing map focus mechanism. Nothing is invented.
+  const locId = o.action && o.action.params ? o.action.params.location_id : null;
+  return el("div", { class: "opp desire-opp" },
+    el("div", { class: "desire-opp-title" }, o.title || ""),
+    o.reason ? el("div", { class: "muted" }, o.reason) : null,
+    o.source ? el("div", { class: "muted" }, `Источник: ${o.source}`) : null,
+    o.link ? el("a", { href: o.link }, "Открыть") : null,
+    locId != null ? mapLink(locId) : null);
+}
+
+function renderDesire(desire, opps, preview) {
+  // #170 deep link: the Дела screen sets S.desireFocus on its link, the
+  // flag is consumed here — arrival focuses the free-text field (§47: the
+  // free input stays the visible primary control).
+  const wantFocus = S.desireFocus === true;
+  S.desireFocus = false;
+  const interp = (desire && desire.interpretation) || {};
+  const status = el("div", { class: "muted desire-status", role: "status" });
+  const field = el("textarea", {
+    id: "desire-input", rows: "3", maxlength: "500",
+    placeholder: "Опишите желание своими словами — например: найти друзей, открыть своё дело",
+  });
+  const focusField = () => { if (wantFocus) field.focus(); };
+
+  // Warm family: the desire screen carries the world-shell token set on the
+  // grid container (.desire-shell mirrors the --w-* custom properties only)
+  // so panels, dividers and accents read warm like the approved screens.
+  function compose(...panels) {
+    app.replaceChildren(topbar("#/desire"),
+      el("div", { class: "grid desire-shell" }, ...panels));
+    focusField();
+  }
+
+  const submitBtn = el("button", {
+    id: "desire-submit", class: "primary", type: "button",
+    onclick: async () => {
+      const text = field.value.trim();
+      if (!text) {
+        status.textContent = "Напишите желание своими словами — свободный текст здесь главный";
+        return;
+      }
+      // B2-review F2 pattern: no double-submit while a request is in flight.
+      if (submitBtn.disabled) return;
+      submitBtn.disabled = true;
+      status.textContent = "";
+      try {
+        // #64 §4-5 honesty: interpret FIRST, create ONLY on confirm — the
+        // deterministic catalog runs here without mutating anything.
+        const r = await api(`/characters/${S.character.id}/desire/interpret`,
+          { method: "POST", body: { text } });
+        if (r && r.clarification) {
+          // #87 ok:false pattern: the reason is data, nothing was created —
+          // the typed text stays so the player can rephrase in place.
+          status.textContent = r.clarification;
+          field.focus();
+          return;
+        }
+        renderDesire(desire, opps, { text, interpretation: r.interpretation });
+      } catch (e) {
+        // #93: recoverable failure keeps the typed draft on screen.
+        status.textContent = "Не удалось разобрать желание. " + RETRY_HINT;
+        toast(e.message, true);
+      } finally { submitBtn.disabled = false; }
+    },
+  }, "Сформулировать желание");
+
+  const confirmBtn = el("button", {
+    class: "primary", type: "button",
+    onclick: async () => {
+      // The ONLY create site (#64 §5): confirmation performs the real POST;
+      // one-active-desire replace semantics are server-side.
+      if (confirmBtn.disabled) return;
+      confirmBtn.disabled = true;
+      try {
+        await api(`/characters/${S.character.id}/desire`,
+          { method: "POST", body: { text: preview.text } });
+        await refreshDesire();
+      } catch (e) {
+        toast(e.message, true);
+        confirmBtn.disabled = false;
+      }
+    },
+  }, "Подтвердить");
+
+  const dropDraftBtn = el("button", {
+    type: "button",
+    onclick: () => composeHome(),  // drops the DRAFT — nothing was created
+  }, "Отказаться");
+
+  const dropBtn = el("button", {
+    type: "button", class: "desire-drop",
+    onclick: async () => {
+      if (dropBtn.disabled) return;
+      dropBtn.disabled = true;
+      try {
+        await api(`/characters/${S.character.id}/desire`, { method: "DELETE" });
+        toast("Цель больше не активна");
+        await refreshDesire();
+      } catch (e) { toast(e.message, true); }
+      finally { dropBtn.disabled = false; }
+    },
+  }, "Отказаться от цели");
+
+  function editorPanel(preset) {
+    field.value = preset || "";
+    return el("div", { class: "panel", id: "desire-editor" },
+      el("h2", {}, "Цель / желание"),
+      el("p", { class: "desire-question" },
+        "Чего ты хочешь для своего персонажа?"),
+      field,
+      status,
+      desire
+        ? el("div", { class: "muted desire-note" },
+            "Текущая цель остаётся активной, пока вы не подтвердите новую.")
+        : null,
+      el("div", { class: "desire-actions" }, submitBtn),
+      desireChipRow(field));
+  }
+
+  function sidePanel() {
+    return el("div", { class: "panel" },
+      el("h2", {}, "Как это работает"),
+      el("div", { class: "muted" },
+        "Желание — глобальный мотив персонажа, а не отдельный квест: "
+        + "мир читает его и подбирает правдоподобные возможности через "
+        + "разговоры, роли, работу и места острова."),
+      el("div", { class: "muted" },
+        "Сначала система покажет, как поняла желание, — ничего не "
+        + "сменится скрыто."));
+  }
+
+  function oppsPanel() {
+    return el("div", { class: "panel", id: "desire-opps" },
+      el("h2", {}, "Возможности для цели"),
+      opps.length
+        ? opps.map((o) => desireOppCard(o))
+        : el("div", { class: "muted" },
+            "Пока нет возможностей — мир подберёт их, когда появятся основания"));
+  }
+
+  function confirmPanel(preview) {
+    // #64 §4-5: interpretation BEFORE mutation — the structured result is
+    // shown at once (deterministic catalog, no fake spinner), and the
+    // confirm button performs the real create; nothing exists until then.
+    const pi = preview.interpretation || {};
+    return el("div", { class: "panel", id: "desire-confirm" },
+      el("h2", {}, "Как система поняла"),
+      el("div", { class: "desire-quote" }, preview.text),
+      el("div", { class: "desire-intent" },
+        `Тема: ${pi.title_ru || pi.catalog_key || "—"}`),
+      pi.confidence_note
+        ? el("div", { class: "muted" }, pi.confidence_note) : null,
+      el("div", { class: "muted desire-note" },
+        desire
+          ? "Текущая цель остаётся активной, пока вы не подтвердите новую."
+          : "Желание станет активным после подтверждения."),
+      el("div", { class: "desire-actions" },
+        confirmBtn,
+        el("button", { type: "button",
+          onclick: () => compose(editorPanel(preview.text),
+            desire ? oppsPanel() : sidePanel()) },
+          "Изменить формулировку"),
+        dropDraftBtn));
+  }
+
+  function activePanel() {
+    // #64 §6: status is qualitative (the read model has no numeric
+    // progress) — shown as such, never as a fake progress bar.
+    return el("div", { class: "panel", id: "desire-active" },
+      el("h2", {}, "Цель / желание"),
+      el("div", { class: "desire-quote" }, desire.source_text),
+      el("div", { class: "desire-intent" },
+        `Тема: ${interp.title_ru || desire.catalog_key || "—"}`
+        + ` · статус: ${desire.status || "active"}`),
+      interp.confidence_note
+        ? el("div", { class: "muted" }, interp.confidence_note) : null,
+      el("div", { class: "muted" }, `Задано: ${dayTime(desire.created_at || 0)}`),
+      el("div", { class: "muted desire-note" },
+        "Прогресс качественный: пока цель активна, мир подбирает возможности."),
+      el("div", { class: "desire-actions" },
+        el("button", { type: "button", id: "desire-replace",
+          onclick: () => compose(editorPanel(desire.source_text),
+            oppsPanel()) },
+          "Заменить цель"),
+        dropBtn));
+  }
+
+  function composeHome() {
+    if (desire) compose(activePanel(), oppsPanel());
+    else compose(editorPanel(""), sidePanel());
+  }
+
+  if (preview) {
+    // #64 §4-5: the interpretation preview gates the mutation — the desire
+    // becomes active only through the confirm button.
+    compose(confirmPanel(preview), desire ? oppsPanel() : sidePanel());
+    return;
+  }
+  composeHome();
+}
 
 /* #90: long-term Desire — one active desire, replace/abandon here. Kept
    strictly separate from the short-term CharacterGoal shown on #/tasks. */
@@ -1923,6 +2213,11 @@ function profileDesireBlock() {
   refresh();
   return el("div", { class: "profile-desire-box" },
     line,
+    // #170: the dedicated #/desire screen is the canonical surface; this
+    // profile hook keeps working (set/drop) and links over for the full
+    // interpretation/opportunities view.
+    el("div", { class: "muted" },
+      "Развёрнутый вид: ", el("a", { href: "#/desire" }, "экран «Цель»")),
     el("div", { style: "margin-top:6px; display:flex; gap:6px" }, input, saveBtn),
     dropBtn,
     status);
