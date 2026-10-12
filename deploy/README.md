@@ -139,14 +139,18 @@ sudo -u lifesim sqlite3 /opt/lifesim/data/lifesim.db ".backup '/opt/lifesim/back
    запускается — `skipped`, это принимается). Любая ошибка API — отказ
    (fail-closed).
 3. Job `deploy` (concurrency-группа `lifesim-production`): один SSH-вызов с
-   forced command `lifesim-deploy-v1 <sha>`. Обёртка на сервере
+   forced command `lifesim-deploy-v1 <sha>`. Установленный на сервере launcher
    (`/usr/local/sbin/lifesim-deploy-wrapper`, исходник —
-   `deploy/deploy-wrapper`): flock single-flight → `git fetch` (origin
-   зафиксирован на канонический URL) → проверка, что SHA лежит на
-   first-parent-цепочке `origin/main` → запись previous-sha → бэкап SQLite
-   (§8) → `git checkout --detach <sha>` → `.venv/bin/pip install -e .
+   `deploy/deploy-wrapper`) делает только: парсинг verb'а, валидацию SHA
+   (exact-match, без eval) → взятие apply-lock (flock single-flight) →
+   открытие engine'а из чек-аута по fd и version-gate (`--version` →
+   `interface=1`) → передачу кода возврата verbatim. Вся деплой-логика живёт
+   в `deploy/deploy-engine` чек-аута (обновляется каждым деплоем, §9.1):
+   `git fetch` (origin зафиксирован на канонический URL) → проверка, что SHA
+   лежит на first-parent-цепочке `origin/main` → запись previous-sha → бэкап
+   SQLite (§8) → `git checkout --detach <sha>` → `.venv/bin/pip install -e .
    uvicorn` → `sudo systemctl restart lifesim` → пробы §6 (health с ретраем
-   ~60 с, docs 404, static 200). Обёртка работает от пользователя `deploy`
+   ~60 с, docs 404, static 200). Engine работает от пользователя `deploy`
    через ограниченный sudoers — root не предполагается (§9.1).
 4. Успех: обёртка печатает `DEPLOYMENT_ACCEPTED sha=<sha> previous=<prev>`;
    job проверяет маркер и кладёт SSH-транскрипт в артефакты; на сервере
@@ -168,10 +172,36 @@ sudo -u lifesim sqlite3 /opt/lifesim/data/lifesim.db ".backup '/opt/lifesim/back
 откатится и job упадёт с транскриптом. Переносите такие правки в репо
 коммитом или снимайте их на сервере перед деплоем.
 
-### 9.1 Bootstrap (однократно, Lane B)
+### 9.1 Установка транспорта (Lane B): launcher + engine
 
-Bootstrap выполняется вручную владельцем/сисадмином с root-доступом, один
-раз. Обёртка никогда не предполагает root — только эти гранты.
+С T2 транспорт разделён на две части — это устраняет chicken-egg однофайлового
+враппера (root-установленный враппер не мог обновить сам себя: деплой, который
+он запускает, перезаписывает чек-аут, но не `/usr/local/sbin`):
+
+- **Launcher** — `/usr/local/sbin/lifesim-deploy-wrapper` (исходник
+  `deploy/deploy-wrapper`): минимальный привилегированный вход — валидация
+  verb+SHA (exact-match, без eval), single-flight flock
+  (`STATE_DIR/apply.lock`), открытие engine'а по fd, version-gate (только
+  `interface=1` из жёстко зашитого списка), передача кода возврата verbatim.
+  Деплой-логики нет, повышенных вызовов нет. Меняется редко → каждое изменение
+  лаунчера = однократная ручная установка Lane B (см. «Миграция»).
+- **Engine** — `deploy/deploy-engine` (в чек-ауте:
+  `/opt/lifesim/deploy/deploy-engine`): вся деплой-логика — fetch, проверка
+  first-parent-цепочки, бэкап БД, checkout, pip, restart, пробы, автооткат,
+  манифест, prune. Работает от пользователя `deploy` через те же ограниченные
+  гранты; **обновляется сам каждым lane-A деплоем** (файл живёт в чек-ауте на
+  задеплоенном SHA). Контракт версий: `--version` → `interface=1`; лаунчер
+   отказывается работать с неподдерживаемым интерфейсом (fail-closed), engine —
+   при отсутствии `LIFESIM_DEPLOY_LOCK_FD`: прямой вызов движка блокируется по
+   умолчанию; single-flight — конкурентный барьер, а не изоляционный (локальный
+   вызов с подделанным открытым fd возможен и не является security-границей).
+
+С T2 `lifesim-status-v1` берёт apply-lock так же, как деплои: во время идущего
+деплоя он ждёт до `LOCK_WAIT` (300 с) и затем падает с rc 1. Операторские пробы
+статуса во время деплоя должны этого ожидать (раньше status замок не брал вовсе).
+
+Установка выполняется вручную владельцем/сисадмином с root-доступом.
+Транспорт никогда не предполагает root — только эти гранты.
 
 1. **Deploy-пользователь и каталоги:**
 
@@ -182,9 +212,10 @@ Bootstrap выполняется вручную владельцем/сисад�
    sudo chown lifesim:lifesim /opt/lifesim/backups
    ```
 
-2. **Обёртка** (копия с root-владельцем — НЕ symlink в чекаут: код обёртки
-   не должен меняться из деплоя; при изменении `deploy/deploy-wrapper` в
-   репо повторить шаг вручную):
+2. **Launcher** (копия с root-владельцем — НЕ symlink в чекаут: код лаунчера
+   не должен меняться из деплоев; при изменении `deploy/deploy-wrapper` в репо
+   повторить шаг вручную, Lane B. **Engine вручную не устанавливается** — он
+   приезжает и обновляется деплоями, §9):
 
    ```bash
    sudo install -m 0755 -o root -g root \
@@ -200,16 +231,25 @@ Bootstrap выполняется вручную владельцем/сисад�
    ```
 
 4. **Sudoers** — `/etc/sudoers.d/lifesim-deploy` (root:root, 0440; перед
-   установкой проверить `visudo -cf <файл>`):
+   установкой проверить `visudo -cf <файл>`). Целевой блок (T2): текущие
+   гранты + pip, суженный до точной формы установки — engine вызывает pip
+   ровно с этими аргументами, и та же форма вызова была у старого
+   однофайлового враппера, поэтому суженный грант покрывает и откат на
+   `.bak`:
 
    ```
    Defaults:deploy !requiretty
    deploy ALL=(lifesim) NOPASSWD: /usr/bin/git -C /opt/lifesim *
-   deploy ALL=(lifesim) NOPASSWD: /opt/lifesim/.venv/bin/pip install *
+   deploy ALL=(lifesim) NOPASSWD: /opt/lifesim/.venv/bin/pip install --no-cache-dir --editable /opt/lifesim uvicorn
    deploy ALL=(lifesim) NOPASSWD: /usr/bin/sqlite3 /opt/lifesim/data/lifesim.db *
    deploy ALL=(root) NOPASSWD: /usr/bin/systemctl restart lifesim
    deploy ALL=(lifesim) NOPASSWD: /usr/bin/rm -f -- /opt/lifesim/backups/pre-deploy-*.db
    ```
+
+   Фактическое применение сужения — в окне миграции с однофайлового
+   враппера (см. «Миграция» ниже), с проверкой `visudo -cf` перед
+   установкой и в одном окне с установкой лаунчера; до миграции на
+   сервере остаётся действующий блок.
 
 5. **origin**: обёртка принимает только канонический URL; проверьте/выставьте
 
@@ -236,6 +276,62 @@ Bootstrap выполняется вручную владельцем/сисад�
 8. **Environment** `production` создаётся GitHub автоматически при первом
    запуске workflow; protection rules не настраиваются — человеческий гейт
    это подтверждение в dev-чате до dispatch (решение владельца 2026-10-10).
+
+**Version-bump cutover (`-v1` → `-v2`): порядок без silent drift.** При смене
+интерфейса engine'а (например, до `interface=2`):
+
+1. Engine bumps до `interface=2` — обычный repo PR (`deploy/deploy-engine`:
+   строка `--version`, субкоманды).
+2. ДО dispatch любого деплоя с этим engine — Lane B устанавливает обновлённый
+   launcher, в чей жёстко зашитый список принятых интерфейсов входит `2`
+   (правки launcher'а — Lane B by design, шаг 2 выше).
+3. Смена verb'а в workflow (`-v1` → `-v2`) — только вместе с установкой
+   launcher'а, в том же Lane-B окне: verb шлёт workflow, и он обязан
+   матчиться exact-match regex'ом launcher'а (accepted-verb regex).
+4. Drift-check: `engine_interface`/`launcher_interface` из отчёта
+   `lifesim-status-v1` доказывают, какая комбинация живая на сервере.
+5. Rollback cutover'а: переустановить предыдущий launcher из `.bak` (см.
+   «Break-glass (launcher)» ниже) + вернуть engine повторным dispatch
+   предыдущего SHA (§9) — engine в чек-ауте вернётся к прежнему интерфейсу.
+
+**Миграция с однофайлового враппера** (однократно, Lane B, одно окно).
+
+1. Обновить чек-аут до SHA со сплитом — engine должен уже лежать в чек-ауте
+   до установки лаунчера, иначе smoke провести нельзя:
+
+   ```bash
+   sudo -u lifesim git -C /opt/lifesim fetch origin
+   sudo -u lifesim git -C /opt/lifesim checkout --detach <новый-main-sha>
+   ```
+
+2. Бэкап старого однофайлового враппера:
+
+   ```bash
+   sudo cp -a /usr/local/sbin/lifesim-deploy-wrapper \
+     /usr/local/sbin/lifesim-deploy-wrapper.bak-$(date +%F-%H%M%S)
+   ```
+
+3. Установить launcher (шаг 2) и целевой sudoers-блок (шаг 4, после
+   `visudo -cf`). Суженный pip-грант совместим и со старым враппером
+   (идентичная форма вызова) — откат на `.bak` правки sudoers не требует.
+
+4. Smoke: `ssh deploy@<host> lifesim-status-v1` — ожидаем блок
+   `== transport ==` (`launcher_interface=lifesim-launcher-v1`,
+   `engine_interface=1`, `engine_lock_fd=held`) и штатное тело (manifest,
+   HEAD, service). Тот же отчёт даёт дрейф-детект: `launcher_sha256` сверяется
+   с `git show <deployed-sha>:deploy/deploy-wrapper`, `engine_open_sha256` —
+   с `git show <deployed-sha>:deploy/deploy-engine`.
+
+5. Первый деплой через workflow (Lane A, §9). С этого момента engine
+   обновляется каждым деплоем; лаунчер меняется только через Lane B.
+
+**Break-glass (launcher)**: если миграция лаунчера не удалась, вернуть
+забэкапированный однофайловый враппер:
+
+```bash
+sudo cp -a /usr/local/sbin/lifesim-deploy-wrapper.bak-<метка> \
+  /usr/local/sbin/lifesim-deploy-wrapper
+```
 
 **Break-glass** (ручной путь, когда Actions недоступны). После деплоев через
 workflow чекаут detached на задеплоенном SHA — сначала вернитесь на ветку:

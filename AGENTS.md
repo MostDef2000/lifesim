@@ -37,6 +37,8 @@ Add architecture, runtime contours, protected paths, test commands, release poli
 
 ## Deploy contract
 
-- Lane A (routine app deploys): dispatch of `.github/workflows/deploy.yml` (forced-command wrapper on the VPS) per the DEPLOY-TRIGGER protocol after explicit owner confirmation in chat — full 40-hex SHA from origin/main, green CI, acceptance probes, rollback.
+- Lane A (routine app deploys): dispatch of `.github/workflows/deploy.yml` (SSH forced command on the VPS) per the DEPLOY-TRIGGER protocol after explicit owner confirmation in chat — full 40-hex SHA from origin/main, green CI, acceptance probes, rollback.
+- Transport (T2) = minimal privileged launcher `/usr/local/sbin/lifesim-deploy-wrapper` (source `deploy/deploy-wrapper`: verb/SHA exact-match, single-flight flock, engine version-gate `interface=1`; contains no deploy logic; changes only via lane B per `deploy/README.md` §9.1) + versioned unprivileged deploy-engine `deploy/deploy-engine` (all deploy logic; lives in the checkout at the deployed SHA and auto-updates itself via every lane-A deploy; fails closed without the launcher's lock fd). Verbs unchanged: `lifesim-deploy-v1 <sha>`, `lifesim-status-v1`; `lifesim-status-v1` prints a `== transport ==` block (launcher/engine sha256 + interface) for repo↔host drift detection.
 - The unified deploy contract is documented in the workspace repo: `specs/deploy-unification/`.
+- Version-bump cutover (`-v1`→`-v2`) — ordered runbook: `deploy/README.md` §9.1 «Version-bump cutover» (engine bump в repo PR → обновление launcher'а Lane B → смена verb'а в workflow, всё в одном Lane-B окне; drift-check — `engine_interface`/`launcher_interface` в `lifesim-status-v1`).
 - Infra/stateful changes (systemd, nginx, migrations, secrets) — sysadmin lane B.

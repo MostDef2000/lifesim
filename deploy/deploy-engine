@@ -1,0 +1,416 @@
+#!/usr/bin/env bash
+#
+# lifesim-deploy-engine — версионированный unprivileged deploy-engine (T2, interface=1).
+#
+# ВЫЗЫВАЕТСЯ ТОЛЬКО ЧЕРЕЗ LAUNCHER (deploy/deploy-wrapper, установлен как
+# /usr/local/sbin/lifesim-deploy-wrapper — root:root 0755, forced command в
+# authorized_keys пользователя deploy). Launcher: валидирует verb+SHA (exact-match,
+# без eval), берёт single-flight lock (STATE_DIR/apply.lock), открывает этот файл
+# по fd 8, гоняет version-gate (`--version` => interface=1 из жёстко зашитого
+# списка) и вызывает:
+#
+#   LIFESIM_DEPLOY_LOCK_FD=9 LIFESIM_DEPLOY_ENGINE_FD=8 bash /proc/self/fd/8 \
+#       deploy-v1 <40-hex sha>   |   status-v1
+#
+# exit code engine'а передаётся вызывающему (workflow) БЕЗ ИЗМЕНЕНИЙ. Схема
+# сервера и все повышенные гранты — deploy/README.md §9.1; engine работает от
+# пользователя deploy, root не предполагается.
+#
+# КОНТРАКТ ЗАМКА (fail-closed, см. dispatch ниже): engine ОТКАЗЫВАЕТСЯ работать,
+# если LIFESIM_DEPLOY_LOCK_FD не задан / не число / не открытый fd (проверка
+# /proc/self/fd, без eval) — прямой вызов движка блокируется по умолчанию.
+# Оговорка: single-flight — конкурентный барьер, а не изоляционный; локальный
+# вызов с подделанным открытым fd возможен и не является security-границей.
+# Engine НИКОГДА не закрывает унаследованный fd 9.
+# LIFESIM_DEPLOY_ENGINE_FD (fd, на котором launcher открыл сам файл engine'а) —
+# информационный: скрипт уже исполняется из него.
+#
+# SELF-UPDATE: файл живёт в чек-ауте и обновляется КАЖДЫМ lane-A деплоем —
+# chicken-egg однофайлового враппера устранён. bash /proc/self/fd/8 исполняет
+# ЗАКРЕПЛЁННЫЙ inode (launcher открыл fd 8 до запуска): git-checkout, обновляющий
+# этот файл в ходе деплоя, идёт через rename — текущий процесс дорабатывает на
+# старой версии, следующая берёт новую.
+#
+# ВЕРСИИ: `--version` печатает ровно одну строку:
+#   lifesim-deploy-engine interface=1 impl=t2-split-1
+# Launcher принимает только interface=1; смена интерфейса требует одновременного
+# lane-B обновления launcher'а (deploy/README.md §9.1).
+#
+# Engine никогда не печатает секретные значения: .env читается только
+# приложением, сюда не попадает.
+# Уроки #163-#165: capture-then-match на длинных пайпах (grep -q + SIGPIPE),
+# явные `|| return 1` в мутирующей фазе, без process substitution, ERR-трап
+# репортит строку и команду отказа.
+
+set -Eeuo pipefail
+
+# ---- конфигурация (переопределяется только для drill'ов; прод — дефолты) --- #
+APP_DIR="${LIFESIM_DEPLOY_APP_DIR:-/opt/lifesim}"
+PIP_BIN="${LIFESIM_DEPLOY_PIP:-/opt/lifesim/.venv/bin/pip}"
+STATE_DIR="${LIFESIM_DEPLOY_STATE_DIR:-/opt/lifesim/deploy-state}"
+DB_PATH="${LIFESIM_DEPLOY_DB:-/opt/lifesim/data/lifesim.db}"
+BACKUPS_DIR="${LIFESIM_DEPLOY_BACKUPS:-/opt/lifesim/backups}"
+KEEP_BACKUPS="${LIFESIM_DEPLOY_KEEP_BACKUPS:-10}"
+SERVICE="${LIFESIM_DEPLOY_SERVICE:-lifesim}"
+REPO_URL="${LIFESIM_DEPLOY_REPO_URL:-https://github.com/MostDef2000/lifesim.git}"
+# Точные пути обязательны: sudoers матчит command+args буквально.
+GIT_BIN="${LIFESIM_DEPLOY_GIT:-/usr/bin/git}"
+SQLITE_BIN="${LIFESIM_DEPLOY_SQLITE:-/usr/bin/sqlite3}"
+SYSTEMCTL_BIN="${LIFESIM_DEPLOY_SYSTEMCTL:-/usr/bin/systemctl}"
+RM_BIN="${LIFESIM_DEPLOY_RM:-/usr/bin/rm}"
+STATE_PREV="$STATE_DIR/previous-sha"
+STATE_MANIFEST="$STATE_DIR/deployment-manifest.json"
+HEALTH_URL="${LIFESIM_DEPLOY_HEALTH_URL:-http://127.0.0.1:8000/health}"
+DOCS_URL="${LIFESIM_DEPLOY_DOCS_URL:-http://127.0.0.1:8000/docs}"
+STATIC_URL="${LIFESIM_DEPLOY_STATIC_URL:-http://127.0.0.1:8000/static/app.js}"
+PROBE_ATTEMPTS="${LIFESIM_DEPLOY_PROBE_ATTEMPTS:-30}"   # 30 * 2s ≈ 60s прогрев
+APP_USER="lifesim"   # фиксировано схемой сервера; не переопределяется
+
+on_err() {
+    local ec=$?
+    # ${BASH_LINENO[1]} — строка отказа в кадре вызывающего (сам трап — кадр 0);
+    # ${LINENO} внутри трапа указывает на строку трапа — отсюда бессмысленное
+    # «unexpected failure at line 78» в зелёном ране 38117968717: трап стрелял
+    # из сабшелла process substitution (find получал EACCES на 0750-каталоге
+    # бэкапов), а exit 1 убивал только этот сабшелл — родитель продолжал.
+    echo "WRAP-ERR: unexpected failure (status ${ec}): ${BASH_COMMAND:-?} at line ${BASH_LINENO[1]:-unknown}" >&2
+    exit 1
+}
+trap on_err ERR
+
+err() { echo "WRAP-ERR: $*" >&2; exit 1; }
+log() { echo "WRAP: $*"; }
+
+# Все шаги с файлами приложения выполняются от имени lifesim. -H пинит HOME
+# к домашнему каталогу lifesim по /etc/passwd — по bootstrap §1 это сам
+# /opt/lifesim. Без -H HOME недетерминирован (унаследованный от deploy), с -H
+# — известен. --no-cache-dir отключает кэш у самого pip, но PEP 517 сабпроцесс
+# build-isolation (hatchling) флаг родителя не наследует и пишет $HOME/.cache/pip;
+# HOME lifesim по passwd = /opt/lifesim, поэтому кэш попадает в чек-аут.
+# Директория игнорируется (.gitignore), кэш дедуплицирован и переиспользуется.
+# -H просто делает окружение as_app предсказуемым. -H — опция sudo, на матчинг
+# Cmnd в sudoers не влияет (формы грантов не меняются).
+as_app() { sudo -n -H -u "$APP_USER" "$@"; }
+
+require_sha() {
+    [[ "$1" =~ ^[0-9a-f]{40}$ ]] || err "invalid sha: expected 40 lowercase hex"
+}
+
+json_str_or_null() {  # <значение> — JSON-строка или null для пустого
+    if [ -n "$1" ]; then printf '"%s"' "$1"; else printf 'null'; fi
+}
+
+# probes_ok — пробы из deploy/README.md §6. Ретрай только на /health (сервис
+# поднимается после рестарта); /docs и /static не зависят от прогрева и
+# проверяются после успешного health.
+probes_ok() {
+    local attempt body code
+    for attempt in $(seq 1 "$PROBE_ATTEMPTS"); do
+        body="$(curl -fsS -m 5 "$HEALTH_URL" 2>/dev/null || true)"
+        if printf '%s' "$body" | grep -q '"status":[[:space:]]*"ok"'; then
+            break
+        fi
+        if [ "$attempt" -ge "$PROBE_ATTEMPTS" ]; then
+            echo "WRAP-ERR: /health not ready after ${PROBE_ATTEMPTS} attempts (~$((PROBE_ATTEMPTS * 2))s)" >&2
+            return 1
+        fi
+        sleep 2
+    done
+    log "probe /health ok"
+    code="$(curl -s -o /dev/null -m 10 -w '%{http_code}' "$DOCS_URL" || true)"
+    if [ "$code" != "404" ]; then
+        echo "WRAP-ERR: probe /docs: got HTTP ${code:-none}, want 404 (#113)" >&2
+        return 1
+    fi
+    code="$(curl -s -o /dev/null -m 10 -w '%{http_code}' "$STATIC_URL" || true)"
+    if [ "$code" != "200" ]; then
+        echo "WRAP-ERR: probe /static/app.js: got HTTP ${code:-none}, want 200" >&2
+        return 1
+    fi
+    log "probes ok: health=ok docs=404 static=200"
+    return 0
+}
+
+# Мутирующая фаза деплоя. Каждая ступень — явный `|| return 1`: ERR-trap в
+# условных контекстах bash глушится, поэтому откат ловится вызывающим кодом
+# через код возврата, а не через trap.
+deploy_mutate() {
+    local sha="$1"
+    log "git checkout --detach ${sha}"
+    as_app "$GIT_BIN" -C "$APP_DIR" checkout --detach "$sha" || return 1
+    log "pip install -e . uvicorn"
+    # Деплой-инсталлы одноразовые: колесный кэш не даёт попаданий и только
+    # копится на маленьком VPS — отключаем чтение и запись кэша целиком.
+    as_app "$PIP_BIN" install --no-cache-dir --editable "$APP_DIR" uvicorn || return 1
+    log "systemctl restart ${SERVICE}"
+    sudo -n "$SYSTEMCTL_BIN" restart "$SERVICE" || return 1
+    probes_ok || return 1
+
+    # Гигиена чек-аута: untracked-артефакты (артефакты инструментов, попавшие
+    # в чек-аут через HOME) пишем в лог, но ошибкой деплоя не считаем.
+    # Перечисление — через грант (status как deploy может быть слеп, как find
+    # в prune до #165); игнорируемое (.gitignore) status не показывает.
+    local status_out untracked="" hygiene_line
+    if status_out="$(as_app "$GIT_BIN" -C "$APP_DIR" status --porcelain 2>/dev/null)"; then
+        while IFS= read -r hygiene_line; do
+            [ -n "$hygiene_line" ] || continue
+            case "$hygiene_line" in
+                '??'*) untracked+="${hygiene_line#\?\? }"$'\n' ;;
+            esac
+        done <<<"$status_out"
+    else
+        log "hygiene check unavailable: git status failed"
+        return 0  # дальше только отчёт по untracked — при сбое status делать его не на чем
+    fi
+    if [ -n "$untracked" ]; then
+        log "note: untracked in checkout:"
+        printf '%s' "$untracked" | sed 's/^/WRAP:   /'
+    else
+        log "checkout clean (no untracked entries)"
+    fi
+    return 0
+}
+
+# rollback <prev> — best-effort: каждая ступень логируется, неудача фиксируется
+# в rc, исходная ошибка деплоя не маскируется.
+rollback() {
+    local prev="$1" rc=0
+    log "rollback start -> ${prev}"
+    if ! as_app "$GIT_BIN" -C "$APP_DIR" checkout --detach "$prev"; then
+        echo "WRAP-ERR: rollback checkout failed" >&2
+        rc=1
+    fi
+    if ! as_app "$PIP_BIN" install --no-cache-dir --editable "$APP_DIR" uvicorn; then
+        echo "WRAP-ERR: rollback pip install failed" >&2
+        rc=1
+    fi
+    if ! sudo -n "$SYSTEMCTL_BIN" restart "$SERVICE"; then
+        echo "WRAP-ERR: rollback systemctl restart failed" >&2
+        rc=1
+    fi
+    if ! probes_ok; then
+        echo "WRAP-ERR: rollback probes failed" >&2
+        rc=1
+    fi
+    [ "$rc" -eq 0 ] && log "rollback complete: probes ok on ${prev}"
+    return "$rc"
+}
+
+# write_manifest <sha> <prev> <backup_path> — атомарно (tmp + mv).
+write_manifest() {
+    local sha="$1" prev="$2" backup="$3" tmp
+    tmp="${STATE_MANIFEST}.tmp.$$"
+    {
+        printf '{\n'
+        printf '  "sha": "%s",\n' "$sha"
+        printf '  "timestamp": "%s",\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+        printf '  "previous_sha": %s,\n' "$(json_str_or_null "$prev")"
+        printf '  "probes": {"health": "ok", "docs": 404, "static": 200},\n'
+        printf '  "backup": "%s"\n' "$backup"
+        printf '}\n'
+    } > "$tmp" || err "cannot write manifest tmp file"
+    mv -f -- "$tmp" "$STATE_MANIFEST" || err "cannot install manifest"
+}
+
+# Держим KEEP_BACKUPS свежих pre-deploy-*.db. Каталог бэкапов принадлежит
+# lifesim с режимом 0750 — deploy не может ни перечислить его содержимое
+# (find/stat молча дают пустоту), ни удалить файлы напрямую: перечисление
+# идёт через уже выданный грант git (ls-files --others видит и игнорируемые
+# файлы, работает от lifesim), удаление — через грант rm от lifesim.
+# Pathspec "${rel_backups}/pre-deploy-*.db" ограничивает перечисление только
+# pre-deploy-бэкапами — чужие файлы в каталоге бэкапов не занимают keep-слоты.
+# Имена содержат метку времени %F-%H%M, поэтому лексикографическая сортировка
+# совпадает с хронологической. Пустой список ("нечего удалять") — не ошибка;
+# сбой перечисления или удаления — явная ошибка, не глушится.
+prune_backups() {
+    local list victims rel_backups rel victim
+    rel_backups="${BACKUPS_DIR#"$APP_DIR"/}"
+    if [[ "$rel_backups" = "$BACKUPS_DIR" ]]; then
+        # drill-конфиг уводит каталог бэкапов из чек-аута (strip не сматчился,
+        # путь остался абсолютным) — через грант git его не перечислить; prune
+        # деградирует в no-op с явным логом.
+        log "prune skipped: backups dir is outside the worktree (drill config)"
+        return 0
+    fi
+    list="$(as_app "$GIT_BIN" -C "$APP_DIR" ls-files --others -- "${rel_backups}/pre-deploy-*.db")" \
+        || err "cannot enumerate backups (git ls-files failed)"
+    victims="$(printf '%s\n' "$list" | sort -r | tail -n +"$((KEEP_BACKUPS + 1))")"
+    while IFS= read -r rel; do
+        [ -n "$rel" ] || continue
+        case "${rel##*/}" in pre-deploy-*.db) ;; *) continue ;; esac
+        victim="${APP_DIR}/${rel#./}"
+        as_app "$RM_BIN" -f -- "$victim" || {
+            echo "WRAP-ERR: cannot prune backup ${victim}" >&2
+            return 1
+        }
+        log "pruned old backup: ${rel}"
+    done <<<"$victims"
+    return 0
+}
+
+deploy_v1() {
+    local sha="$1"
+    require_sha "$sha"
+
+    [ -d "$APP_DIR" ] || err "app dir missing (bootstrap §9.1): $APP_DIR"
+    [ -d "$BACKUPS_DIR" ] || err "backups dir missing (bootstrap §9.1): $BACKUPS_DIR"
+    mkdir -p "$STATE_DIR" || err "cannot create state dir: $STATE_DIR"
+
+    # Single-flight обеспечен launcher'ом: fd 9 на apply.lock открыт лаунчером
+    # и удерживается flock'ом ДО запуска engine'а, замок унаследован этим
+    # процессом; LIFESIM_DEPLOY_LOCK_FD проверен выше в main() (fail-closed).
+    # Engine сам замок НЕ берёт и fd 9 не закрывает.
+
+    # origin зафиксирован: тянем ТОЛЬКО канонический репозиторий, иначе
+    # проверяемые sha можно было бы подсунуть чужой историей с подменённого
+    # remote.
+    local remote
+    remote="$(as_app "$GIT_BIN" -C "$APP_DIR" remote get-url origin)" \
+        || err "cannot read origin remote url"
+    [ "$remote" = "$REPO_URL" ] || err "unexpected origin url: ${remote} (want ${REPO_URL})"
+
+    log "git fetch origin"
+    as_app "$GIT_BIN" -C "$APP_DIR" fetch --no-tags origin || err "git fetch failed"
+
+    # SHA обязан лежать на first-parent-цепочке origin/main: ровно это свойство
+    # гарантирует гейт в GitHub Actions (trusted push-run ci.yml существует
+    # только для push'ей в main, т.е. head_sha такого run'а — first-parent
+    # коммит main). Плюс обычная проверка достижимости — на случай ручного
+    # перезапуска обёртки с сервера. Проверка делается capture-then-match, а не
+    # пайпом с grep -q: grep -q закрывает пайп после первого совпадения,
+    # многострочный git rev-list получает SIGPIPE (exit 141), и pipefail валит
+    # проверку даже при совпадении.
+    as_app "$GIT_BIN" -C "$APP_DIR" merge-base --is-ancestor "$sha" refs/remotes/origin/main \
+        || err "sha ${sha} is not an ancestor of origin/main"
+    local chain
+    chain="$(as_app "$GIT_BIN" -C "$APP_DIR" rev-list --first-parent refs/remotes/origin/main)" \
+        || err "cannot enumerate first-parent chain of origin/main"
+    grep -qx "$sha" <<<"$chain" \
+        || err "sha ${sha} is not on the first-parent chain of origin/main"
+    log "sha verified on origin/main: ${sha}"
+
+    # previous-sha = живая ревизия чекаута (то, что обслуживается сейчас):
+    # после штатного деплоя это detached HEAD на задеплоенном sha.
+    local prev
+    prev="$(as_app "$GIT_BIN" -C "$APP_DIR" rev-parse HEAD)" || err "cannot resolve live HEAD"
+    [[ "$prev" =~ ^[0-9a-f]{40}$ ]] || err "live HEAD is not a valid sha: ${prev}"
+    printf '%s\n' "$prev" > "${STATE_PREV}.tmp.$$" \
+        && mv -f -- "${STATE_PREV}.tmp.$$" "$STATE_PREV" \
+        || err "cannot write ${STATE_PREV}"
+    log "previous sha: ${prev}"
+
+    # Бэкап БД ДО любых мутаций и рестарта (README §8; рестарт прерывает
+    # максимум текущий тик, но бэкап дешевле любых предположений).
+    local stamp backup_path
+    stamp="$(date +%F-%H%M)"
+    backup_path="${BACKUPS_DIR}/pre-deploy-${stamp}.db"
+    log "sqlite backup -> ${backup_path}"
+    as_app "$SQLITE_BIN" "$DB_PATH" ".backup ${backup_path}" || err "sqlite backup failed"
+    # Backups dir is lifesim:0750 — deploy cannot stat inside it, so the size
+    # check must run as lifesim. git is already sudoers-granted as lifesim with
+    # `-C /opt/lifesim *`; hash-object (no -w) reads the file and prints its
+    # blob sha — the canonical empty-blob sha flags a missing/empty/unreadable
+    # backup without weakening the no-eval design.
+    local backup_hash empty_hash
+    backup_hash="$(as_app "$GIT_BIN" -C "$APP_DIR" hash-object "$backup_path")" \
+        || err "cannot read sqlite backup for verification: ${backup_path}"
+    empty_hash="$(printf '' | "$GIT_BIN" hash-object --stdin)"
+    [ "$backup_hash" != "$empty_hash" ] \
+        || err "sqlite backup is empty: ${backup_path}"
+
+    # ---- мутирующая фаза: любая неудача => автоматический откат ----
+    if deploy_mutate "$sha"; then
+        prune_backups
+        write_manifest "$sha" "$prev" "$backup_path"
+        log "deployed ${sha} (previous ${prev}); manifest: ${STATE_MANIFEST}"
+        echo "DEPLOYMENT_ACCEPTED sha=${sha} previous=${prev}"
+        return 0
+    fi
+
+    echo "WRAP-ERR: deploy of ${sha} failed; starting automatic rollback" >&2
+    if rollback "$prev"; then
+        echo "DEPLOY_ROLLED_BACK sha=${sha} previous=${prev}"
+        exit 1
+    fi
+    echo "WRAP-ERR: automatic rollback FAILED — host may be partially updated; use break-glass (deploy/README.md §9)" >&2
+    exit 1
+}
+
+status_v1() {
+    echo "== manifest =="
+    cat "$STATE_MANIFEST" 2>/dev/null || echo "(нет манифеста — ещё ни одного деплоя через workflow)"
+    echo "== previous-sha =="
+    cat "$STATE_PREV" 2>/dev/null || echo "(нет)"
+    echo "== checkout HEAD =="
+    as_app "$GIT_BIN" -C "$APP_DIR" rev-parse HEAD 2>/dev/null || echo "(неизвестно)"
+    echo "== service =="
+    "$SYSTEMCTL_BIN" is-active "$SERVICE" 2>/dev/null || true
+    echo "== disk =="
+    df -h "$APP_DIR" 2>/dev/null || true
+    echo "== backups (последние 5) =="
+    local sbrel sblist
+    sbrel="${BACKUPS_DIR#"$APP_DIR"/}"
+    if [[ "$sbrel" = "$BACKUPS_DIR" ]]; then
+        echo "(каталог бэкапов вне чек-аута — drill-конфиг; перечисление недоступно)"
+    else
+        sblist="$(as_app "$GIT_BIN" -C "$APP_DIR" ls-files --others -- "${sbrel}/pre-deploy-*.db" 2>/dev/null \
+            | sort -r | head -5)" || true
+        if [ -n "$sblist" ]; then
+            printf '%s\n' "$sblist"
+        else
+            echo "(нет видимых бэкапов — перечисление через lifesim недоступно или каталог пуст)"
+        fi
+    fi
+}
+
+# ---------------------------------------------------------------------------- #
+# dispatch: сабкоманды engine'а. --version — всегда (launcher-гейт не должен
+# зависеть от окружения); deploy-v1/status-v1 — только под launcher'ом
+# (fail-closed по LIFESIM_DEPLOY_LOCK_FD, см. шапку).
+# ---------------------------------------------------------------------------- #
+ENGINE_VERSION_LINE="lifesim-deploy-engine interface=1 impl=t2-split-1"
+
+main() {
+    local cmd="${1:-}"
+    case "$cmd" in
+        --version)
+            printf '%s\n' "$ENGINE_VERSION_LINE"
+            return 0
+            ;;
+    esac
+
+    # КОНТРАКТ ЗАМКА (fail-closed, см. шапку): unset fd / не число / не открытый
+    # fd — отказ; прямой вызов движка блокируется по умолчанию (это конкурентный
+    # барьер, а не security-граница — подделанный открытый fd локально возможен).
+    local lock_fd="${LIFESIM_DEPLOY_LOCK_FD:-}"
+    case "$lock_fd" in
+        ''|*[!0-9]*) err "LIFESIM_DEPLOY_LOCK_FD must be set to an open fd by the launcher; got: ${lock_fd:-<unset>}" ;;
+    esac
+    [ -e "/proc/self/fd/${lock_fd}" ] \
+        || err "LIFESIM_DEPLOY_LOCK_FD=${lock_fd} is not an open fd (invoke via lifesim-deploy-wrapper)"
+
+    # Инструменты, без которых engine бессмысленен (fail fast, до dispatch;
+    # flock не нужен — замок держит launcher, sha256sum — тоже).
+    local _tool _bin
+    for _tool in curl sudo; do
+        command -v "$_tool" >/dev/null 2>&1 || err "missing tool: $_tool"
+    done
+    for _bin in "$GIT_BIN" "$SQLITE_BIN" "$SYSTEMCTL_BIN" "$PIP_BIN" "$RM_BIN"; do
+        [ -x "$_bin" ] || err "executable not found: $_bin"
+    done
+    unset _tool _bin
+
+    case "$cmd" in
+        deploy-v1)
+            deploy_v1 "${2:-}"
+            ;;
+        status-v1)
+            status_v1
+            ;;
+        *)
+            err "unknown engine subcommand: ${cmd:-<none>} (expected: deploy-v1 <sha> | status-v1 | --version)"
+            ;;
+    esac
+}
+
+main "$@"
