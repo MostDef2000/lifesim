@@ -2317,8 +2317,15 @@ def create_app(settings, session_factory: sessionmaker):
         status: str = "active", session: Session = Depends(db),
         user: User = Depends(current_user),
     ):
-        """012 (R6): browse offers."""
-        from app.db.models import MarketOffer
+        """012 (R6): browse offers.
+
+        #173: additive read-only display fields — item_name and seller_name.
+        No schema change, nothing mutated; the existing keys (including
+        ``seller``) are untouched, so the payload stays backward-compatible.
+        """
+        import json as _json
+
+        from app.db.models import Character, MarketOffer, WorldObject
 
         if status not in ("active", "sold", "cancelled"):
             raise HTTPException(status_code=422, detail="bad status")
@@ -2330,9 +2337,54 @@ def create_app(settings, session_factory: sessionmaker):
             .limit(50)
             .all()
         )
+        # #173 read-only joins, batched (two extra SELECTs at most — no N+1).
+        obj_ids = {r.object_id for r in rows}
+        seller_ids = {r.seller_character_id for r in rows}
+        objects = (
+            {o.id: o for o in session.query(WorldObject).filter(
+                WorldObject.id.in_(list(obj_ids))).all()}
+            if obj_ids else {}
+        )
+        sellers = (
+            {c.id: c for c in session.query(Character).filter(
+                Character.id.in_(list(seller_ids))).all()}
+            if seller_ids else {}
+        )
+
+        def _item_name(object_id: int) -> str:
+            """#173 display name, resolved read-only: metadata JSON «name»
+            (non-empty string, for items minted with one) → object_type (the
+            authoritative row identity the inventory screen shows — current
+            stock carries metadata={}) → «Неизвестный предмет» (dangling
+            offer or nothing usable). Malformed metadata degrades to {} —
+            never a 500."""
+            obj = objects.get(object_id)
+            if obj is None:
+                return "Неизвестный предмет"
+            try:
+                meta = _json.loads(obj.object_metadata or "")
+                if not isinstance(meta, dict):
+                    meta = {}
+            except (ValueError, TypeError):
+                meta = {}
+            name = meta.get("name")
+            if isinstance(name, str) and name.strip():
+                return name.strip()
+            if isinstance(obj.object_type, str) and obj.object_type.strip():
+                return obj.object_type
+            return "Неизвестный предмет"
+
+        def _seller_name(character_id: str):
+            ch = sellers.get(character_id)
+            if ch is None:
+                return None
+            return f"{ch.first_name} {ch.last_name}".strip()
+
         return [
             {"id": o.id, "object_id": o.object_id, "price": o.price,
-             "seller": o.seller_character_id, "status": o.status}
+             "seller": o.seller_character_id, "status": o.status,
+             "item_name": _item_name(o.object_id),
+             "seller_name": _seller_name(o.seller_character_id)}
             for o in rows
         ]
 

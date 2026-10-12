@@ -207,7 +207,8 @@ def test_regression_byte_pins_of_b3_survive():
     §77-78 XSS hygiene, §61 refusal surfacing, chat-draft pattern) — the #161
     fix must not disturb them."""
     # #170: viewDesire joins the #93 retry pattern → 5 alpha-critical sites.
-    assert JS.count("loadRetryNode(loading, () => view") == 5
+    # #173: viewShop joins the #93 retry pattern → 6 alpha-critical sites.
+    assert JS.count("loadRetryNode(loading, () => view") == 6
     # #170 F2: the desire interpret-preview failure path reuses the shared
     # hint constant (m158 keeps the const def + profile-save literal).
     assert JS.count("RETRY_HINT") == 4

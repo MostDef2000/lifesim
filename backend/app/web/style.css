@@ -1289,3 +1289,60 @@ button.danger:hover { background: #93301f; }
 }
 .desire-shell button.primary:hover { border-color: var(--w-warm-ink); }
 .desire-shell .sugg:hover { color: var(--w-accent); border-color: var(--w-accent); }
+
+/* #173: Рынок (#/shop) — the screen renders outside .world-shell, so the
+   cool :root tokens would leak in; mirror ONLY the warm custom properties
+   (same values as .desire-shell, self-contained on purpose — see the
+   #170/#172 notes above). */
+.shop-shell {
+  --w-bg: #0a1016;
+  --w-panel: rgba(23, 33, 42, 0.72);
+  --w-panel-deep: rgba(12, 19, 25, 0.6);
+  --w-line: rgba(148, 178, 205, 0.16);
+  --w-text: #dde5ec;
+  --w-dim: #8fa1b1;
+  --w-accent: #e2b45a;
+  --w-warm: rgba(226, 180, 90, 0.15);
+  --w-warm-line: rgba(226, 180, 90, 0.4);
+  --w-warm-ink: #1d1506;
+}
+.shop-shell .panel {
+  background: var(--w-panel);
+  border-color: var(--w-line);
+}
+.shop-shell .muted { color: var(--w-dim); }
+.shop-shell button.primary {
+  background: var(--w-accent);
+  color: var(--w-warm-ink);
+}
+.shop-shell button.primary:hover { border-color: var(--w-warm-ink); }
+
+/* #173: offer rows — item / price / seller on one line, wrapping on narrow
+   screens; dividers and prices carry the warm tokens (var(--w-line) has the
+   :root fallback from #172, so borders survive outside any shell). */
+.shop-offers { display: grid; gap: 8px; }
+.shop-offer {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 14px;
+  padding: 8px 10px;
+  border: 1px solid var(--w-line);
+  border-radius: 10px;
+}
+.shop-item { color: var(--w-text); font-weight: 600; }
+.shop-price { color: var(--w-text); }
+.shop-mine { color: var(--w-dim); font-size: 12px; }
+.shop-balance { margin: 2px 0 6px; color: var(--w-text); }
+.shop-status { min-height: 1.2em; margin-top: 4px; }
+.shop-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
+.shop-sell-form { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.shop-sell-form select,
+.shop-sell-form input {
+  padding: 6px 10px;
+  border: 1px solid var(--w-line);
+  border-radius: 8px;
+  background: var(--w-panel-deep);
+  color: var(--w-text);
+  font: inherit;
+}
