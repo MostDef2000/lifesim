@@ -4,6 +4,11 @@
 (#124: no credential in the URL, so the token never reaches access logs);
 server sends {type:'hello', cursor}, then polls world_events (id > cursor)
 and batches them as {type:'events', events:[...]}.
+#179: right after hello the client may declare its poll START position with
+{type:'cursor', id} — the server honors it (bounded handshake window, see
+WS_CURSOR_HANDSHAKE_TIMEOUT_S) and polls world_events from that cursor;
+on handshake timeout, disconnect, or any non-cursor/garbage message the
+server falls back to the legacy full replay from cursor 0.
 Read-only: no mutations over WS (MVP).
 NOTE: no `from __future__ import annotations` — FastAPI must resolve the
 WebSocket annotation at route-add time.
@@ -14,6 +19,11 @@ import json
 from typing import Any, Dict, List
 
 from sqlalchemy.orm import Session
+
+# #179: seconds to wait for the client's cursor declaration right after hello
+# ({type:'cursor', id}). None = derive from the poll interval
+# (max(2.0, 2 * ws_interval_s)); tests patch this constant to shrink the wait.
+WS_CURSOR_HANDSHAKE_TIMEOUT_S = None
 
 
 def _serialize_event(event) -> Dict[str, Any]:
@@ -100,7 +110,37 @@ def register_ws_route(app, settings, session_factory) -> None:
         await websocket.send_json({"type": "hello", "cursor": cursor})
 
         interval = settings.api.ws_interval_s
+        # #179: cursor handshake — right after hello the client may declare
+        # the START of its event stream ({type:'cursor', id}), so a
+        # reconnecting client no longer pays for a full backlog replay from 0.
+        # One message is honored per connection; handshake timeout, garbage
+        # or any non-cursor frame keeps cursor = 0 (legacy full-replay
+        # fallback). WebSocketDisconnect propagates to the outer handler
+        # below — exactly the main loop's disconnect path.
+        handshake_timeout = (
+            max(2.0, 2 * interval)
+            if WS_CURSOR_HANDSHAKE_TIMEOUT_S is None
+            else WS_CURSOR_HANDSHAKE_TIMEOUT_S
+        )
         try:
+            try:
+                msg = await asyncio.wait_for(
+                    websocket.receive_json(), timeout=handshake_timeout
+                )
+            except WebSocketDisconnect:
+                raise  # outer handler mirrors the main loop's disconnect path
+            except Exception:
+                msg = None  # timeout or unparsable frame -> legacy fallback
+            if isinstance(msg, dict) and msg.get("type") == "cursor":
+                try:
+                    v = int(msg.get("id", 0))
+                except (TypeError, ValueError, OverflowError):
+                    # OverflowError: JSON floats like 1e400 parse to inf —
+                    # garbage input must clamp to 0, never kill the connection
+                    v = 0
+                cursor = max(0, min(v, 10**12))
+                await websocket.send_json({"type": "cursor", "id": cursor})
+
             while True:
                 # non-blocking drain of client control messages (cursor updates)
                 client_cursor = None

@@ -10,7 +10,9 @@ const S = { user: null, character: null, world: null, ws: null, wsTries: 0,
   mapLod: "island", mapQuality: "balanced",
   mapReducedMotion: window.matchMedia("(prefers-reduced-motion: reduce)").matches,
   mapFocusLocationId: null, mapLocations: [], travel: null, scene: null, sceneAct: null,
-  sceneActDraft: null, pollBusy: false, shopConfirm: null, chatDraft: "",
+  sceneActDraft: null, pollBusy: false,
+  wsCursorSent: false, feedFetched: false,  // #179: WS cursor handshake state (see sendWsCursor)
+  shopConfirm: null, chatDraft: "",
   bootCursor: Infinity };  // #177: replay gate — set once from the first REST history fill; Infinity = "no live events until proven"
 
 /* ---------- helpers ---------- */
@@ -1286,6 +1288,7 @@ function stopFeed() {
     const w = S.ws;
     S.ws = null;
     w.onclose = null; w.onmessage = null; w.onopen = null;  // #161: detach BEFORE close — the old socket's async onclose must not stomp a newer socket's state
+    S.wsCursorSent = false;  // #179: the #161 detach means onclose never fires for this socket — re-arm the handshake flag here so the next connection re-declares its cursor
     try { w.close(); } catch (e) { /* already closed */ }
   }
 }
@@ -1417,6 +1420,20 @@ async function pollEventsFeed() {
     // live; the boundary is zero.
     S.bootCursor = 0;
   }
+  // #179: a completed REST fetch proves S.cursor is defined — arm the WS
+  // cursor handshake (one per connection; re-armed in ws.onclose).
+  S.feedFetched = true;
+  sendWsCursor();
+}
+
+// #179: tell the server where our event stream should start — right after
+// hello it replays from 0 unless the client declares its cursor. One
+// handshake per connection: re-armed in ws.onclose, armed once the first
+// REST events fetch has defined S.cursor (boot boundary).
+function sendWsCursor() {
+  if (!S.feedFetched || S.wsCursorSent) return;
+  if (!S.ws || S.ws.readyState !== 1) return;
+  try { S.ws.send(JSON.stringify({ type: "cursor", id: S.cursor })); S.wsCursorSent = true; } catch (e) { /* closing */ }
 }
 
 function connectWs() {
@@ -1474,10 +1491,11 @@ function connectWs() {
   ws.onclose = () => {
     S.wsTries += 1;
     if (S.ws === ws) S.ws = null;  // #161: only clear the reference while this socket is still the current one (no stomp)
+    S.wsCursorSent = false;  // #179: the next connection re-handshakes with the current S.cursor
     if (S.wsTries <= 3) setTimeout(connectWs, 2000 * S.wsTries);
     /* иначе остаётся polling */
   };
-  ws.onopen = () => { S.wsTries = 0; };
+  ws.onopen = () => { S.wsTries = 0; sendWsCursor(); };
   S.ws = ws;
 }
 
