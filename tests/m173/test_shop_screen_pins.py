@@ -183,7 +183,11 @@ def test_shop_honesty_negative_pins():
     # #175 appended chatDraft after shopConfirm in the S initializer — the
     # closing brace moved; the init tail is pinned byte-exactly at its new
     # shape (the confirm field is still the single null initializer).
-    assert js.count("shopConfirm: null, chatDraft: \"\" };") == 1
+    # #177 appended bootCursor as the LAST property (own line, #177 comment
+    # rides as the trailing comment) — tail updated to the new truthful
+    # bytes (count stays == 1, strength unchanged).
+    assert js.count("shopConfirm: null, chatDraft: \"\",\n"
+                    "  bootCursor: Infinity };") == 1
     # Adversarial-review P0 fix: the confirm step reads LIVE S.shopConfirm
     # everywhere — composeHome branches on the live flag and confirmPanel
     # finds by the live flag. The render-time capture (const confirmId)
