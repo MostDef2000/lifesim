@@ -197,3 +197,21 @@ def test_desire_css_pins():
     # .sugg look.
     assert css.count(".desire-chips .sugg { margin: 0; background: "
                      "transparent; font: inherit; }") == 1
+
+
+def test_root_wline_fallback_pin():
+    """#172: .task-row/.opp/.inv-item consume var(--w-line) on screens that
+    render outside .world-shell (tasks/inventory/chat). Without a :root
+    fallback the border shorthand is invalid at computed-value time and the
+    divider silently disappears (browser-verified "0px none"). The fallback
+    value must equal .world-shell's own --w-line; exactly two definitions
+    total (root + world-shell)."""
+    css = _read(APP_CSS)
+    # Three scopes: :root fallback (#172) + .world-shell + .desire-shell
+    # (the latter deliberately self-contained — stays correct even if the
+    # root fallback is ever removed).
+    assert css.count("--w-line:") == 3
+    root = css.split("}", 1)[0]
+    assert "--w-line: rgba(148, 178, 205, 0.16);" in root
+    world = css[css.index(".world-shell {"):css.index(".world-shell {") + 400]
+    assert "rgba(148, 178, 205, 0.16)" in world
