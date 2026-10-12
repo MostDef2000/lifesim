@@ -2,6 +2,11 @@
 :root {
   --bg: #101418; --panel: #1a2027; --line: #2a323c;
   --text: #d8dee6; --dim: #8a94a3; --accent: #4da3ff; --ok: #6fd08c; --warn: #e0b050;
+  /* #172: .task-row/.opp/.inv-item use var(--w-line) outside .world-shell
+     (tasks/inventory/chat) — without a root fallback the shorthand is
+     invalid at computed-value time and NO divider renders (verified in
+     browser: "0px none"). Same value as .world-shell:976. */
+  --w-line: rgba(148, 178, 205, 0.16);
 }
 * { box-sizing: border-box; }
 body { margin: 0; background: var(--bg); color: var(--text);
