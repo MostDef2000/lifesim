@@ -6,10 +6,11 @@ const app = document.getElementById("app");
 const toastEl = document.getElementById("toast");
 const S = { user: null, character: null, world: null, ws: null, wsTries: 0,
   feed: [], cursor: 0, pollTimer: null, canonicalPortraitId: null, authProbed: false, visualDisabled: false,
+  connLost: false, pollFails: 0,  // #175: poll-failure liveness banner (WS close is routine — never drives this)
   mapLod: "island", mapQuality: "balanced",
   mapReducedMotion: window.matchMedia("(prefers-reduced-motion: reduce)").matches,
   mapFocusLocationId: null, mapLocations: [], travel: null, scene: null, sceneAct: null,
-  sceneActDraft: null, pollBusy: false, shopConfirm: null };
+  sceneActDraft: null, pollBusy: false, shopConfirm: null, chatDraft: "" };
 
 /* ---------- helpers ---------- */
 
@@ -39,6 +40,26 @@ function loadRetryNode(loading, retry) {
   loading.replaceChildren(
     el("span", { class: "muted" }, "Загрузка не удалась. " + RETRY_HINT),
     el("button", { type: "button", onclick: retry }, "Повторить"));
+}
+
+/* #175: connection banner — a dead server must be visible. The banner is
+   created lazily, appended to document.body exactly once, and toggled via
+   .hidden like .toast. Liveness oracle = consecutive pollEvents failures
+   (index.html must not grow a second static node; WS closes are routine on
+   navigation and never drive this). */
+function ensureConnBanner() {
+  let b = document.getElementById("conn-banner");
+  if (!b) {
+    b = el("div", { id: "conn-banner", class: "conn-banner", role: "status" },
+      "Нет связи с островом — переподключение…");
+    document.body.append(b);
+  }
+  b.classList.remove("hidden");
+}
+
+function hideConnBanner() {
+  const b = document.getElementById("conn-banner");
+  if (b) b.classList.add("hidden");
 }
 
 async function api(path, opts = {}) {
@@ -99,7 +120,7 @@ function dayTime(ts) {
 const routes = {
   "#/login": viewAuth, "#/world": viewWorld, "#/chat": viewChat,
   "#/inventory": viewInventory, "#/shop": viewShop, "#/tasks": viewTasks, "#/desire": viewDesire,
-  "#/profile": viewProfile, "#/admin": viewAdmin,
+  "#/profile": viewProfile, "#/admin": viewAdmin, "#/external": viewExternal,
 };
 
 async function route() {
@@ -354,6 +375,7 @@ function portraitBlock() {
         hasCanonical = true;
       } catch (e) {
         if (e && e.status === 503) S.visualDisabled = true;
+        else status.textContent = "Портрет ещё не готов";  // #175: 404/net — honest non-error note
         /* no portrait yet — keep button */
       }
     }
@@ -502,6 +524,9 @@ function sceneActBar() {
       id: "scene-act-input", type: "text",
       value: S.sceneActDraft || "",
       placeholder: "Что вы делаете? Например: поговорить с Ивановым",
+      // #175: capture the draft on every keystroke too (the post-submit
+      // pattern alone loses text to a re-inspect while typing).
+      oninput: (ev) => { S.sceneActDraft = ev.target.value; },
       onkeydown: (ev) => { if (ev.key === "Enter") submitSceneAct(); },
     }),
     el("button", { id: "scene-act-go", type: "button",
@@ -1173,7 +1198,8 @@ function locationView(locs) {
 async function viewExternal() {
   const oldHash = location.hash;
   location.hash = "#/external";
-  app.replaceChildren(topbar("#/world"), el("div", { class: "muted" }, "Загрузка…"));
+  const loading = el("div", { class: "muted" }, "Загрузка…");
+  app.replaceChildren(topbar("#/world"), loading);
   try {
     const catalog = await api("/external");
     const services = [];
@@ -1230,7 +1256,11 @@ async function viewExternal() {
           // just set it and let the queued hashchange route once.
           el("button", { onclick: () => { if (location.hash === oldHash) viewWorld(); else location.hash = oldHash; } },
             "Назад"))));
-  } catch (e) { toast(e.message, true); }
+  } catch (e) {
+    // #175/#93: transient failure — explicit retry instead of a dead «Загрузка…».
+    loadRetryNode(loading, () => viewExternal());
+    toast(e.message, true);
+  }
 }
 
 /* ---------- event feed (§79 WS + polling fallback) ---------- */
@@ -1327,7 +1357,26 @@ async function pollEvents() {
         if (badge) badge.classList.add("hidden");
       }
     }
-  } catch (e) { /* silent */ } finally { S.pollBusy = false; }
+
+    // #175: a full refresh succeeded — the server is reachable again. Clear
+    // the failure streak; if the banner was up, drop it and say so once.
+    if (S.connLost) {
+      S.connLost = false;
+      hideConnBanner();
+      toast("Связь восстановлена");
+    }
+    S.pollFails = 0;
+  } catch (e) {
+    // #175: consecutive poll failures are the liveness oracle (WS closes are
+    // routine on navigation and never drive the banner) — the 2nd failure in
+    // a row surfaces the persistent connection banner. Errors stay otherwise
+    // unlogged (same quiet-catch semantics as before, now with a signal).
+    S.pollFails += 1;
+    if (S.pollFails >= 2 && !S.connLost) {
+      S.connLost = true;
+      ensureConnBanner();
+    }
+  } finally { S.pollBusy = false; }
 }
 
 // #139: WS is the live channel while connected; the REST events fetch is
@@ -1537,6 +1586,10 @@ function renderChat(session) {
 
   const status = el("div", { class: "muted", id: "chat-status" });
   const input = el("input", { id: "chat-msg-input", placeholder: "Сообщение…" });
+  // #175: the typed draft survives NPC switches/re-renders — seeded from
+  // S.chatDraft and kept in sync on every keystroke; cleared on send.
+  input.value = S.chatDraft || "";
+  input.addEventListener("input", () => { S.chatDraft = input.value; });
   const sendBtn = el("button", {
     id: "chat-send", class: "primary", onclick: () => send(),
   }, "Отправить");
@@ -1564,6 +1617,8 @@ function renderChat(session) {
       if (npcSel.value !== sentNpc) {
         // The turn is logged server-side for the original NPC's session;
         // a stale closure must not hijack the freshly re-rendered view.
+        // #175: S.chatDraft is intentionally NOT cleared here — it already
+        // belongs to the composer re-rendered for the switched-to NPC.
         input.value = "";
         return;
       }
@@ -1578,6 +1633,7 @@ function renderChat(session) {
         ? npcMsg.suggested_responses : []);
       refreshRel();
       input.value = "";
+      S.chatDraft = "";  // #175: the send succeeded — the draft is consumed
       status.textContent = r.source === "fallback"
         ? "LLM недоступен, отвечает fallback" : "";
     } catch (e) {
@@ -2552,7 +2608,8 @@ async function viewProfile() {
 
 async function viewAdmin() {
   location.hash = "#/admin";
-  app.replaceChildren(topbar("#/admin"), el("div", { class: "muted" }, "Загрузка…"));
+  const loading = el("div", { class: "muted" }, "Загрузка…");
+  app.replaceChildren(topbar("#/admin"), loading);
   try {
     const ov = await api("/admin/overview");
     const isAdmin = ["admin", "developer"].includes(S.user.role);
@@ -2588,7 +2645,11 @@ async function viewAdmin() {
           ...audit.map((a) => el("tr", {},
             el("td", {}, a.action), el("td", {}, `${a.target_type}:${a.target_id ?? ""}`),
             el("td", { class: "muted" }, a.wall_created_at || ""))))));
-  } catch (e) { toast(e.message, true); }
+  } catch (e) {
+    // #175/#93: transient failure — explicit retry instead of a dead «Загрузка…».
+    loadRetryNode(loading, () => viewAdmin());
+    toast(e.message, true);
+  }
 }
 
 async function adminAction(path, body = {}) {

@@ -370,20 +370,22 @@ def test_ui_transient_failure_catch_pins():
     - Dialogue in-message error (m156 gold pattern) stays intact.
     """
     js = _read(APP_JS)
-    # Shared retry affordance: one helper, six alpha-critical screens.
+    # Shared retry affordance: one helper, eight alpha-critical screens.
     assert js.count("const RETRY_HINT =") == 1
     assert js.count("function loadRetryNode(") == 1
-    # Six alpha-critical call sites (the def line also contains
+    # Eight alpha-critical call sites (the def line also contains
     # "loadRetryNode(loading," — pin the calls by their retry closures).
     # #170: viewDesire joins the #93 transient-failure pattern.
     # #173: viewShop joins the #93 retry pattern → 6 alpha-critical sites.
-    assert js.count("loadRetryNode(loading, () => view") == 6
+    # #175: viewExternal + viewAdmin replace their toast-only catches → 8.
+    assert js.count("loadRetryNode(loading, () => view") == 8
     assert js.count('"Загрузка не удалась. " + RETRY_HINT') == 1
     assert js.count('el("button", { type: "button", onclick: retry }, "Повторить")') == 1
     # Scene act draft preservation (never uses the chat literals — m156 pins
     # 'input.value = draft;' == 1 and 'input.value = "";' == 2 exactly).
-    # S-init + read + ok:false-keep + success-clear + error-set:
-    assert js.count("sceneActDraft") == 5
+    # S-init + read + ok:false-keep + success-clear + error-set
+    # + #175 oninput-capture (draft also saved on every keystroke):
+    assert js.count("sceneActDraft") == 6
     assert js.count("S.sceneActDraft = text;") == 2  # 200 ok:false AND catch — both recoverable
     assert js.count("S.sceneActDraft = null;") == 1  # only a real success clears it
     assert js.count("value: S.sceneActDraft || ") == 1

@@ -1346,3 +1346,22 @@ button.danger:hover { background: #93301f; }
   color: var(--w-text);
   font: inherit;
 }
+
+/* #175: connection banner — persistent offline signal driven by consecutive
+   pollEvents failures (WS close is routine on navigation, never drives it).
+   Warm-warn family on the dark panel bg; fixed top-center, below nothing —
+   .toast sits bottom, so same z-index as .toast is safe. */
+.conn-banner {
+  position: fixed;
+  top: 14px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: var(--panel);
+  color: var(--warn);
+  border: 1px solid var(--warn);
+  border-radius: 8px;
+  padding: 8px 16px;
+  max-width: 80%;
+  z-index: 10;
+}
+.conn-banner.hidden { display: none; }
