@@ -204,13 +204,14 @@ def test_root_wline_fallback_pin():
     render outside .world-shell (tasks/inventory/chat). Without a :root
     fallback the border shorthand is invalid at computed-value time and the
     divider silently disappears (browser-verified "0px none"). The fallback
-    value must equal .world-shell's own --w-line; exactly two definitions
-    total (root + world-shell)."""
+    value must equal .world-shell's own --w-line; four definitions total
+    (:root + .world-shell + .desire-shell + .shop-shell)."""
     css = _read(APP_CSS)
-    # Three scopes: :root fallback (#172) + .world-shell + .desire-shell
+    # Four scopes: :root fallback (#172) + .world-shell + .desire-shell
     # (the latter deliberately self-contained — stays correct even if the
-    # root fallback is ever removed).
-    assert css.count("--w-line:") == 3
+    # root fallback is ever removed) + .shop-shell (#173 — same warm values,
+    # same self-contained pattern).
+    assert css.count("--w-line:") == 4
     root = css.split("}", 1)[0]
     assert "--w-line: rgba(148, 178, 205, 0.16);" in root
     world = css[css.index(".world-shell {"):css.index(".world-shell {") + 400]

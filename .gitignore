@@ -46,6 +46,9 @@ Thumbs.db
 runs/
 snapshots/
 *.db
+*.db-shm
+*.db-wal
+*.db.tick.lock
 
 # Runtime artifacts (M8)
 backups/

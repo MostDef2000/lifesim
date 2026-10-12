@@ -9,7 +9,7 @@ const S = { user: null, character: null, world: null, ws: null, wsTries: 0,
   mapLod: "island", mapQuality: "balanced",
   mapReducedMotion: window.matchMedia("(prefers-reduced-motion: reduce)").matches,
   mapFocusLocationId: null, mapLocations: [], travel: null, scene: null, sceneAct: null,
-  sceneActDraft: null, pollBusy: false };
+  sceneActDraft: null, pollBusy: false, shopConfirm: null };
 
 /* ---------- helpers ---------- */
 
@@ -98,7 +98,7 @@ function dayTime(ts) {
 
 const routes = {
   "#/login": viewAuth, "#/world": viewWorld, "#/chat": viewChat,
-  "#/inventory": viewInventory, "#/tasks": viewTasks, "#/desire": viewDesire,
+  "#/inventory": viewInventory, "#/shop": viewShop, "#/tasks": viewTasks, "#/desire": viewDesire,
   "#/profile": viewProfile, "#/admin": viewAdmin,
 };
 
@@ -602,7 +602,7 @@ function weatherLabel() {
 
 function topbar(active) {
   const tabs = [["#/world", "Мир"], ["#/chat", "Чат"], ["#/inventory", "Инвентарь"],
-    ["#/tasks", "Дела"], ["#/desire", "Цель"], ["#/profile", "Профиль"]];
+    ["#/shop", "Рынок"], ["#/tasks", "Дела"], ["#/desire", "Цель"], ["#/profile", "Профиль"]];
   if (["admin", "developer", "moderator"].includes(S.user.role)) {
     tabs.push(["#/admin", "Админ"]);
   }
@@ -1736,7 +1736,264 @@ function renderInventory(items, listed) {
       el("h2", {}, "Инвентарь"),
       body,
       el("p", { class: "muted" },
-        "Использование предметов выполняется игровыми действиями (EAT/DRINK).")));
+        "Использование предметов выполняется игровыми действиями (EAT/DRINK)."),
+      el("p", { class: "muted" },
+        el("a", { href: "#/shop" }, "Рынок"),
+        " — витрина покупки и продажи между персонажами")));
+}
+
+
+/* ---------- #173 (design #73, panel 5): Рынок — buy/sell over the
+   player-to-player market (012 §74, /market/offers). v1 ships buy/sell
+   ONLY: the sim has no service mechanic, so there is deliberately NO
+   services section — nothing service-shaped is faked (gap stated in PR). */
+
+const SHOP_ERROR_TEXT = {
+  // MarketError codes (marketplace.py) surface as the HTTP detail string →
+  // honest human text; anything unmapped falls through RAW (never invented).
+  insufficient_funds: "Недостаточно средств",
+  own_offer: "Это ваше предложение — его нельзя купить",
+  offer_closed: "Предложение уже закрыто — куплено или отменено",
+  offer_not_found: "Предложение не найдено",
+  item_unavailable: "Предмет недоступен — предложение устарело",
+  already_listed: "Этот предмет уже выставлен на рынок",
+  not_your_item: "Можно выставлять только свои предметы",
+  not_your_offer: "Отменять можно только свои предложения",
+  price_must_be_positive: "Цена должна быть целым числом ≥ 1",
+};
+
+function shopErrorText(e) {
+  const code = String(e.detail ?? e.message ?? "");
+  return SHOP_ERROR_TEXT[code] || code || "Не удалось выполнить операцию";
+}
+
+async function viewShop() {
+  location.hash = "#/shop";
+  const loading = el("div", { class: "muted" }, "Загрузка…");
+  app.replaceChildren(topbar("#/shop"), loading);
+  try {
+    // One round of authoritative reads: active offers (browse and «мои»
+    // are split client-side by seller), own balance, owned items for the
+    // sell form (the same endpoint the inventory screen reads).
+    const [offers, me, inv] = await Promise.all([
+      api("/market/offers?status=active"),
+      api(`/characters/${S.character.id}`),
+      api(`/characters/${S.character.id}/inventory`),
+    ]);
+    renderShop(Array.isArray(offers) ? offers : [], me,
+      Array.isArray(inv) ? inv : (inv && inv.items) || []);
+  } catch (e) {
+    // #93: transient failure — explicit retry instead of a dead «Загрузка…».
+    loadRetryNode(loading, () => viewShop());
+    toast(e.message, true);
+  }
+}
+
+async function refreshShop() {
+  // Guarded refresh after a market action: re-render ONLY while the player
+  // is still on #/shop — navigating away mid-request must not yank them
+  // back (no hash assignment on this path; refreshDesire pattern).
+  if (location.hash !== "#/shop") return;
+  const [offers, me, inv] = await Promise.all([
+    api("/market/offers?status=active"),
+    api(`/characters/${S.character.id}`),
+    api(`/characters/${S.character.id}/inventory`),
+  ]);
+  if (location.hash === "#/shop") {
+    renderShop(Array.isArray(offers) ? offers : [], me,
+      Array.isArray(inv) ? inv : (inv && inv.items) || []);
+  }
+}
+
+function shopCancelBtn(o, status) {
+  const btn = el("button", { type: "button",
+    onclick: async () => {
+      if (btn.disabled) return;  // no double-submit while in flight
+      btn.disabled = true;
+      try {
+        await api(`/market/offers/${o.id}/cancel`, { method: "POST" });
+        toast("Предложение отменено");
+        await refreshShop();  // authoritative state after the mutation
+      } catch (e) {
+        status.textContent = shopErrorText(e);
+        toast(shopErrorText(e), true);
+        btn.disabled = false;
+      }
+    },
+  }, "Отменить");
+  return btn;
+}
+
+function renderShop(offers, me, items) {
+  // #173 confirm step: S.shopConfirm holds the offer being bought, read
+  // LIVE everywhere (never captured into a const — a render-time capture
+  // made the confirm panel unreachable: «Купить» set the flag and
+  // composeHome() branched on the stale null). The price is rendered
+  // BEFORE the confirming POST (design #73 §4-5).
+  const balance = me && me.balance != null ? me.balance : null;
+  const status = el("div", { class: "muted shop-status", role: "status" });
+
+  // Warm family: the shop grid mirrors the world-shell token set
+  // (.shop-shell, same values as .desire-shell — the screen renders
+  // outside .world-shell); compose() is the single re-render factor.
+  function compose(...panels) {
+    app.replaceChildren(topbar("#/shop"),
+      el("div", { class: "grid shop-shell" }, ...panels));
+  }
+
+  function headPanel() {
+    return el("div", { class: "panel", id: "shop-head" },
+      el("h2", {}, "Рынок"),
+      el("div", { class: "shop-balance" },
+        "Баланс: ",
+        el("span", { class: "world-money", id: "shop-balance" },
+          balance == null ? "—" : `${balance} ₽`)),
+      status);
+  }
+
+  function shopOfferRow(o) {
+    const price = el("span", { class: "shop-price" },
+      el("span", { class: "world-money" }, `${o.price} ₽`));
+    if (o.seller === S.character.id) {
+      // My own offer shown honestly: «Ваше предложение» + cancel INSTEAD
+      // of a buy button that the validator would refuse (own_offer).
+      return el("div", { class: "shop-offer" },
+        el("span", { class: "shop-item" }, o.item_name || `#${o.object_id}`),
+        price,
+        el("span", { class: "shop-mine" }, "Ваше предложение"),
+        shopCancelBtn(o, status));
+    }
+    return el("div", { class: "shop-offer" },
+      el("span", { class: "shop-item" }, o.item_name || `#${o.object_id}`),
+      price,
+      el("span", { class: "muted" },
+        `Продавец: ${o.seller_name || "#" + o.seller}`),
+      el("button", { type: "button",
+        onclick: () => { S.shopConfirm = o.id; composeHome(); } },
+        "Купить"));
+  }
+
+  function browsePanel() {
+    return el("div", { class: "panel", id: "shop-browse" },
+      el("h2", {}, "Предложения"),
+      offers.length
+        ? el("div", { class: "shop-offers" },
+            ...offers.map((o) => shopOfferRow(o)))
+        : el("div", { class: "muted" },
+            "Рынок пуст — никто ничего не продаёт. Выставьте предмет ниже."));
+  }
+
+  function confirmPanel() {
+    // #73 §4 buy state: explicit confirm — price AND balance visible
+    // before the mutation; the button below is the ONLY buy site.
+    const buy = offers.find((o) => o.id === S.shopConfirm);
+    if (!buy) return browsePanel();
+    const buyBtn = el("button", { class: "primary", type: "button",
+      onclick: async () => {
+        if (buyBtn.disabled) return;  // no double-submit while in flight
+        buyBtn.disabled = true;
+        try {
+          await api(`/market/offers/${buy.id}/buy`, { method: "POST" });
+          S.shopConfirm = null;
+          toast(`Покупка состоялась: ${buy.item_name} за ${buy.price} ₽`);
+          await refreshShop();  // balance refresh comes from the read model
+        } catch (e) {
+          status.textContent = shopErrorText(e);
+          toast(shopErrorText(e), true);
+          buyBtn.disabled = false;
+        }
+      },
+    }, `Купить за ${buy.price} ₽`);
+    return el("div", { class: "panel", id: "shop-confirm" },
+      el("h2", {}, "Подтвердите покупку"),
+      el("div", { class: "shop-item" }, buy.item_name || `#${buy.object_id}`),
+      el("div", { class: "muted" },
+        `Продавец: ${buy.seller_name || "#" + buy.seller}`),
+      el("div", { class: "shop-price" },
+        "Цена: ", el("span", { class: "world-money" }, `${buy.price} ₽`)),
+      balance == null ? null
+        : el("div", { class: "muted" }, `Ваш баланс: ${balance} ₽`),
+      el("div", { class: "shop-actions" },
+        buyBtn,
+        el("button", { type: "button",
+          onclick: () => { S.shopConfirm = null; composeHome(); } },
+          "Отмена")));
+  }
+
+  function sellPanel() {
+    // One active offer per object (validator rule): already-listed items
+    // are excluded from the picker — the «Мои предложения» list right
+    // below shows where they went, with cancel.
+    const listedIds = new Set(offers.map((o) => o.object_id));
+    const sellable = items.filter((it) => !listedIds.has(it.id));
+    const sel = el("select", { id: "shop-sell-item", "aria-label": "Предмет" },
+      ...sellable.map((it) =>
+        el("option", { value: String(it.id) },
+          `${it.object_type} ×${it.quantity}`)));
+    const price = el("input", { id: "shop-sell-price", type: "number",
+      min: "1", step: "1", placeholder: "Цена, ₽", "aria-label": "Цена" });
+    const go = el("button", { id: "shop-sell-go", class: "primary",
+      type: "button",
+      onclick: async () => {
+        const p = Math.floor(Number(price.value));
+        if (!Number.isFinite(p) || p < 1) {
+          status.textContent = "Цена должна быть целым числом ≥ 1";
+          return;
+        }
+        if (go.disabled) return;  // no double-submit while in flight
+        go.disabled = true;
+        try {
+          // The ONLY create site: the authoritative market validator
+          // (price>0, own item, one active offer per object) decides.
+          await api("/market/offers", {
+            method: "POST",
+            body: { object_id: Number(sel.value), price: p },
+          });
+          toast("Предложение создано");
+          await refreshShop();
+        } catch (e) {
+          status.textContent = shopErrorText(e);
+          toast(shopErrorText(e), true);
+          go.disabled = false;
+        }
+      },
+    }, "Выставить");
+    const mine = offers.filter((o) => o.seller === S.character.id);
+    return el("div", { class: "panel", id: "shop-sell" },
+      el("h2", {}, "Выставить предмет"),
+      sellable.length
+        ? el("div", { class: "shop-sell-form" }, sel, price, go)
+        : (items.length
+          ? el("div", { class: "muted" },
+              "Все ваши предметы уже выставлены — отмените предложение, "
+              + "чтобы перевыставить.")
+          : el("div", { class: "muted" },
+              "Инвентарь пуст — нечего выставлять. ",
+              el("a", { href: "#/inventory" }, "Открыть инвентарь"))),
+      el("h3", {}, "Мои предложения"),
+      mine.length
+        ? el("div", { class: "shop-offers", id: "shop-my" },
+            ...mine.map((o) => el("div", { class: "shop-offer" },
+              el("span", { class: "shop-item" },
+                o.item_name || `#${o.object_id}`),
+              el("span", { class: "shop-price" },
+                el("span", { class: "world-money" }, `${o.price} ₽`)),
+              shopCancelBtn(o, status))))
+        : el("div", { class: "muted" }, "У вас нет активных предложений"));
+  }
+
+  function composeHome() {
+    // Branches on LIVE S.shopConfirm (adversarial-review P0: a render-time
+    // capture made «Купить» re-render the same browse panel forever — the
+    // confirm panel was unreachable).
+    if (S.shopConfirm != null) {
+      compose(headPanel(), confirmPanel(), sellPanel());
+    } else {
+      compose(headPanel(), browsePanel(), sellPanel());
+    }
+  }
+
+  composeHome();
 }
 
 

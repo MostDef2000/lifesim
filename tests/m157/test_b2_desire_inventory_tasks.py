@@ -613,9 +613,13 @@ def test_ui_inventory_screen_pins():
     assert js.count('"inv-wear"') == 1
     assert js.count('"inv-sell"') == 1
     # Wear toggle talks to the existing endpoint; sell to the market validator
-    # (two market call sites: the active-offers read + the create POST).
+    # (#173: five market call sites now — inventory read + create POST,
+    # shop browse GET ×2 (view + guarded refresh), shop create POST).
     assert js.count('api("/wear"') == 1
-    assert js.count('api("/market/offers') == 2
+    # #173: the shop screen adds three more literal sites (browse GET in
+    # viewShop + guarded refresh + create POST; its buy/cancel go through
+    # template-literal paths, not this pin).
+    assert js.count('api("/market/offers') == 5
     # Refresh after action (re-fetch + re-render), errors keep state.
     assert js.count("renderInventory") >= 2
     # NO invented actions: consumption/use have no direct item endpoint in alpha.

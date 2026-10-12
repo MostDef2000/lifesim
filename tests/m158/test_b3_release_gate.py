@@ -370,13 +370,14 @@ def test_ui_transient_failure_catch_pins():
     - Dialogue in-message error (m156 gold pattern) stays intact.
     """
     js = _read(APP_JS)
-    # Shared retry affordance: one helper, five alpha-critical screens.
+    # Shared retry affordance: one helper, six alpha-critical screens.
     assert js.count("const RETRY_HINT =") == 1
     assert js.count("function loadRetryNode(") == 1
-    # Five alpha-critical call sites (the def line also contains
+    # Six alpha-critical call sites (the def line also contains
     # "loadRetryNode(loading," — pin the calls by their retry closures).
     # #170: viewDesire joins the #93 transient-failure pattern.
-    assert js.count("loadRetryNode(loading, () => view") == 5
+    # #173: viewShop joins the #93 retry pattern → 6 alpha-critical sites.
+    assert js.count("loadRetryNode(loading, () => view") == 6
     assert js.count('"Загрузка не удалась. " + RETRY_HINT') == 1
     assert js.count('el("button", { type: "button", onclick: retry }, "Повторить")') == 1
     # Scene act draft preservation (never uses the chat literals — m156 pins
