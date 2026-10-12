@@ -206,8 +206,11 @@ def test_regression_byte_pins_of_b3_survive():
     """Representative subset of m158's B3/resilience pins (retry affordance,
     §77-78 XSS hygiene, §61 refusal surfacing, chat-draft pattern) — the #161
     fix must not disturb them."""
-    assert JS.count("loadRetryNode(loading, () => view") == 4
-    assert JS.count("RETRY_HINT") == 3
+    # #170: viewDesire joins the #93 retry pattern → 5 alpha-critical sites.
+    assert JS.count("loadRetryNode(loading, () => view") == 5
+    # #170 F2: the desire interpret-preview failure path reuses the shared
+    # hint constant (m158 keeps the const def + profile-save literal).
+    assert JS.count("RETRY_HINT") == 4
     assert JS.count("innerHTML") == 0
     assert JS.count("AUTONOMOUS_HINT") == 8
     assert JS.count("isAutonomousRefusal") == 6

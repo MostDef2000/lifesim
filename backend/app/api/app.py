@@ -1378,6 +1378,37 @@ def create_app(settings, session_factory: sessionmaker):
         session.commit()
         return {"desire": _desire_to_dict(row), "interpretation": interpretation}
 
+    @app.post("/characters/{cid}/desire/interpret")
+    def interpret_desire_preview(
+        cid: str, body: DesireIn,
+        user: User = Depends(current_user), session: Session = Depends(db)
+    ):
+        """#170 (spec #64 §4-5): interpretation PREVIEW — runs the SAME
+        deterministic catalog as the create flow WITHOUT any mutation
+        (no row, no status change; the planner is not invoked). Read-only
+        step so the player sees «как система поняла» BEFORE the desire
+        becomes active; the create happens only on explicit confirm via
+        POST /characters/{cid}/desire. Unsupported/ambiguous/short text →
+        200 + clarification, NO row (scene_act ok:false pattern #87)."""
+        from app.desire.desire import interpret_desire
+
+        # ownership gate only — the pure catalog never touches the character
+        _owned_character(session, user, cid)
+        text = (body.text or "").strip()
+        if len(text) > 500:
+            raise HTTPException(status_code=422, detail="text must be 1..500 chars")
+
+        interpretation = interpret_desire(text)
+        if interpretation.get("catalog_key") is None:
+            return JSONResponse(status_code=200, content={
+                "catalog_key": None,
+                "clarification": interpretation.get("clarification", ""),
+            })
+        return {
+            "catalog_key": interpretation["catalog_key"],
+            "interpretation": interpretation,
+        }
+
     @app.get("/characters/{cid}/desire")
     def get_desire(
         cid: str, user: User = Depends(current_user), session: Session = Depends(db)

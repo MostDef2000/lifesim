@@ -236,6 +236,83 @@ def test_desire_too_long_rejected(world):
     assert r.status_code == 422
 
 
+def test_desire_interpret_preview_readonly(world):
+    """#170 review F2: the interpret preview runs the SAME deterministic
+    catalog as the create flow WITHOUT any mutation — no row, no status
+    change, active desire untouched (the create happens only on confirm)."""
+    _settings, _app, client, factory, cid, _engine = world
+    r = client.post(f"/characters/{cid}/desire/interpret",
+                    json={"text": "хочу завести отношения"})
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["catalog_key"] == "relationship"
+    interp = body["interpretation"]
+    assert interp["catalog_key"] == "relationship"
+    assert interp["title_ru"] == "Отношения"
+    assert interp["confidence_note"].startswith("совпадения:")
+    # read-only: no row, active desire still absent
+    with factory() as s:
+        assert s.query(CharacterDesire).filter_by(character_id=cid).count() == 0
+    assert client.get(f"/characters/{cid}/desire").json()["desire"] is None
+    # with an ACTIVE desire: interpret must not replace or touch it
+    made = client.post(f"/characters/{cid}/desire",
+                       json={"text": "хочу открыть своё дело"})
+    assert made.status_code == 201
+    active_id = made.json()["desire"]["id"]
+    with factory() as s:
+        before = s.query(CharacterDesire).filter_by(character_id=cid).count()
+    r2 = client.post(f"/characters/{cid}/desire/interpret",
+                     json={"text": "хочу завести отношения"})
+    assert r2.status_code == 200 and r2.json()["catalog_key"] == "relationship"
+    with factory() as s:
+        rows = s.query(CharacterDesire).filter_by(character_id=cid).all()
+        assert len(rows) == before
+        actives = [x for x in rows if x.status == "active"]
+        assert len(actives) == 1 and actives[0].id == active_id
+    assert client.get(f"/characters/{cid}/desire").json()["desire"]["id"] == active_id
+
+
+def test_desire_interpret_preview_clarification_passthrough(world):
+    """#87 ok:false pattern: unsupported/short text → 200 + clarification,
+    catalog_key null, NO row (mirrors the create endpoint's semantics)."""
+    _settings, _app, client, factory, cid, _engine = world
+    for text in ("", "ок", "съездить на Марс"):
+        r = client.post(f"/characters/{cid}/desire/interpret",
+                        json={"text": text})
+        assert r.status_code == 200, (text, r.text)
+        body = r.json()
+        assert body["catalog_key"] is None
+        assert body.get("clarification")
+        assert "Отношения" in body["clarification"]
+    with factory() as s:
+        assert s.query(CharacterDesire).filter_by(character_id=cid).count() == 0
+
+
+def test_desire_interpret_preview_too_long(world):
+    _settings, _app, client, _factory, cid, _engine = world
+    r = client.post(f"/characters/{cid}/desire/interpret",
+                    json={"text": "ж" * 501})
+    assert r.status_code == 422
+
+
+def test_desire_interpret_preview_owner_only(world):
+    _settings, _app, client, _factory, cid, _engine = world
+    r = client.post(f"/characters/{cid}/desire/interpret",
+                    json={"text": "хочу друзей"})
+    assert r.status_code == 200
+    # unauthenticated
+    client.post("/auth/logout")
+    assert client.post(f"/characters/{cid}/desire/interpret",
+                       json={"text": "х"}).status_code == 401
+    # another user's character
+    _register_and_login(client, "b2interpother")
+    assert client.post(f"/characters/{cid}/desire/interpret",
+                       json={"text": "х"}).status_code == 403
+    # unknown character id
+    assert client.post("/characters/does-not-exist/desire/interpret",
+                       json={"text": "х"}).status_code == 404
+
+
 def test_replace_flow_one_active(world):
     _settings, _app, client, factory, cid, _engine = world
     r1 = client.post(f"/characters/{cid}/desire", json={"text": "хочу любви и дружбы"})
@@ -505,7 +582,11 @@ def test_ui_tasks_screen_pins():
     assert js.count('"Возможности"') == 1
     assert js.count('"Ближняя цель"') == 1
     # Explicit empty states.
-    assert js.count('"Желание не задано — задайте его в профиле"') == 1
+    # #170: the dedicated #/desire screen is the canonical desire surface —
+    # the Дела empty state now links over there (deep link focuses the
+    # free-text field) instead of pointing at the profile block.
+    assert js.count('"Желание не задано — "') == 1
+    assert js.count('"Экран «Цель»"') == 1
     assert js.count('"Пока нет возможностей"') == 1
     assert js.count('"Нет активных задач"') >= 1  # world card already had one
     assert js.count('"История пуста"') == 1
@@ -519,7 +600,8 @@ def test_ui_tasks_screen_pins():
     assert js.count("if (S.mapFocusManual && S.mapFocusAnchor !== character.location_id)") == 1
     assert js.count("if (!S.mapFocusManual && character.location_id != null)") == 1
     # Cold-load safety mirrors viewChat's authoritative character read.
-    assert js.count("if (S.character.location_id == null)") == 2
+    # #170 review F1: viewDesire joins the pattern → 3 sites.
+    assert js.count("if (S.character.location_id == null)") == 3
 
 
 def test_ui_inventory_screen_pins():
@@ -548,9 +630,13 @@ def test_ui_profile_desire_pins():
     assert js.count('"profile-desire"') == 1
     assert js.count('"Задать желание"') == 1
     assert js.count('"Отказаться от желания"') == 1
-    # The opportunities read model is consumed exactly once — the Дела screen.
-    assert js.count("/desire/opportunities") == 1
-    assert js.count("`/characters/${S.character.id}/desire`") == 3  # POST/GET/DELETE
+    # #170: the opportunities read model is now consumed twice — the Дела
+    # screen and the dedicated #/desire screen (viewDesire loader).
+    assert js.count("/desire/opportunities") == 2
+    # #170: +2 sites from the #/desire screen's own lifecycle (POST + DELETE);
+    # the GET-side read goes through the opportunities endpoint, so the
+    # backticked bare-desire literal counts POST/GET/DELETE + 2 = 5.
+    assert js.count("`/characters/${S.character.id}/desire`") == 5
 
 
 def test_ui_legacy_pins_intact():

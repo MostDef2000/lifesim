@@ -1234,3 +1234,53 @@ button.danger:hover { background: #93301f; }
 .opp a { align-self: flex-start; }
 .profile-desire-box { margin-top: 8px; display: flex; flex-direction: column; gap: 6px; }
 .map-link { align-self: flex-start; }
+
+/* #170 (spec #64) Goal / Desire screen — appended at the END after the
+   pinned media blocks (they stay byte-exact). Free text stays the primary
+   control; chips reuse the .sugg shortcut styling from the dialogue. */
+.desire-question { font-size: 1.15em; margin: 0 0 8px; }
+#desire-input { min-height: 72px; resize: vertical; }
+.desire-chips { margin-top: 8px; display: flex; flex-wrap: wrap; gap: 4px; align-items: baseline; }
+.desire-chips .sugg { margin: 0; background: transparent; font: inherit; }
+.desire-chips-note { width: 100%; font-size: 0.9em; margin-top: 2px; }
+.desire-actions { display: flex; gap: 6px; margin-top: 8px; flex-wrap: wrap; }
+.desire-actions button { align-self: flex-start; }
+.desire-quote { border-left: 3px solid var(--w-accent); padding: 2px 10px; margin: 6px 0; }
+.desire-intent { margin: 4px 0; }
+.desire-status { margin-top: 6px; white-space: pre-line; min-height: 1em; }
+.desire-note { margin-top: 6px; }
+.desire-opp-title { font-weight: 600; }
+.desire-drop { color: var(--warn); }
+.desire-drop:hover { border-color: var(--warn); }
+.tasks-desire-link { margin-top: 6px; align-self: flex-start; }
+
+/* #170 review F3: #/desire renders outside .world-shell, so the global
+   cool-blue :root tokens applied and --w-line stayed undefined (→ .opp
+   dividers invisible). Mirror ONLY the world-shell custom properties —
+   .world-shell's own grid/padding/borders would fight the topbar+grid
+   layout used here — so panels, dividers and the accent read warm like the
+   approved screens. Tasks/inventory/chat keep their pre-existing (cool)
+   rendering: untouched here, noted for follow-up. */
+.desire-shell {
+  --w-bg: #0a1016;
+  --w-panel: rgba(23, 33, 42, 0.72);
+  --w-panel-deep: rgba(12, 19, 25, 0.6);
+  --w-line: rgba(148, 178, 205, 0.16);
+  --w-text: #dde5ec;
+  --w-dim: #8fa1b1;
+  --w-accent: #e2b45a;
+  --w-warm: rgba(226, 180, 90, 0.15);
+  --w-warm-line: rgba(226, 180, 90, 0.4);
+  --w-warm-ink: #1d1506;
+}
+.desire-shell .panel {
+  background: var(--w-panel);
+  border-color: var(--w-line);
+}
+.desire-shell .muted { color: var(--w-dim); }
+.desire-shell button.primary {
+  background: var(--w-accent);
+  color: var(--w-warm-ink);
+}
+.desire-shell button.primary:hover { border-color: var(--w-warm-ink); }
+.desire-shell .sugg:hover { color: var(--w-accent); border-color: var(--w-accent); }
