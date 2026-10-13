@@ -2,7 +2,7 @@
 never the whole database (constitution П1 + §54).
 """
 import json
-from typing import Dict, List
+from typing import Dict, List, Optional
 
 from sqlalchemy.orm import Session
 
@@ -90,6 +90,33 @@ def _traits_line(session: Session, character_id: str) -> str:
     return "personality: " + (", ".join(parts) if parts else "unknown")
 
 
+def roles_prompt_fragment(session: Session, character_id: str,
+                          limit: int = 5) -> Optional[str]:
+    """#61 v2: the character's own social roles as one prompt line.
+
+    Roles are derived on read from authoritative rows only
+    (app.social.roles.derive_roles — no LLM, no writes). Visibility: the
+    derived set IS the public set — derive-on-read roles are public facts
+    by construction (an unreported crime is a secret fact and never grants
+    a role; roles.py has no visibility field), i.e. exactly what
+    GET /characters/{cid}/roles returns (app.py mirrors derive_roles
+    unfiltered). The decision prompt uses the character's own roles
+    (self-view), bounded to `limit` titles. Returns None when the character
+    derives no roles — callers then keep the prompt byte-identical.
+    """
+    from app.social.roles import derive_roles
+
+    char = session.get(Character, character_id)
+    if char is None:
+        return None
+    titles = [str(r.get("title", "")) for r in
+              derive_roles(session, char.world_id, character_id)]
+    titles = [t for t in titles if t][:limit]
+    if not titles:
+        return None
+    return "roles: " + ", ".join(titles)
+
+
 def build_decision_prompt(session: Session, world_id: str, character_id: str,
                           settings, event_type: str,
                           now: int = 0) -> Dict:
@@ -106,8 +133,14 @@ def build_decision_prompt(session: Session, world_id: str, character_id: str,
     identity = character_identity(session, character_id)
     location = me.location_id if me else None
 
-    lines = [
-        f"identity: {identity}",
+    lines = [f"identity: {identity}"]
+    # #61 v2: social roles as world-perceived context, directly after the
+    # identity line. Omitted when the character derives no roles — the
+    # prompt stays byte-identical to the pre-roles builder output then.
+    roles_line = roles_prompt_fragment(session, character_id)
+    if roles_line is not None:
+        lines.append(roles_line)
+    lines += [
         _traits_line(session, character_id),
         _needs_line(session, character_id),
         _goal_line(session, character_id),
