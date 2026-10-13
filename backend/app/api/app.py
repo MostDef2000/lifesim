@@ -1989,6 +1989,21 @@ def create_app(settings, session_factory: sessionmaker):
             source = "llm"
         suggestions = suggested_responses(context)
 
+        # #183: encounter-based affection — one relationship delta per
+        # cooldown window per pair, the shared SOCIALIZE rule
+        # (app.social.affection), affection-only. Runs AFTER the reply
+        # source is resolved (LLM and fallback get identical behavior —
+        # parity by construction) and BEFORE the single commit below, so
+        # journal + effect land atomically. Emits no WorldEvent (v1 —
+        # documented simplification; band events fire on the next
+        # SOCIALIZE mutation). dialogue/start deliberately does NOT apply
+        # the effect: an encounter is a message exchange, not a session
+        # start.
+        from app.api.dialogue import apply_dialogue_encounter
+        relationship_effect = apply_dialogue_encounter(
+            session, row.world_id, row, now_ts, state["settings"]
+        )
+
         session.add(DialogueMessage(
             session_id=row.id, sender="npc", content=reply,
             suggested_responses=suggestions, game_timestamp=now_ts,
@@ -2001,6 +2016,11 @@ def create_app(settings, session_factory: sessionmaker):
             # #88 (A6): which path produced the reply — UI surfaces
             # «LLM недоступен, отвечает fallback» from this flag.
             "source": source,
+            # #183: encounter affection outcome (backward-compatible
+            # addition): {"applied": true, "affection_delta": …,
+            # "affection_after": …} or {"applied": false} — the cooldown
+            # window had a prior exchange of this pair.
+            "relationship_effect": relationship_effect,
         }
 
     @app.get("/dialogue/{session_id}")

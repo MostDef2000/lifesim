@@ -1646,6 +1646,12 @@ function renderChat(session, locName) {
   const relBox = el("div", {
     class: "rel-box", role: "img", "aria-label": "Отношения: нет данных",
   }, el("span", { class: "rel-scale" }, ...relSegs), relWord, relTrust);
+  // #183: encounter affection notice — a short «Симпатия +2» line next to
+  // the relationship widget. The ONLY signal is the reply body's
+  // relationship_effect (the server applies the shared SOCIALIZE rule at
+  // most once per cooldown window per pair); no client-side guessing.
+  // Hidden unless THIS reply applied the delta; cleared when it did not.
+  const relNote = el("div", { id: "chat-rel-note", hidden: true });
   function applyRel(band, trustText, ariaText) {
     relSegs.forEach((seg, i) => {
       seg.className = i < band.filled ? `rel-seg on ${band.cls}` : "rel-seg";
@@ -1800,6 +1806,18 @@ function renderChat(session, locName) {
       renderSugg(npcMsg && npcMsg.suggested_responses
         ? npcMsg.suggested_responses : []);
       refreshRel();
+      // #183: encounter affection notice — sign + integer of the applied
+      // delta; a clamp at the ±100 bounds may honestly yield 0 (the row
+      // did not move). Cleared when the cooldown did not elapse.
+      const eff = r.relationship_effect;
+      if (eff && eff.applied) {
+        const d = Math.round(eff.affection_delta);
+        relNote.textContent = `Симпатия ${d >= 0 ? "+" : ""}${d}`;
+        relNote.hidden = false;
+      } else {
+        relNote.textContent = "";
+        relNote.hidden = true;
+      }
       input.value = "";
       S.chatDraft = "";  // #175: the send succeeded — the draft is consumed
       status.textContent = r.source === "fallback"
@@ -1807,6 +1825,10 @@ function renderChat(session, locName) {
     } catch (e) {
       clearInterval(tick);
       typingBubble.remove();
+      // #183: a failed send shows no effect note — a stale «Симпатия +2»
+      // from a previous reply must not outlive its reply.
+      relNote.textContent = "";
+      relNote.hidden = true;
       input.value = draft;  // #88: recoverable error keeps the typed draft
       status.textContent = "Не удалось отправить — проверьте связь и повторите";
       // #63: the error is ALSO an inline row in the chatlog (the toast and
@@ -1831,7 +1853,7 @@ function renderChat(session, locName) {
           el("div", { id: "chat-npc-name" },
             (S.chatNpcNames && S.chatNpcNames[npcSel.value])
               ? S.chatNpcNames[npcSel.value] : npcSel.value),
-          subLine, rolesLine, relBox),
+          subLine, rolesLine, relBox, relNote),
         el("div", { style: "margin-top:8px" }, log),
         status,
         sugg,

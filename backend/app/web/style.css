@@ -1459,6 +1459,15 @@ button.danger:hover { background: #93301f; }
 .rel-word { color: var(--w-text); font-size: 13px; }
 .rel-trust { font-size: 12px; }
 
+/* #183: encounter affection notice — a short warm line next to the
+   relationship widget; app.js reveals it only when the reply body's
+   relationship_effect.applied is true (the shared SOCIALIZE rule applied
+   once per cooldown window), and hides/clears it otherwise. */
+.chat-shell #chat-rel-note {
+  color: var(--w-accent);
+  font-size: 12px;
+}
+
 /* #63: message bubbles — translucent warm cards; the sender label is the
    warm accent (NOT the cool --ok green). */
 .chat-shell .chatmsg {
