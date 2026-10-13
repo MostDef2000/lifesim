@@ -34,8 +34,11 @@ Covers:
 - POST /dialogue/{sid}/message response gains "source": "llm"|"fallback"
   (backward-compatible addition — no other API change).
 - Fallback path works with llm disabled; stubbed llm seam returns source llm.
-- Dialogue is journal-only: NO relationship mutation from plain chat (no fake
-  delta) — Relationship rows byte-identical before/after N messages.
+- Dialogue is journal-only EXCEPT the #183 encounter affection: at most
+  ONE relationship delta per cooldown window per pair (the shared
+  SOCIALIZE rule, affection-only — all other scalars byte-identical) —
+  there is no fake per-message delta, and the once-per-window truth is
+  pinned in test_dialogue_encounter_affection_once_per_window below.
 - suggested_responses present as shortcuts.
 - UI byte-pins: free-text input always visible; suggested reply click FILLS
   the input and NEVER sends; «Печатает…» + ticking elapsed-seconds counter;
@@ -447,32 +450,89 @@ def test_message_source_llm_via_stubbed_seam_receives_roles(
     assert isinstance(captured["context"].get("player_roles"), list)
 
 
-def test_dialogue_never_mutates_relationship(world, monkeypatch):
-    """#88: «no fake relationship delta from plain chat» — journal-only."""
+def test_dialogue_encounter_affection_once_per_window(world, monkeypatch):
+    """#183 (replaces the retired #88 «no fake delta» pin): plain chat DOES
+    mutate the relationship — but at most ONE delta per encounter, i.e.
+    once per DIALOGUE_ENCOUNTER_COOLDOWN_MIN (30 game minutes) per pair,
+    via the shared SOCIALIZE rule (app.social.affection). Affection-ONLY:
+    every other scalar stays byte-identical across all exchanges."""
     settings, app, client, factory, cid, npc_id, _ = world
+    wid = settings.world.world_id
 
     def fake_llm_reply(session, settings_, world_id, row, history, context,
                        user_message):
-        return "ЛЛМ отвечает, но мир не трогает."
+        return "ЛЛМ отвечает, мир отвечает одним дельта-окном."
 
     monkeypatch.setattr("app.api.dialogue.llm_reply", fake_llm_reply)
 
-    def rel_snapshot():
-        with factory() as s:
-            rows = s.query(Relationship).filter_by(world_id=settings.world.world_id).all()
-            return len(rows), sorted(
-                (r.character_a, r.character_b, r.trust, r.affection, r.respect)
-                for r in rows
-            )
+    a, b = sorted([cid, npc_id])
 
-    before = rel_snapshot()
+    def rel_state():
+        with factory() as s:
+            r = s.query(Relationship).filter_by(
+                world_id=wid, character_a=a, character_b=b).one()
+            return {
+                "affection": r.affection,
+                # affection-only contract: everything else must not move.
+                "others": {k: getattr(r, k) for k in (
+                    "trust", "respect", "fear", "anger", "attraction",
+                    "romantic_interest", "familiarity")},
+            }
+
+    # Arrange the pair at a known warm affection (60) — the helper rule
+    # predicts exactly +2.0 from there. The fixture seeds no row for the
+    # fresh player pair — create-or-set (m3 test pattern: updated_at=0).
+    with factory() as s:
+        r = s.query(Relationship).filter_by(
+            world_id=wid, character_a=a, character_b=b).first()
+        if r is None:
+            r = Relationship(
+                world_id=wid, character_a=a, character_b=b,
+                affection=60.0, updated_at=0,
+            )
+            s.add(r)
+        else:
+            r.affection = 60.0
+        s.commit()
+
     sid = client.post("/dialogue/start", json={"npc_id": npc_id}).json()["session_id"]
-    for i in range(3):
-        r = client.post(f"/dialogue/{sid}/message", json={"content": f"Сообщение {i}"})
-        assert r.status_code == 200
-    after = rel_snapshot()
-    assert before == after, "plain chat must not touch Relationship rows"
-    # Sanity: the dialogue did persist (journal exists, world untouched).
+
+    # 1st exchange: the encounter applies +2.0 (60 → 62).
+    before = rel_state()
+    r = client.post(f"/dialogue/{sid}/message", json={"content": "Раз"})
+    assert r.status_code == 200, r.text
+    eff = r.json()["relationship_effect"]
+    assert eff["applied"] is True
+    assert eff["affection_delta"] == 2.0
+    assert eff["affection_after"] == 62.0
+    after1 = rel_state()
+    assert after1["affection"] == 62.0
+    assert after1["others"] == before["others"], "affection-only: no other scalar moves"
+
+    # 2nd exchange, same game minute (frozen clock): the encounter window
+    # is still hot — no second delta, response honestly says not applied.
+    r = client.post(f"/dialogue/{sid}/message", json={"content": "Два"})
+    assert r.status_code == 200, r.text
+    assert r.json()["relationship_effect"] == {"applied": False}
+    after2 = rel_state()
+    assert after2 == after1, "cooldown: second immediate exchange changes nothing"
+
+    # 3rd exchange after +60 game minutes: the window has elapsed — the
+    # next encounter applies the rule again (62 → 64).
+    with factory() as s:
+        clock = s.query(WorldClock).filter_by(world_id=wid).first()
+        clock.game_timestamp += 60
+        s.commit()
+    r = client.post(f"/dialogue/{sid}/message", json={"content": "Три"})
+    assert r.status_code == 200, r.text
+    eff = r.json()["relationship_effect"]
+    assert eff["applied"] is True
+    assert eff["affection_delta"] == 2.0
+    assert eff["affection_after"] == 64.0
+    after3 = rel_state()
+    assert after3["affection"] == 64.0
+    assert after3["others"] == before["others"], "still affection-only after cooldown"
+    # Sanity: the dialogue did persist (journal exists).
     hist = client.get(f"/dialogue/{sid}").json()
     assert len(hist["messages"]) == 6
 

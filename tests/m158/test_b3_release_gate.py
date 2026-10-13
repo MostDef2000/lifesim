@@ -16,8 +16,8 @@ Covers:
   result.
 - LLM-down smoke: a full 3-exchange dialogue with the LLM disabled stays
   playable (source="fallback" every turn, non-empty replies, history
-  readable) and is journal-only (zero WorldEvents — dialogue never mutates
-  the world).
+  readable) and emits zero WorldEvents (journal-only since #183 EXCEPT the
+  single encounter-affection mutation, which emits no events).
 - Flux-down smoke: with visual.enabled=False the committed gameplay result
   (scene act look descriptor) still serves; POST /visual/scenes degrades to
   503 without mutating anything; the client pins the fallback state machine
@@ -255,8 +255,9 @@ def test_master_journey_api_level(world):
 
 def test_llm_down_three_exchanges_playable_fallback(world):
     """LLM unavailable (enabled=False): a 3-exchange dialogue never dead-ends
-    — every turn answers with source="fallback", and the exchange is
-    journal-only: zero WorldEvents (dialogue never mutates the world)."""
+    — every turn answers with source="fallback", and the exchange emits zero
+    WorldEvents (#183: the encounter-affection mutation is journal-quiet —
+    it writes Relationship rows, never events)."""
     settings, _app, client, factory, cid, _engine = world
     wid = settings.world.world_id
 

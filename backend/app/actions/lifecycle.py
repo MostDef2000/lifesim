@@ -368,6 +368,7 @@ def complete_task(
 
     elif task_type == "SOCIALIZE":
         from app.db.models import Character, Relationship
+        from app.social.affection import apply_socialize_affection
 
         # Target locked at decision time (validator enqueued the MOVE toward
         # them). The interaction applies at completion if the target is still
@@ -411,7 +412,9 @@ def complete_task(
             pass
         else:
             target_id = target_char.id
-            # 1. Lazy row creation & Mutation
+            # 1. Lazy row creation (kept here — the conflict path and the
+            # band-crossing events below need the live row; the scalar
+            # mutation itself rides with the shared helper).
             a, b = sorted([character.id, target_id])
             rel = session.query(Relationship).filter_by(
                 world_id=world_id, character_a=a, character_b=b
@@ -428,14 +431,20 @@ def complete_task(
             # affection_before from the live row (stale params ignored).
             affection_before = rel.affection
 
-            # Normal path vs Conflict path — decided by the FRESH value.
-            if affection_before >= -30:
-                rel.affection = max(-100.0, min(100.0, rel.affection + 2.0))
-                affection_delta = 2.0
-            else:
-                # Conflict path
-                rel.affection = max(-100.0, min(100.0, rel.affection - 5.0))
-                affection_delta = -5.0
+            # #183: the scalar affection mutation IS the shared SOCIALIZE
+            # rule — extracted to app.social.affection so the HTTP dialogue
+            # encounter applies the exact same math (affection-only: the
+            # helper writes affection + updated_at and nothing else). The
+            # conflict-path side effects below stay here, gated on the same
+            # fresh-value condition.
+            affection_delta = apply_socialize_affection(
+                session, world_id, character.id, target_id,
+                game_timestamp, settings,
+            )
+
+            if affection_before < -30:
+                # Conflict path — side effects only (the -5.0 affection
+                # mutation rode with the helper above).
 
                 # Both participants get stress += 5.0
                 from app.db.models import CharacterHealth
@@ -477,7 +486,8 @@ def complete_task(
                     )
 
             affection_after = rel.affection
-            rel.updated_at = game_timestamp
+            # (rel.updated_at = game_timestamp is written by the shared
+            # helper — #183.)
 
             # 2. Events
             # SOCIAL_INTERACTION
