@@ -19,11 +19,15 @@ IMPORTANCE_MAP = {
     "ELECTION": 50,
     "LAW_VIOLATION": 40,
     "ORG_FEAST": 30,
+    # 182: a mutual partnership declaration is a memorable positive social
+    # fact — same band/valence as RECONCILIATION.
+    "PARTNERSHIP_DECLARED": 60,
 }
 VALENCE_MAP = {
     "CONFLICT": -0.6,
     "RECONCILIATION": 0.7,
     "ORG_FEAST": 0.5,
+    "PARTNERSHIP_DECLARED": 0.7,
 }
 DEATH_IMPORTANCE = 90
 DEATH_VALENCE = -0.9

@@ -56,6 +56,10 @@ class EventType(Enum):
     # roles (app/social/roles.py stays the ONLY source of truth; no store).
     ROLE_ACQUIRED = "ROLE_ACQUIRED"
     ROLE_REVOKED = "ROLE_REVOKED"
+    # 182: mutual partnership declaration («объявить пару») — authoritative
+    # fact from the partnerships table, created by a deterministic NPC
+    # agreement rule (no LLM). No PARTNERSHIP_* revoke event in v1: no breakup.
+    PARTNERSHIP_DECLARED = "PARTNERSHIP_DECLARED"
 
 def log_event(
     session: Session,

@@ -1572,9 +1572,16 @@ function renderChat(session, locName) {
       (S.chatNpcNames && S.chatNpcNames[id])
         ? `${S.chatNpcNames[id]} (${id})` : id)));
   npcSel.addEventListener("change", () => {
+    S.chatNpcId = npcSel.value;  // 182: survive re-renders (review F1)
     S.chatSessionId = null;
     renderChat(null, locName);
   });
+  // 182 (review F1): the rebuilt select loses the user's choice on any
+  // re-render — an accepted proposal re-render included. Restore the
+  // persisted selection when it is still among the options.
+  if (S.chatNpcId && S.chatNpcs.includes(S.chatNpcId)) {
+    npcSel.value = S.chatNpcId;
+  }
 
   // #89: public roles from the authoritative read model (no trait overlap,
   // derive-on-read server-side — the client never invents roles).
@@ -1583,15 +1590,50 @@ function renderChat(session, locName) {
   const rolesLine = el("div", { class: "muted", id: "chat-roles" }, "Роли: …");
   const subLine = el("div", { class: "muted chat-npc-sub", id: "chat-npc-sub" },
     locName ? String(locName) : "");
+  // 182: explicit mutual partnership — a proposal button, shown ONLY while
+  // an NPC is selected AND not already a partner. The roles list (the same
+  // single fetch below) is the answer: a «Партнёр …» title in the derived
+  // roles means the pair already exists — the button hides. No client-side
+  // guessing: without a role there is no partnership, and a wrong click is
+  // still answered by the deterministic server rule (422 / decline reason).
+  const partnerBtn = el("button", {
+    id: "chat-partner-btn", hidden: true,
+    onclick: async () => {
+      const targetNpc = npcSel.value;
+      if (!targetNpc) return;
+      partnerBtn.disabled = true;
+      try {
+        const r = await api(`/characters/${targetNpc}/partnership`,
+          { method: "POST" });
+        if (r.accepted) {
+          status.textContent = "Вы теперь пара";
+          // The re-render re-derives roles (same single fetch) — the new
+          // «Партнёр …» title shows for both and hides this button.
+          renderChat(curSession, locName);
+          return;
+        }
+        status.textContent = r.reason || "Предложение отклонено";
+      } catch (e) {
+        chatErrorRow(`Не удалось объявить пару: ${e.message}`);
+        toast(e.message, true);
+      } finally {
+        partnerBtn.disabled = false;
+      }
+    },
+  }, "Объявить пару");
   if (npcSel.value) {
     api(`/characters/${npcSel.value}/roles`).then((r) => {
       const titles = (r.roles || []).map((x) => x.title);
       rolesLine.textContent = titles.length ? `Роли: ${titles.join(", ")}` : "Роли: нет";
       subLine.textContent = titles.length && locName
         ? `${titles[0]} · ${locName}` : (titles[0] || locName || "");
+      // 182 (review F4): derive-on-read truth — the role ID is the stable
+      // gate (a title prefix would be a fragile text match).
+      partnerBtn.hidden = (r.roles || []).some((x) => x.id === "partner");
     }).catch(() => { rolesLine.textContent = "Роли: недоступны"; });
   } else {
     rolesLine.textContent = "Роли: выберите NPC";
+    partnerBtn.hidden = true;
   }
 
   // #88: relationship summary — authoritative read model only, current
@@ -1663,6 +1705,13 @@ function renderChat(session, locName) {
   }
 
   const log = el("div", { class: "chatlog", id: "chat-log" });
+  // #63/#182: the inline error row lives in ONE construction site — the
+  // send() failure path and the partnership proposal failure path both
+  // append through this helper (the m63 pin counts the literal).
+  function chatErrorRow(msg) {
+    log.append(el("div", { class: "chat-error" }, msg));
+    log.scrollTop = log.scrollHeight;
+  }
   function renderMessages(messages) {
     log.replaceChildren(...(messages || []).map((m) =>
       el("div", { class: `chatmsg ${m.sender === "npc" ? "npc" : ""}` },
@@ -1762,9 +1811,7 @@ function renderChat(session, locName) {
       status.textContent = "Не удалось отправить — проверьте связь и повторите";
       // #63: the error is ALSO an inline row in the chatlog (the toast and
       // the assistive status line stay).
-      log.append(el("div", { class: "chat-error" },
-        `Не удалось отправить: ${e.message}`));
-      log.scrollTop = log.scrollHeight;
+      chatErrorRow(`Не удалось отправить: ${e.message}`);
       toast(e.message, true);
     }
   }
@@ -1788,6 +1835,7 @@ function renderChat(session, locName) {
         el("div", { style: "margin-top:8px" }, log),
         status,
         sugg,
+        partnerBtn,
         el("div", { class: "chat-bar" }, input, sendBtn)),
       el("div", { class: "panel" }, el("h2", {}, "Подсказки"),
         el("div", { class: "muted" },

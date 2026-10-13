@@ -525,9 +525,10 @@ def test_single_helper_and_template_definitions():
 
 
 def test_event_count_and_fallback_untouched():
-    # #61 v2 D2 adds ROLE_ACQUIRED/ROLE_REVOKED — the catalog is now 43
-    # (m2/m11/m4 pins updated deliberately; count pin only).
-    assert len(EventType) == 43
+    # #61 v2 D2 added ROLE_ACQUIRED/ROLE_REVOKED; #182 adds
+    # PARTNERSHIP_DECLARED — the catalog is now 44 (m2/m11/m4 pins updated
+    # deliberately; count pin only).
+    assert len(EventType) == 44
     # Fallback path (П2) bytes untouched: templates and the trip tail stay.
     import app.api.dialogue as dialogue
 

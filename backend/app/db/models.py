@@ -617,6 +617,31 @@ class ExternalContact(Base):
     note = Column(Text, nullable=True)
 
 
+# 182: partnership — authoritative mutual declaration («объявить пару»).
+# Rows are created ONLY by POST /characters/{target_id}/partnership under a
+# deterministic NPC agreement rule (affection threshold, adults, no LLM).
+# v1 has no breakup: a row is never revoked, so the canonical pair is
+# permanent. Constraint pattern copied from Relationship (canonical pair
+# character_a_id < character_b_id, unique per world).
+class Partnership(Base):
+    __tablename__ = "partnerships"
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    world_id = Column(String, ForeignKey("worlds.id"), nullable=False)
+    character_a_id = Column(String, ForeignKey("characters.id"), nullable=False)
+    character_b_id = Column(String, ForeignKey("characters.id"), nullable=False)
+    created_at = Column(Integer, nullable=False)  # game timestamp
+    __table_args__ = (
+        CheckConstraint("character_a_id < character_b_id"),
+        UniqueConstraint("world_id", "character_a_id", "character_b_id"),
+        # Per-character singleton at the DB level (#182 review): two
+        # concurrent proposals to the same NPC produce DIFFERENT canonical
+        # pairs, so the pair UniqueConstraint never fires — each side is
+        # pinned by its own unique index instead.
+        Index("uq_partnerships_world_a", "world_id", "character_a_id", unique=True),
+        Index("uq_partnerships_world_b", "world_id", "character_b_id", unique=True),
+    )
+
+
 def create_engine_factory(settings: Settings):
     engine = create_engine(
         f"sqlite:///{settings.persistence.db_path}",
@@ -646,7 +671,7 @@ def bootstrap(engine, settings: Settings, seed: int):
 
     with Session(engine) as session:
         # Schema meta
-        session.merge(SchemaMeta(key="version", value="0.14.0"))
+        session.merge(SchemaMeta(key="version", value="0.15.0"))  # 182: +partnerships
 
         # World
         world_id = settings.world.world_id
