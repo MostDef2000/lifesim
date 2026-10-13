@@ -130,6 +130,23 @@ def suggested_responses(context: Dict[str, Any]) -> List[str]:
     ]
 
 
+def _roles_titles(roles: Any, limit: int = 3) -> str:
+    """#61 v2: bounded «, »-joined role titles (pure formatting).
+
+    Roles enter here already derived — build_context puts npc_roles /
+    player_roles into the context dict from app.social.roles.derive_roles
+    (the exact set GET /characters/{cid}/roles returns: roles.py has no
+    visibility field, derive-on-read roles are public facts by
+    construction — an unreported crime is a secret fact and never grants
+    a role; app.py get_character_roles mirrors derive_roles unfiltered).
+    """
+    if not isinstance(roles, list):
+        return ""
+    return ", ".join(
+        str(r.get("title", "")) for r in roles[:limit] if r.get("title")
+    )
+
+
 def llm_reply(
     session: Session,
     settings,
@@ -150,8 +167,22 @@ def llm_reply(
     if not settings.llm.enabled:
         return None
     transport = build_transport(settings.llm)
+    # #61 v2: social roles as world-perceived context, right after the
+    # identity line. Reuses the lists build_context already derived
+    # (npc_roles/player_roles) instead of re-deriving; each line omitted
+    # when that side derives no roles — the prompt stays byte-identical
+    # to the pre-roles text then (LLM-off behavior unchanged: the
+    # fallback path below never sees this prompt).
+    roles_block = ""
+    npc_roles = _roles_titles(context.get("npc_roles"))
+    if npc_roles:
+        roles_block += f"Роли: {npc_roles}\n"
+    player_roles = _roles_titles(context.get("player_roles"))
+    if player_roles:
+        roles_block += f"Роли собеседника: {player_roles}\n"
     prompt = (
         "identity: {name}\n"
+        "{roles_block}"
         "Ты — {name}, житель города. Отвечай кратко (1-3 предложения), "
         "в характерe персонажа, на русском языке.\n"
         "Контекст: местоположение {loc}. Отношение к собеседнику: "
@@ -160,6 +191,7 @@ def llm_reply(
         "Последние сообщения: {hist}\n"
         "Сообщение игрока: {msg}".format(
             name=context.get("npc_name", "NPC"),
+            roles_block=roles_block,
             loc=context.get("npc_location"),
             trust=context.get("relationship", {}).get("trust", 0.0),
             aff=context.get("relationship", {}).get("affection", 0.0),
