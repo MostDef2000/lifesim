@@ -120,10 +120,10 @@ class TestIgniteAPI:
 
 
 class TestStructuralPins:
-    def test_event_types_30(self):
+    def test_event_types_43(self):
         from app.events.events import EventType
 
-        assert len(EventType) == 41
+        assert len(EventType) == 43
 
     def test_fire_events_exist(self, env):
         settings, factory, client_for = env

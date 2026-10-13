@@ -25,16 +25,27 @@ EXCLUDED_ROLES — roles deliberately absent from the catalog:
   fuzzy role (spec: «unsupported/fuzzy role is not invented»).
 
 Traceability contract (spec: «role changes are traceable»): this is a
-derive-on-read model — it keeps no event log and never writes. The change
-log IS the authoritative source rows themselves: each carries its own
-timestamp (characters.created_at, character_jobs.started_at,
-organization_members.joined_at/role, crimes.day/status), so a role change is
-a source-row change and tests pin those timestamps. The single exception is
-the newcomer role's expiry: it is driven purely by WorldClock.game_timestamp
-crossing the 7-day boundary — traceable by construction from the clock state,
-not from a row write. A separate
+derive-on-read model — derive_roles keeps no event log and never writes.
+The change log IS the authoritative source rows themselves: each carries
+its own timestamp (characters.created_at, character_jobs.started_at,
+organization_members.joined_at/role, crimes.day/status), so a role change
+is a source-row change and tests pin those timestamps. The single exception
+is the newcomer role's expiry: it is driven purely by
+WorldClock.game_timestamp crossing the 7-day boundary — traceable by
+construction from the clock state, not from a row write. A separate
 mutation-heavy role store would duplicate state and drift; it is rejected
 here on purpose.
+
+#61 v2 (D2) — ROLE_ACQUIRED / ROLE_REVOKED world events: a NARRATIVE
+PROJECTION of this derive-on-read model, NOT a second source of truth.
+Mechanics that mutate a role SOURCE row call roles_snapshot() before the
+mutation and project_role_events() after it; the emitted set-difference
+rows live in world_events (same transaction) and make no
+role-history-completeness claim — derive is the truth, the events are
+history. Coverage is exactly the wired mutation sites (elections, crime
+report): the newcomer→permanent boundary is clock-driven and has NO
+mutation site, so it emits nothing by design; seed-time membership
+(app/world/social_seed.py) emits nothing by the same rule.
 
 Determinism: same DB state → same role list, in a fixed order
 (newcomer, occupation, org roles by organization id, offender).
@@ -42,7 +53,7 @@ Determinism: same DB state → same role list, in a fixed order
 
 from __future__ import annotations
 
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Tuple
 
 from sqlalchemy.orm import Session
 
@@ -55,6 +66,7 @@ from app.db.models import (
     OrganizationMember,
     WorldClock,
 )
+from app.events.events import EventType
 
 MINUTES_PER_DAY = 1440
 NEWCOMER_DAYS = 7
@@ -202,3 +214,93 @@ def derive_roles(session: Session, world_id: str, character_id: str) -> List[Dic
     if off is not None:
         roles.append(off)
     return roles
+
+
+def _role_identity(role: Dict[str, Any]) -> Tuple[str, str]:
+    """Identity of a derived role: (role kind, source entity).
+
+    The source string embeds the source ENTITY (organization name for org
+    roles; the offender/occupation/newcomer kinds are singletons per
+    character), so two roles of the same kind from different sources never
+    alias (two org_leader roles → two identities, one per organization).
+    ``reason``/``title`` are snapshots, NOT identity: they may rephrase
+    without the role itself changing.
+    """
+    return (role["id"], role["source"])
+
+
+def roles_snapshot(
+    session: Session, world_id: str, character_id: str
+) -> Dict[Tuple[str, str], Dict[str, Any]]:
+    """Pre-mutation snapshot: identity-keyed derived roles of one character.
+
+    Pure read (same discipline as derive_roles). The caller takes this
+    immediately BEFORE mutating a role source row and hands it to
+    project_role_events() after the mutation.
+    """
+    return {
+        _role_identity(r): r
+        for r in derive_roles(session, world_id, character_id)
+    }
+
+
+def project_role_events(
+    session: Session,
+    world_id: str,
+    character_id: str,
+    before: Dict[Tuple[str, str], Dict[str, Any]],
+    cause: str | None = None,
+    cause_event_id: int | None = None,
+) -> List[Tuple[EventType, Dict[str, Any]]]:
+    """Set-difference of derived role identities across a source mutation.
+
+    Compares the caller's PRE-mutation ``before`` snapshot against the
+    CURRENT session state (derive-on-read is the only truth — this helper
+    invents no roles and writes nothing; the caller logs the returned
+    (event_type, payload) tuples via log_event in the SAME transaction as
+    the mutation, which makes the events atomic with it and idempotent
+    wherever the mutation itself is).
+
+    Acquired identities come from the current state, revoked ones from the
+    before-snapshot (their row may be gone). Sorted by identity for a
+    deterministic order.
+    """
+    after = roles_snapshot(session, world_id, character_id)
+    char = session.get(Character, character_id)
+    name = (
+        f"{char.first_name} {char.last_name}"
+        if char is not None else None
+    )
+    events: List[Tuple[EventType, Dict[str, Any]]] = []
+    for identity in sorted(after.keys() - before.keys()):
+        events.append((EventType.ROLE_ACQUIRED, _role_payload(
+            character_id, name, after[identity], cause, cause_event_id)))
+    for identity in sorted(before.keys() - after.keys()):
+        events.append((EventType.ROLE_REVOKED, _role_payload(
+            character_id, name, before[identity], cause, cause_event_id)))
+    return events
+
+
+def _role_payload(
+    character_id: str,
+    name: str | None,
+    role: Dict[str, Any],
+    cause: str | None,
+    cause_event_id: int | None,
+) -> Dict[str, Any]:
+    """Payload convention: flat scalar dict; effective time lives in the
+    WorldEvent.game_timestamp column (never duplicated in payloads)."""
+    payload: Dict[str, Any] = {
+        "role": role["id"],
+        "title": role["title"],
+        "source": role["source"],
+        "reason": role["reason"],
+        "character_id": character_id,
+    }
+    if name is not None:
+        payload["character_name"] = name
+    if cause is not None:
+        payload["cause"] = cause
+    if cause_event_id is not None:
+        payload["cause_event_id"] = cause_event_id
+    return payload

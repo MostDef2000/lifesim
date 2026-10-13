@@ -52,6 +52,10 @@ class EventType(Enum):
     ARRESTED = "ARRESTED"  # 016 (§35): imprisonment starts
     RELEASED = "RELEASED"  # 016 (§35): prison term over
     POWER_OUTAGE = "POWER_OUTAGE"  # 017 (§26): electricity deficit
+    # #61 v2 (D2): role changes as narrative projection of derive-on-read
+    # roles (app/social/roles.py stays the ONLY source of truth; no store).
+    ROLE_ACQUIRED = "ROLE_ACQUIRED"
+    ROLE_REVOKED = "ROLE_REVOKED"
 
 def log_event(
     session: Session,
