@@ -764,8 +764,8 @@ def create_app(settings, session_factory: sessionmaker):
         outcome (200, accepted=false), not an error. v1: no breakup — rows
         are never revoked. Relationship math and InteractionPermission
         (consent for romantic ACTIONS) are NOT touched."""
-        from sqlalchemy.exc import IntegrityError
         from sqlalchemy import or_ as _or
+        from sqlalchemy.exc import IntegrityError
 
         from app.db.models import Partnership, Relationship
         from app.events.events import EventType, log_event
@@ -792,7 +792,10 @@ def create_app(settings, session_factory: sessionmaker):
         # Mirror the dialogue endpoint's rule (/dialogue/start): propose to
         # an NPC, never to another player's character.
         if target.user_id is not None:
-            raise HTTPException(status_code=422, detail="cannot declare partnership with a player character")
+            raise HTTPException(
+                status_code=422,
+                detail="cannot declare partnership with a player character",
+            )
 
         def _partnered(char_id: str):
             return (
