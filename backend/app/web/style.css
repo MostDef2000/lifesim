@@ -1213,11 +1213,11 @@ button.danger:hover { background: #93301f; }
 .location-view button { align-self: flex-start; }
 
 /* #88 Dialogue alpha: chat screen — visual header, always-visible free-text
-   composer, non-frozen wait status. Appended after the pinned media blocks. */
-.chat-head { display: flex; gap: 10px; margin-top: 8px; align-items: flex-start; }
+   composer, non-frozen wait status. Appended after the pinned media blocks.
+   #63: the visual/header restyle lives in the .chat-shell block at the END
+   of this file (warm family rework — mirrors .desire-shell/.shop-shell);
+   the base layout rules below stay byte-exact. */
 .chat-head-info { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
-#chat-visual { min-height: 96px; max-width: 220px; }
-.chat-visual-img { width: 200px; max-width: 100%; border-radius: 8px; display: block; }
 .chat-when { font-size: 0.8em; margin-left: 6px; }
 #chat-log { min-height: 120px; }
 .chat-bar { display: flex; gap: 6px; margin-top: 8px; }
@@ -1346,6 +1346,188 @@ button.danger:hover { background: #93301f; }
   color: var(--w-text);
   font: inherit;
 }
+
+/* ---------- issue #63: chat screen warm-family rework ----------
+   The chat screen renders outside .world-shell, so the cool :root tokens
+   would leak in; mirror the warm custom properties (same values as
+   .desire-shell/.shop-shell). Scope rides on the .grid element (class
+   "grid chat-shell"), same as those shells. Tasks/inventory stay cool —
+   untouched. No new assets/fonts. The EMPTY visual state is the normal
+   state: a warm hero band with centered muted fallback text, styled to
+   look intentional.
+   DELIBERATE deviation from the .desire-shell mirror: NO --w-line
+   definition here — m170/m173/m175 pin the --w-line token count at 4,
+   and the :root fallback (#172 note at the top of this file) carries the
+   IDENTICAL value rgba(148, 178, 205, 0.16), so var(--w-line) resolves
+   to the same color inside .chat-shell anyway. */
+.chat-shell {
+  --w-bg: #0a1016;
+  --w-panel: rgba(23, 33, 42, 0.72);
+  --w-panel-deep: rgba(12, 19, 25, 0.6);
+  --w-text: #dde5ec;
+  --w-dim: #8fa1b1;
+  --w-accent: #e2b45a;
+  --w-warm: rgba(226, 180, 90, 0.15);
+  --w-warm-line: rgba(226, 180, 90, 0.4);
+  --w-warm-ink: #1d1506;
+  /* #63 chat-only accents: warm pink/magenta for the relationship scale
+     fill, hostile red for its first band (no cool --ok green anywhere). */
+  --w-rel-fill: rgba(217, 119, 168, 0.85);
+  --w-rel-hostile: #e07070;
+}
+.chat-shell .panel {
+  background: var(--w-panel);
+  border-color: var(--w-line);
+  border-radius: 14px;
+  backdrop-filter: blur(10px);
+  box-shadow: 0 12px 30px rgba(2, 8, 14, 0.35);
+}
+.chat-shell .muted { color: var(--w-dim); }
+.chat-shell button.primary {
+  background: var(--w-accent);
+  color: var(--w-warm-ink);
+}
+.chat-shell button.primary:hover { border-color: var(--w-warm-ink); }
+.chat-shell input,
+.chat-shell select {
+  background: var(--w-panel-deep);
+  color: var(--w-text);
+  border: 1px solid var(--w-line);
+  border-radius: 10px;
+}
+
+/* #63: hero band — full-width, 16:9, warm deep fill; the honest fallback
+   («Визуал недоступен — диалог текстом») is centered and muted so the empty
+   state reads as intentional, not broken. */
+.chat-shell .chat-hero {
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  border: 1px solid var(--w-line);
+  border-radius: 14px;
+  overflow: hidden;
+  background:
+    radial-gradient(640px 240px at 18% 0%, rgba(226, 180, 90, 0.10), transparent 62%),
+    linear-gradient(180deg, rgba(23, 33, 42, 0.55), var(--w-panel-deep));
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.chat-shell .chat-hero .portrait-status {
+  color: var(--w-dim);
+  font-size: 13px;
+  padding: 0 16px;
+  text-align: center;
+}
+.chat-visual-img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+/* #63: header on/under the hero — large name, dim role · location line. */
+#chat-npc-name {
+  font-size: 24px;
+  font-weight: 700;
+  line-height: 1.2;
+  color: var(--w-text);
+}
+.chat-npc-sub { color: var(--w-dim); font-size: 13px; }
+
+/* #63: relationship widget — 5-segment scale (mapping documented in
+   app.js renderRelationshipScale) + band word + small trust text. */
+.rel-box {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-top: 6px;
+}
+.rel-scale { display: inline-flex; gap: 3px; }
+.rel-seg {
+  width: 22px;
+  height: 8px;
+  border-radius: 4px;
+  background: var(--w-panel-deep);
+  border: 1px solid var(--w-line);
+}
+.rel-seg.on { background: var(--w-rel-fill); border-color: var(--w-rel-fill); }
+.rel-seg.on.rel-hostile {
+  background: var(--w-rel-hostile);
+  border-color: var(--w-rel-hostile);
+}
+.rel-word { color: var(--w-text); font-size: 13px; }
+.rel-trust { font-size: 12px; }
+
+/* #63: message bubbles — translucent warm cards; the sender label is the
+   warm accent (NOT the cool --ok green). */
+.chat-shell .chatmsg {
+  background: var(--w-panel-deep);
+  border: 1px solid var(--w-line);
+  border-radius: 12px;
+  padding: 10px 14px;
+  max-width: 70%;
+  margin: 6px 0;
+}
+.chat-shell .chatmsg .who { color: var(--w-accent); }
+
+/* #63: typing bubble — three bouncing dots inside the chatlog; static dots
+   under prefers-reduced-motion. */
+.chat-typing { display: flex; align-items: center; }
+.typing-dots { display: inline-flex; gap: 4px; align-items: center; }
+.typing-dots i {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--w-dim);
+  animation: typing-bounce 1.2s infinite ease-in-out;
+}
+.typing-dots i:nth-child(2) { animation-delay: 0.15s; }
+.typing-dots i:nth-child(3) { animation-delay: 0.3s; }
+@keyframes typing-bounce {
+  0%, 60%, 100% { transform: translateY(0); opacity: 0.5; }
+  30% { transform: translateY(-4px); opacity: 1; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .typing-dots i { animation: none; opacity: 1; }
+}
+
+/* #63: inline error row in the chatlog (reuses the warm --warn signal;
+   the toast and the assistive status line stay). */
+.chat-error {
+  color: var(--warn);
+  border: 1px solid var(--warn);
+  border-radius: 10px;
+  padding: 8px 12px;
+  margin: 6px 0;
+  font-size: 13px;
+}
+
+/* #63: composer — rounded input + circular send button. */
+.chat-shell .chat-bar { gap: 8px; margin-top: 10px; }
+.chat-shell #chat-msg-input { border-radius: 12px; }
+.chat-shell #chat-send {
+  width: 40px;
+  height: 40px;
+  flex: 0 0 40px;
+  padding: 0;
+  border-radius: 50%;
+  font-size: 18px;
+  line-height: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* #63: suggestion chips — translucent warm fill, rounded shortcuts that
+   fill the composer (never send). */
+.chat-shell .sugg {
+  border-radius: 10px;
+  background: var(--w-warm);
+  border-color: var(--w-warm-line);
+  padding: 8px 12px;
+}
+.chat-shell .sugg:hover { color: var(--w-accent); border-color: var(--w-accent); }
 
 /* #175: connection banner — persistent offline signal driven by consecutive
    pollEvents failures (WS close is routine on navigation, never drives it).

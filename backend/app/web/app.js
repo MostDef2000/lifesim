@@ -1529,7 +1529,9 @@ async function viewChat() {
       try { sess = await api(`/dialogue/${S.chatSessionId}`); }
       catch (e) { S.chatSessionId = null; sess = null; }
     }
-    renderChat(sess);
+    // #63: the meeting location IS the display location (S.chatNpcs is
+    // filtered to characters_here) — thread loc.name into the header.
+    renderChat(sess, loc.name);
   } catch (e) {
     // #93: transient failure — explicit retry instead of a dead «Загрузка…».
     loadRetryNode(loading, () => viewChat());
@@ -1537,7 +1539,33 @@ async function viewChat() {
   }
 }
 
-function renderChat(session) {
+/* #63: relationship widget — the bare «Отношения: …» text line reworked
+   into a 5-segment horizontal scale. EXPLICIT band mapping over the
+   authoritative affection scalar (band words carried over from the #88
+   line; segments filled 1..5, warm pink/magenta fill per the approved
+   mock, hostile band red):
+     affection <= -40        → «враждебные»  — 1/5 filled (red)
+     -39 .. -13              → «холодные»    — 2/5 filled
+     -12 .. 12               → «нейтральные» — 3/5 filled
+     13 .. 40                → «тёплые»      — 4/5 filled
+     affection > 40          → «близкие»     — 5/5 filled
+   Missing/undefined/NaN affection → Neutral fallback (no crash, no
+   invented data). Pure: accepts a number OR a relationship object
+   ({affection, ...}) and returns the band descriptor. */
+function renderRelationshipScale(rel) {
+  const a = (rel !== null && typeof rel === "object")
+    ? Number(rel.affection) : Number(rel);
+  if (!Number.isFinite(a)) {
+    return { words: "нейтральные", filled: 3, cls: "rel-neutral" };
+  }
+  if (a <= -40) return { words: "враждебные", filled: 1, cls: "rel-hostile" };
+  if (a <= -13) return { words: "холодные", filled: 2, cls: "rel-cold" };
+  if (a <= 12) return { words: "нейтральные", filled: 3, cls: "rel-neutral" };
+  if (a <= 40) return { words: "тёплые", filled: 4, cls: "rel-warm" };
+  return { words: "близкие", filled: 5, cls: "rel-close" };
+}
+
+function renderChat(session, locName) {
   let curSession = session;
   const npcSel = el("select", {},
     ...S.chatNpcs.map((id) => el("option", { value: id },
@@ -1545,16 +1573,22 @@ function renderChat(session) {
         ? `${S.chatNpcNames[id]} (${id})` : id)));
   npcSel.addEventListener("change", () => {
     S.chatSessionId = null;
-    renderChat(null);
+    renderChat(null, locName);
   });
 
   // #89: public roles from the authoritative read model (no trait overlap,
   // derive-on-read server-side — the client never invents roles).
+  // #63: the same single fetch feeds BOTH the roles line (pin: «Роли: …»
+  // stays) and the header subtitle «{primary role title} · {location}».
   const rolesLine = el("div", { class: "muted", id: "chat-roles" }, "Роли: …");
+  const subLine = el("div", { class: "muted chat-npc-sub", id: "chat-npc-sub" },
+    locName ? String(locName) : "");
   if (npcSel.value) {
     api(`/characters/${npcSel.value}/roles`).then((r) => {
       const titles = (r.roles || []).map((x) => x.title);
       rolesLine.textContent = titles.length ? `Роли: ${titles.join(", ")}` : "Роли: нет";
+      subLine.textContent = titles.length && locName
+        ? `${titles[0]} · ${locName}` : (titles[0] || locName || "");
     }).catch(() => { rolesLine.textContent = "Роли: недоступны"; });
   } else {
     rolesLine.textContent = "Роли: выберите NPC";
@@ -1562,16 +1596,38 @@ function renderChat(session) {
 
   // #88: relationship summary — authoritative read model only, current
   // values, no client-side delta guessing; refreshed after each reply.
-  const relLine = el("div", { class: "muted" }, "Отношения: нет данных");
+  // #63: rendered as the widget below (band scale + trust as small text,
+  // full state in the aria-label) instead of a bare text line.
+  const relSegs = [0, 1, 2, 3, 4].map(() => el("span", { class: "rel-seg" }));
+  const relWord = el("span", { class: "rel-word" }, "…");
+  const relTrust = el("span", { class: "muted rel-trust" }, "");
+  const relBox = el("div", {
+    class: "rel-box", role: "img", "aria-label": "Отношения: нет данных",
+  }, el("span", { class: "rel-scale" }, ...relSegs), relWord, relTrust);
+  function applyRel(band, trustText, ariaText) {
+    relSegs.forEach((seg, i) => {
+      seg.className = i < band.filled ? `rel-seg on ${band.cls}` : "rel-seg";
+    });
+    relWord.textContent = band.words;
+    relWord.className = `rel-word ${band.cls}`;
+    relTrust.textContent = trustText;
+    relBox.setAttribute("aria-label", ariaText);
+  }
   function refreshRel() {
     api(`/characters/${S.character.id}/relationships`).then((rels) => {
       const rel = (rels || []).find((x) => x.other_id === npcSel.value);
-      if (!rel) { relLine.textContent = "Отношения: пока незнакомы"; return; }
-      const a = rel.affection;
-      const label = a > 20 ? "тёплые" : (a < -20 ? "холодные" : "нейтральные");
-      relLine.textContent =
-        `Отношения: ${label} (симпатия ${Math.round(a)}, доверие ${Math.round(rel.trust)})`;
-    }).catch(() => { relLine.textContent = "Отношения: нет данных"; });
+      if (!rel) {
+        applyRel(renderRelationshipScale(undefined), "пока незнакомы",
+          "Отношения: пока незнакомы");
+        return;
+      }
+      const band = renderRelationshipScale(rel);
+      applyRel(band, `доверие ${Math.round(rel.trust)}`,
+        `Отношения: ${band.words} (симпатия ${Math.round(rel.affection)}, доверие ${Math.round(rel.trust)})`);
+    }).catch(() => {
+      applyRel(renderRelationshipScale(undefined), "нет данных",
+        "Отношения: нет данных");
+    });
   }
   refreshRel();
 
@@ -1580,7 +1636,11 @@ function renderChat(session) {
   // cache (S.visualDisabled) to skip the doomed request, but does NOT set
   // the flag — m132 pins its single set-site inside portraitBlock(), and
   // chat re-renders only on explicit user action.
-  const visual = el("div", { class: "panel portrait", id: "chat-visual" });
+  // #63: the visual is a full-width warm hero band; the EMPTY state is the
+  // normal state (centered honest fallback, styled intentional in CSS).
+  // The honest fallback string is deduped to one constant.
+  const VISUAL_FALLBACK = "Визуал недоступен — диалог текстом";
+  const visual = el("div", { class: "chat-hero", id: "chat-visual" });
   visual.append(el("div", { class: "portrait-status muted" }, "Портрет…"));
   const visualOn = !S.visualDisabled;
   if (visualOn) {
@@ -1594,12 +1654,12 @@ function renderChat(session) {
         }));
       } catch (e) {
         visual.replaceChildren(el("div", { class: "portrait-status muted" },
-          "Визуал недоступен — диалог текстом"));
+          VISUAL_FALLBACK));
       }
     })();
   } else {
     visual.append(el("div", { class: "portrait-status muted" },
-      "Визуал недоступен — диалог текстом"));
+      VISUAL_FALLBACK));
   }
 
   const log = el("div", { class: "chatlog", id: "chat-log" });
@@ -1635,8 +1695,9 @@ function renderChat(session) {
   input.value = S.chatDraft || "";
   input.addEventListener("input", () => { S.chatDraft = input.value; });
   const sendBtn = el("button", {
-    id: "chat-send", class: "primary", onclick: () => send(),
-  }, "Отправить");
+    id: "chat-send", class: "primary", "aria-label": "Отправить",
+    onclick: () => send(),
+  }, "→");
   input.addEventListener("keydown", (ev) => { if (ev.key === "Enter") send(); });
 
   async function send() {
@@ -1644,9 +1705,22 @@ function renderChat(session) {
     const content = draft.trim();
     if (!content) return;
     const sentNpc = npcSel.value;  // #88: guard against NPC switch mid-flight
+    // #63: a stale inline error row must not survive a new attempt. All
+    // rows go — a double-send race must not leave orphaned error rows
+    // behind (peer review finding 1: querySelector removed only the first).
+    log.querySelectorAll(".chat-error").forEach(n => n.remove());
     // #88: LLM latency is 14-45s — visibly non-frozen wait with a ticking
-    // elapsed-seconds counter.
+    // elapsed-seconds counter. #63: the wait is ALSO shown as a typing
+    // bubble inside the chatlog (name + three animated dots, reduced-motion
+    // safe); #chat-status keeps the assistive «Печатает… N с» line.
     status.textContent = "Печатает…";
+    const typingBubble = el("div", { class: "chatmsg npc chat-typing" },
+      el("span", { class: "who" },
+        (S.chatNpcNames && S.chatNpcNames[sentNpc]) || "NPC"),
+      el("span", { class: "typing-dots", "aria-hidden": "true" },
+        el("i"), el("i"), el("i")));
+    log.append(typingBubble);
+    log.scrollTop = log.scrollHeight;
     const t0 = Date.now();
     const tick = setInterval(() => {
       status.textContent = `Печатает… ${Math.round((Date.now() - t0) / 1000)} с`;
@@ -1658,6 +1732,7 @@ function renderChat(session) {
       const r = await api(`/dialogue/${sid}/message`,
         { method: "POST", body: { content } });
       clearInterval(tick);
+      typingBubble.remove();
       if (npcSel.value !== sentNpc) {
         // The turn is logged server-side for the original NPC's session;
         // a stale closure must not hijack the freshly re-rendered view.
@@ -1682,24 +1757,34 @@ function renderChat(session) {
         ? "LLM недоступен, отвечает fallback" : "";
     } catch (e) {
       clearInterval(tick);
+      typingBubble.remove();
       input.value = draft;  // #88: recoverable error keeps the typed draft
       status.textContent = "Не удалось отправить — проверьте связь и повторите";
+      // #63: the error is ALSO an inline row in the chatlog (the toast and
+      // the assistive status line stay).
+      log.append(el("div", { class: "chat-error" },
+        `Не удалось отправить: ${e.message}`));
+      log.scrollTop = log.scrollHeight;
       toast(e.message, true);
     }
   }
 
+  // #63: warm-family shell rides on the grid (same pattern as desire-shell/
+  // shop-shell: `class: "grid <name>-shell"`). Hero band on top, header
+  // (name · subtitle · roles · relationship widget) under it, then the log
+  // (max-height 320), the assistive status line, suggestion chips and the
+  // composer — all inside the shell so the cool :root tokens never leak in.
   app.replaceChildren(topbar("#/chat"),
-    el("div", { class: "grid" },
+    el("div", { class: "grid chat-shell" },
       el("div", { class: "panel", id: "chat-view" },
         el("h2", {}, "Диалог"),
         el("label", {}, "NPC на этой локации"), npcSel,
-        el("div", { class: "chat-head" },
-          visual,
-          el("div", { class: "chat-head-info" },
-            el("div", { id: "chat-npc-name" },
-              (S.chatNpcNames && S.chatNpcNames[npcSel.value])
-                ? S.chatNpcNames[npcSel.value] : npcSel.value),
-            rolesLine, relLine)),
+        visual,
+        el("div", { class: "chat-head-info" },
+          el("div", { id: "chat-npc-name" },
+            (S.chatNpcNames && S.chatNpcNames[npcSel.value])
+              ? S.chatNpcNames[npcSel.value] : npcSel.value),
+          subLine, rolesLine, relBox),
         el("div", { style: "margin-top:8px" }, log),
         status,
         sugg,
