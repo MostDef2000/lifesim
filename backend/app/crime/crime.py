@@ -23,6 +23,7 @@ from app.db.models import (
     WorldObject,
 )
 from app.events.events import EventType, log_event
+from app.social.roles import project_role_events, roles_snapshot
 
 
 def _rng_flag(world_id: str, day: int, scope: str, index: int) -> float:
@@ -98,13 +99,28 @@ def _witness_and_report(
                 created_at=game_timestamp,
             ))
     if noticed:
+        # #61 v2 (D2): the report is the role SOURCE mutation (crimes.status
+        # unreported -> reported grants the derived offender role). Snapshot
+        # before the mutation; the ROLE_ACQUIRED projection commits in the
+        # same transaction as the status flip. A repeat report of an
+        # already-reported crime diffs empty -> no duplicate event.
+        offender_roles_before = roles_snapshot(session, world_id, actor.id)
         crime.status = "reported"
-        log_event(
+        report_event_id = log_event(
             session, world_id, game_timestamp, EventType.CRIME_REPORTED,
             actor_id=noticed[0].id,
             payload={"crime_id": crime.id, "crime_type": crime.crime_type,
                      "suspect": actor.id, "witnesses": [w.id for w in noticed]},
         )
+        for etype, payload in project_role_events(
+            session, world_id, actor.id,
+            before=offender_roles_before,
+            cause="crime_reported", cause_event_id=report_event_id,
+        ):
+            log_event(
+                session, world_id, game_timestamp, etype,
+                actor_id=actor.id, payload=payload,
+            )
 
 
 def _maybe_steal(
@@ -263,6 +279,11 @@ def run_police_phase(
         counters["released"] += 1
 
     # 2. Resolve reported crimes
+    # #61 v2 (D2) coverage note: resolution does NOT revoke the offender —
+    # derive_roles grants the offender role for status reported|resolved
+    # alike (a resolved offense stays publicly known), so the set-diff here
+    # is empty by construction and NO role events are emitted on this side.
+    # The fine/prison mutations below are not role sources.
     org = police_org(session, world_id)
     reported = (
         session.query(Crime)

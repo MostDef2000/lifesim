@@ -14,6 +14,7 @@ from app.db.models import (
 )
 from app.economy import burn, get_balance, open_account, transfer
 from app.events.events import EventType, log_event
+from app.social.roles import project_role_events, roles_snapshot
 
 
 def _get_band(aff: float) -> str:
@@ -327,6 +328,17 @@ def run_daily_org_policies(session: Session, world_id: str, settings, game_times
             # Winner = max score, tie -> lowest character_id
             winner_id = min(candidates, key=lambda cid: (-scores[cid], cid))
 
+            # #61 v2 (D2): pre-mutation snapshots of derived role identities,
+            # taken BEFORE the role flips below. Both the previous leader and
+            # the winner (one and the same character when the incumbent is
+            # re-elected — the temporary demote/promote then nets out to an
+            # empty diff, so a re-election emits nothing).
+            pre_role_snapshots = {}
+            for cid in {prev_leader_id, winner_id}:
+                if cid is not None:
+                    pre_role_snapshots[cid] = roles_snapshot(
+                        session, world_id, cid)
+
             # Effect: flip roles
             if prev_leader_id:
                 leader_member.role = "member"
@@ -348,7 +360,7 @@ def run_daily_org_policies(session: Session, world_id: str, settings, game_times
             # Update Organization leader_character_id
             org.leader_character_id = winner_id
 
-            log_event(
+            election_event_id = log_event(
                 session, world_id, game_timestamp, EventType.ELECTION,
                 actor_id=winner_id,
                 target_id=prev_leader_id,
@@ -360,6 +372,26 @@ def run_daily_org_policies(session: Session, world_id: str, settings, game_times
                     "reason": election_reason
                 }
             )
+
+            # #61 v2 (D2): ROLE_ACQUIRED / ROLE_REVOKED — narrative
+            # projection of the derive-on-read roles (app/social/roles.py
+            # stays the only source of truth; no role store). Emitted from
+            # the set-diff across the WHOLE election mutation, in the same
+            # transaction; deterministic order (character id, then
+            # acquired-before-revoked). A side effect of the honest diff:
+            # the old leader is also projected as acquiring org_member of
+            # this org (and the winner losing it) when the leadership
+            # actually changes.
+            for cid in sorted(pre_role_snapshots):
+                for etype, payload in project_role_events(
+                    session, world_id, cid,
+                    before=pre_role_snapshots[cid],
+                    cause="election", cause_event_id=election_event_id,
+                ):
+                    log_event(
+                        session, world_id, game_timestamp, etype,
+                        actor_id=cid, payload=payload,
+                    )
             session.flush()
 
         # --- 3. Law Enactment ---

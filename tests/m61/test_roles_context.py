@@ -524,9 +524,10 @@ def test_single_helper_and_template_definitions():
     assert "derive_roles" not in inspect.getsource(dialogue.llm_reply)
 
 
-def test_no_new_events_and_fallback_untouched():
-    # #61 adds context only — the event catalog stays at 41 (m2/m11 pins).
-    assert len(EventType) == 41
+def test_event_count_and_fallback_untouched():
+    # #61 v2 D2 adds ROLE_ACQUIRED/ROLE_REVOKED — the catalog is now 43
+    # (m2/m11/m4 pins updated deliberately; count pin only).
+    assert len(EventType) == 43
     # Fallback path (П2) bytes untouched: templates and the trip tail stay.
     import app.api.dialogue as dialogue
 
