@@ -1487,14 +1487,14 @@ def create_app(settings, session_factory: sessionmaker):
         with an explicit clarification and NO row (scene_act ok:false
         pattern #87: the reason is data, not an error)."""
         from app.db.models import CharacterDesire
-        from app.desire.desire import interpret_desire
+        from app.desire.llm_interpret import resolve_desire_interpretation
 
         character = _owned_character(session, user, cid)
         text = (body.text or "").strip()
         if len(text) > 500:
             raise HTTPException(status_code=422, detail="text must be 1..500 chars")
 
-        interpretation = interpret_desire(text)
+        interpretation = resolve_desire_interpretation(text, state["settings"])
         if interpretation.get("catalog_key") is None:
             return JSONResponse(status_code=200, content={
                 "desire": None, "catalog_key": None,
@@ -1530,7 +1530,7 @@ def create_app(settings, session_factory: sessionmaker):
         becomes active; the create happens only on explicit confirm via
         POST /characters/{cid}/desire. Unsupported/ambiguous/short text →
         200 + clarification, NO row (scene_act ok:false pattern #87)."""
-        from app.desire.desire import interpret_desire
+        from app.desire.llm_interpret import resolve_desire_interpretation
 
         # ownership gate only — the pure catalog never touches the character
         _owned_character(session, user, cid)
@@ -1538,7 +1538,7 @@ def create_app(settings, session_factory: sessionmaker):
         if len(text) > 500:
             raise HTTPException(status_code=422, detail="text must be 1..500 chars")
 
-        interpretation = interpret_desire(text)
+        interpretation = resolve_desire_interpretation(text, state["settings"])
         if interpretation.get("catalog_key") is None:
             return JSONResponse(status_code=200, content={
                 "catalog_key": None,

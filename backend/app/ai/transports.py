@@ -33,6 +33,8 @@ class StubTransport:
             return self._dialogue(prompt)
         if schema_hint == "summarize":
             return self._summarize(prompt)
+        if schema_hint == "desire":
+            return self._desire(prompt)
         raise ValueError(f"unknown schema_hint: {schema_hint}")
 
     def _decision(self, prompt: str) -> str:
@@ -84,6 +86,28 @@ class StubTransport:
         summary = "consolidated: " + ", ".join(kinds) if kinds else \
             "consolidated: misc"
         return json.dumps({"summary": summary})
+
+    def _desire(self, prompt: str) -> str:
+        # #60: the stub cannot interpret desires — it answers with the pure
+        # keyword classifier over the desire_text line. This keeps llm-on(stub)
+        # runs fully functional and deterministic (П2): the LLM seam runs, the
+        # catalog decides. (Returning catalog_key=null here would surface
+        # "unsupported" for EVERY desire, since the resolver does not
+        # re-classify LLM-answered nulls.)
+        from app.desire.desire import interpret_desire
+
+        text = ""
+        for line in prompt.splitlines():
+            if line.startswith("desire_text:"):
+                text = line.split(":", 1)[1].strip()
+                break
+        parsed = interpret_desire(text)
+        if parsed.get("catalog_key") is None:
+            return json.dumps({"catalog_key": None})
+        return json.dumps({
+            "catalog_key": parsed["catalog_key"],
+            "confidence_note": "stub: каталог",
+        })
 
     @staticmethod
     def _json_list_after(prompt: str, marker: str) -> List[str]:

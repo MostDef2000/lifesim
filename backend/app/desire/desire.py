@@ -9,11 +9,13 @@ Layer contract (spec of record: gh issue view 90):
   logic: creating a new active desire marks the previous one ``replaced``
   (with a ``replaced_by`` pointer) — SQLite has no partial unique index, so
   the invariant lives in code, and terminal rows stay as the audit trail.
-- DETERMINISTIC, LLM-OFF: the keyword interpreter below IS the alpha
-  implementation, not just a fallback. Dev runs with llm.enabled=false and
-  this slice contains no model call on ANY path; the same code path serves
-  as the safe fallback if an LLM interpreter is layered on top later (out
-  of scope of the alpha catalog brevity — documented, tested).
+- DETERMINISTIC CORE, LLM-LAYERED (#60): the keyword interpreter below is
+  the pure classifier AND the mandatory fallback. The LLM interpreter now
+  EXISTS as ``app.desire.llm_interpret`` (#60), layered ON TOP: when
+  ``llm.enabled`` it answers first, and on ANY LLM failure (disabled
+  transport, exception, non-JSON, whitelist miss) the same deterministic
+  code path below takes over. This module stays pure (no model call on any
+  path here); its dict shape is pinned (no ``interpreted_by`` field).
 
 Pure/purity split (mirrors app/social/roles.py and app/api/scene_act.py):
 
