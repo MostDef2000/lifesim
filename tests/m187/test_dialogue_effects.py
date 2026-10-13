@@ -37,7 +37,6 @@ import os
 import random
 import sys
 
-import pytest
 from sqlalchemy.orm import sessionmaker
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../../.."))
