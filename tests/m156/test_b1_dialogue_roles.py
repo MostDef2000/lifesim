@@ -12,9 +12,11 @@ Covers:
   crimes rows) — no LLM, no new tables, no invented roles.
 - Catalog: newcomer (< 7 days in world), occupation (job title), org_leader /
   org_member (membership.role), offender (reported|resolved crime).
-- EXCLUDED: partner — no authoritative marriage/partnership source exists in
-  the schema; Relationship.romantic_interest is a sentiment scalar, not a
-  partnership fact ("unsupported/fuzzy role is not invented").
+- partner — since #182 derived ONLY from the authoritative partnerships
+  table (mutation-backed by POST /characters/{id}/partnership); WITHOUT a
+  partnerships row the role is still never invented —
+  Relationship.romantic_interest is a sentiment scalar, not a partnership
+  fact ("unsupported/fuzzy role is not invented").
 - No-false-positive: absent source row → role absent (newcomer after
   threshold; unreported crime → offender absent; no job → no occupation).
 - Distinct from internal traits (role ids never overlap trait keys).
@@ -322,10 +324,11 @@ def test_roles_distinct_from_internal_traits(world):
 
 
 def test_partner_role_excluded_no_authoritative_source(world):
-    """#89: «unsupported/fuzzy role is not invented». The schema has NO
-    marriage/partnership source; high romantic_interest is a sentiment
-    scalar, so partner must never be derived. The module documents the
-    exclusion as data."""
+    """#89: «unsupported/fuzzy role is not invented». Since #182 the
+    partnerships table IS the authoritative source (mutation-backed), and
+    the module keeps the EXCLUDED_ROLES guard: WITHOUT a partnerships row
+    (as here — the seeded NPC has none) high romantic_interest, a sentiment
+    scalar, must never grant the role."""
     import app.social.roles as roles_module
 
     assert "partner" in roles_module.EXCLUDED_ROLES

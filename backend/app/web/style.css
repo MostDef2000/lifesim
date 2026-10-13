@@ -1529,6 +1529,19 @@ button.danger:hover { background: #93301f; }
 }
 .chat-shell .sugg:hover { color: var(--w-accent); border-color: var(--w-accent); }
 
+/* issue #182: partnership proposal — small warm button near the suggestion
+   chips. Hidden by default (hidden attribute); app.js reveals it only for
+   a selected NPC whose derived roles contain no «Партнёр …» title. */
+.chat-shell #chat-partner-btn {
+  margin-top: 8px;
+  background: var(--w-accent);
+  color: #14181d;
+  border: 1px solid var(--w-accent);
+  padding: 6px 14px;
+  cursor: pointer;
+}
+.chat-shell #chat-partner-btn:disabled { opacity: 0.6; cursor: default; }
+
 /* #175: connection banner — persistent offline signal driven by consecutive
    pollEvents failures (WS close is routine on navigation, never drives it).
    Warm-warn family on the dark panel bg; fixed top-center, below nothing —

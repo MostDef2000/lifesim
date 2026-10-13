@@ -745,6 +745,143 @@ def create_app(settings, session_factory: sessionmaker):
             "roles": derive_roles(session, character.world_id, cid),
         }
 
+    # ---------- #182: partnership (explicit mutual declaration) ----------
+
+    # v1 game-design constant, deliberately NOT config: the deterministic
+    # NPC agreement threshold for «объявить пару» (frozen for the v1 spec;
+    # raising it above the default SOCIALIZE affection gain takes runs).
+    PARTNERSHIP_MIN_AFFECTION = 25.0
+
+    @app.post("/characters/{target_id}/partnership")
+    def declare_partnership(
+        target_id: str,
+        user: User = Depends(current_user), session: Session = Depends(db),
+    ):
+        """Explicit mutual partnership: the player character proposes, the
+        NPC agrees by a DETERMINISTIC rule (never LLM). On agreement the
+        Partnership row + PARTNERSHIP_DECLARED event + role projections for
+        BOTH characters commit in ONE transaction. A decline is a game
+        outcome (200, accepted=false), not an error. v1: no breakup — rows
+        are never revoked. Relationship math and InteractionPermission
+        (consent for romantic ACTIONS) are NOT touched."""
+        from sqlalchemy.exc import IntegrityError
+        from sqlalchemy import or_ as _or
+
+        from app.db.models import Partnership, Relationship
+        from app.events.events import EventType, log_event
+        from app.social.roles import project_role_events, roles_snapshot
+
+        world_id = state["settings"].world.world_id
+        # Initiator = the authenticated player's living character (the
+        # "initiator alive" validation — _owned_character_by_user filters
+        # alive=True and 422s when the player has no living character).
+        initiator = _owned_character_by_user(session, user)
+
+        # --- deterministic validations, fixed order, distinct reasons ---
+        target = (
+            session.query(Character)
+            .filter_by(world_id=world_id, id=target_id)
+            .first()
+        )
+        if target is None:
+            raise HTTPException(status_code=404, detail="character not found")
+        if not target.alive:
+            raise HTTPException(status_code=422, detail="target is not alive")
+        if target.id == initiator.id:
+            raise HTTPException(status_code=422, detail="cannot declare partnership with yourself")
+        # Mirror the dialogue endpoint's rule (/dialogue/start): propose to
+        # an NPC, never to another player's character.
+        if target.user_id is not None:
+            raise HTTPException(status_code=422, detail="cannot declare partnership with a player character")
+
+        def _partnered(char_id: str):
+            return (
+                session.query(Partnership)
+                .filter_by(world_id=world_id)
+                .filter(_or(
+                    Partnership.character_a_id == char_id,
+                    Partnership.character_b_id == char_id,
+                ))
+                .first()
+            )
+
+        if _partnered(initiator.id) is not None:
+            raise HTTPException(status_code=422, detail="initiator is already in a partnership")
+        if _partnered(target.id) is not None:
+            raise HTTPException(status_code=422, detail="target is already in a partnership")
+
+        # Adults only (П4 convention: player creation requires 18+,
+        # population.min_age is 18; Character.age is a plain year count).
+        if initiator.age < 18 or target.age < 18:
+            raise HTTPException(status_code=422, detail="both characters must be adults (18+)")
+
+        # NPC agreement rule — v1 game-design constant above. The canonical
+        # pair's Relationship row is read in canonical a<b order only
+        # (canonicality is guaranteed by the Relationship CheckConstraint);
+        # a missing row means no history → affection 0.
+        a, b = sorted([initiator.id, target.id])
+        rel = (
+            session.query(Relationship)
+            .filter_by(world_id=world_id, character_a=a, character_b=b)
+            .first()
+        )
+        affection = rel.affection if rel is not None else 0.0
+        initiator_name = f"{initiator.first_name} {initiator.last_name}".strip()
+        target_name = f"{target.first_name} {target.last_name}".strip()
+        if affection < PARTNERSHIP_MIN_AFFECTION:
+            # Deterministic decline: a game outcome, not an error.
+            return {
+                "accepted": False,
+                "reason": (
+                    f"{target_name} отклоняет предложение: взаимная симпатия "
+                    f"{affection:.0f} ниже порога {PARTNERSHIP_MIN_AFFECTION:.0f}"
+                ),
+            }
+
+        # Agreement: row + event + role projections for BOTH characters,
+        # all committed in ONE transaction (close() without commit on any
+        # exception rolls everything back). The DB-level per-character
+        # singleton (unique indexes uq_partnerships_world_a/_b) may still
+        # fire if a concurrent proposal raced past the 422 checks above —
+        # it surfaces as IntegrityError → rollback + 422, never a 500.
+        now_ts = _world_now(session)
+        try:
+            # D2 discipline: pre-mutation snapshots BEFORE the source row lands.
+            pre_snapshots = {
+                cid: roles_snapshot(session, world_id, cid)
+                for cid in sorted({initiator.id, target.id})
+            }
+            session.add(Partnership(
+                world_id=world_id, character_a_id=a, character_b_id=b,
+                created_at=now_ts,
+            ))
+            session.flush()
+            event_id = log_event(
+                session, world_id, now_ts, EventType.PARTNERSHIP_DECLARED,
+                actor_id=initiator.id, target_id=target.id,
+                payload={
+                    "initiator_id": initiator.id,
+                    "initiator_name": initiator_name,
+                    "partner_id": target.id,
+                    "partner_name": target_name,
+                },
+            )
+            for cid in sorted(pre_snapshots):
+                for etype, payload in project_role_events(
+                    session, world_id, cid, before=pre_snapshots[cid],
+                    cause="partnership_declared", cause_event_id=event_id,
+                ):
+                    log_event(session, world_id, now_ts, etype, actor_id=cid, payload=payload)
+            session.commit()
+        except IntegrityError:
+            session.rollback()
+            raise HTTPException(status_code=422, detail="character is already in a partnership")
+        return {
+            "accepted": True,
+            "partner": {"id": target.id, "name": target_name},
+        }
+
+
     @app.post("/characters/{cid}/control")
     def set_control(
         cid: str, body: ControlIn,

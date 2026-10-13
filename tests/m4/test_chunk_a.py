@@ -39,15 +39,15 @@ def test_schema_050_tables_created(default_settings):
         __import__("sqlalchemy").text(
             "SELECT value FROM schema_meta WHERE key='version'")
     ).scalar()
-    assert version == "0.14.0"
+    assert version == "0.15.0"
     session.close()
 
 
-def test_event_type_closed_set_43():
+def test_event_type_closed_set_44():
     values = {e.value for e in EventType}
-    assert len(values) == 43
+    assert len(values) == 44
     for added in ("AI_DECISION", "MEMORY_CREATED", "MEMORY_CONSOLIDATED",
-                  "ROLE_ACQUIRED", "ROLE_REVOKED"):
+                  "ROLE_ACQUIRED", "ROLE_REVOKED", "PARTNERSHIP_DECLARED"):
         assert added in values
 
 

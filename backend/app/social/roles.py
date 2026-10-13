@@ -16,13 +16,21 @@ Catalog (fixed, small):
 - ``offender``   — a Crime row with status reported|resolved (a publicly
   known offense). An *unreported* crime is a secret fact and must NOT grant
   a public role.
+- ``partner``    — (#182) an authoritative Partnership row («объявить
+  пару», POST /characters/{id}/partnership). Singleton per character:
+  v1 has no breakup, so at most one active pair per character exists.
+  Title/source embed the OTHER character (first name / full name), so the
+  role is asymmetric-honest per viewer: «Партнёр {имя}» / «в паре с
+  {полное имя}».
 
-EXCLUDED_ROLES — roles deliberately absent from the catalog:
+EXCLUDED_ROLES — sentiment/probability-only sources never grant a role:
 
-- ``partner`` — the schema has no authoritative marriage/partnership source
-  (no marriage/partner tables). Relationship.romantic_interest is a sentiment
-  scalar, not a partnership fact; deriving «партнёр» from it would invent a
-  fuzzy role (spec: «unsupported/fuzzy role is not invented»).
+- ``partner`` — kept as the honest guard AFTER #182: the role now HAS a
+  mutation-backed authoritative source (partnerships table, its action
+  site emits ROLE_ACQUIRED via project_role_events), but WITHOUT such a
+  row it must never be invented — Relationship.romantic_interest is a
+  sentiment scalar, not a partnership fact (spec: «unsupported/fuzzy role
+  is not invented»).
 
 Traceability contract (spec: «role changes are traceable»): this is a
 derive-on-read model — derive_roles keeps no event log and never writes.
@@ -43,18 +51,20 @@ mutation and project_role_events() after it; the emitted set-difference
 rows live in world_events (same transaction) and make no
 role-history-completeness claim — derive is the truth, the events are
 history. Coverage is exactly the wired mutation sites (elections, crime
-report): the newcomer→permanent boundary is clock-driven and has NO
-mutation site, so it emits nothing by design; seed-time membership
-(app/world/social_seed.py) emits nothing by the same rule.
+report, #182 partnership declaration): the newcomer→permanent boundary is
+clock-driven and has NO mutation site, so it emits nothing by design;
+seed-time membership (app/world/social_seed.py) emits nothing by the same
+rule.
 
 Determinism: same DB state → same role list, in a fixed order
-(newcomer, occupation, org roles by organization id, offender).
+(newcomer, occupation, org roles by organization id, offender, partner).
 """
 
 from __future__ import annotations
 
 from typing import Any, Dict, List, Tuple
 
+from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
 from app.db.models import (
@@ -64,6 +74,7 @@ from app.db.models import (
     Job,
     Organization,
     OrganizationMember,
+    Partnership,
     WorldClock,
 )
 from app.events.events import EventType
@@ -80,12 +91,18 @@ _OCCUPATION_TITLES_RU = {
     "Storekeeper": "Кладовщик",
 }
 
-# Roles with no authoritative source in the current schema — never derived.
+# Roles never derived from sentiment/probability alone — the entry carries
+# the guard rationale. Since #182 partner HAS a mutation-backed source
+# (partnerships table → _partner_role above) and is derived exclusively
+# from it; the entry stays because WITHOUT such a row the role must never
+# be invented from Relationship scalars.
 EXCLUDED_ROLES: Dict[str, str] = {
     "partner": (
-        "нет авторитетного источника (нет модели брака/партнёрства); "
+        "без строки partnerships роль не выводится: "
         "Relationship.romantic_interest — скаляр настроения, а не факт "
-        "партнёрства: неподдерживаемая/размытая роль не изобретается"
+        "партнёрства; с #182 авторитетный источник есть (таблица "
+        "partnerships, мутация — только POST /characters/{id}/partnership), "
+        "роль выводится исключительно из неё"
     ),
 }
 
@@ -193,6 +210,42 @@ def _offender_role(session: Session, world_id: str, char_id: str) -> Dict[str, A
     }
 
 
+def _partner_role(session: Session, world_id: str, char_id: str) -> Dict[str, Any] | None:
+    """#182: the ONLY authoritative partnership source is the partnerships
+    table (mutation-backed by POST /characters/{id}/partnership). Sentiment
+    scalars never grant this role (EXCLUDED_ROLES guard below). Singleton
+    per character: the endpoint refuses a second active pair (v1 has no
+    breakup), so .first() over the canonical pair rows is exact."""
+    row = (
+        session.query(Partnership)
+        .filter(
+            Partnership.world_id == world_id,
+            or_(Partnership.character_a_id == char_id,
+                Partnership.character_b_id == char_id),
+        )
+        .order_by(Partnership.id)
+        .first()
+    )
+    if row is None:
+        return None
+    other_id = (
+        row.character_b_id if row.character_a_id == char_id
+        else row.character_a_id
+    )
+    other = session.get(Character, other_id)
+    other_first = other.first_name if other is not None else other_id
+    other_full = (
+        f"{other.first_name} {other.last_name}".strip()
+        if other is not None else other_id
+    )
+    return {
+        "id": "partner",
+        "title": f"Партнёр {other_first}",
+        "source": f"в паре с {other_full}",
+        "reason": "взаимное объявление пары",
+    }
+
+
 def derive_roles(session: Session, world_id: str, character_id: str) -> List[Dict[str, Any]]:
     """Public roles of a character, derived on read from authoritative rows.
 
@@ -213,6 +266,11 @@ def derive_roles(session: Session, world_id: str, character_id: str) -> List[Dic
     off = _offender_role(session, world_id, character_id)
     if off is not None:
         roles.append(off)
+    # #182: partnership is mutation-backed — appended last so the existing
+    # fixed order (newcomer, occupation, org, offender) is untouched.
+    partner = _partner_role(session, world_id, character_id)
+    if partner is not None:
+        roles.append(partner)
     return roles
 
 
