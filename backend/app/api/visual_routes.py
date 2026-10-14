@@ -12,6 +12,7 @@ NOTE: no `from __future__ import annotations` — it breaks FastAPI resolution o
 locally-defined Pydantic models (same trap as app.py/ws.py in M5).
 """
 import hashlib
+import logging
 import threading
 import time
 from typing import Any
@@ -19,6 +20,8 @@ from typing import Any
 from sqlalchemy.orm import Session, sessionmaker
 
 from app.config.config import Settings
+
+logger = logging.getLogger("vl1.visual")
 
 
 def _deterministic_seed(*parts: Any) -> int:
@@ -404,8 +407,10 @@ def register_visual_routes(app, settings: Settings, session_factory: sessionmake
         # Lazy canonical generation for an NPC (any auth user may trigger it
         # once per NPC). Failure honesty: any generation failure (transport
         # exception / non-2xx → 502, descriptor race, storage error) becomes
-        # the SAME 404 as today, and is remembered in the negative cache so
-        # repeat GETs within the TTL do not retry the transport.
+        # the SAME 404 as today — logged as a one-line warning for the
+        # journal (a silent 404 is undiagnosable in prod) — and is remembered
+        # in the negative cache so repeat GETs within the TTL do not retry
+        # the transport.
         key = (world_id, cid)
         failed_at = _npc_portrait_negative.get(key)
         if failed_at is not None and (
@@ -450,11 +455,16 @@ def register_visual_routes(app, settings: Settings, session_factory: sessionmake
                     actor_id=cid,
                     is_canonical=True,
                 )
-            except Exception:
+            except Exception as exc:
                 # Same 404 as today; the failure is NOT retried on every
                 # request (negative cache), and the state cannot be poisoned:
                 # _generate_asset commits the canonical row + file in ONE
-                # transaction, or writes nothing.
+                # transaction, or writes nothing. One-line warning BEFORE the
+                # 404: without it the failure is invisible in prod (uvicorn
+                # runs --no-access-log and this handler answers everything).
+                logger.warning(
+                    "visual: lazy NPC portrait generation failed world=%s cid=%s: %r",
+                    world_id, cid, exc)
                 _npc_portrait_negative[key] = time.monotonic()
                 _evict_npc_portrait_negative(time.monotonic())
                 raise _not_found() from None

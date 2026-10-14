@@ -23,6 +23,7 @@ exactly once:
   while player-owned GETs keep the 503 gate (m6/m158 pins).
 """
 
+import logging
 import os
 import random
 import sys
@@ -314,6 +315,35 @@ class TestFailureHonesty:
         r = client.get(f"/visual/characters/{npc_id}/portrait")
         assert r.status_code == 200 and r.json()["id"] == asset_id
         assert calls["n"] == 2
+
+    def test_failure_logs_one_line_warning_with_cid(self, world, caplog):
+        """Prod-incident pin (2026-10-14): the blanket except on the lazy NPC
+        GET path must leave a one-line WARNING before the honest 404 —
+        uvicorn runs --no-access-log, so a silently swallowed failure made
+        prod diagnosis impossible. caplog sees the record although 'vl1' does
+        not propagate (app.py sets propagate=False): pytest attaches its
+        capture handler to every already-non-propagating logger at test-phase
+        start, and create_app ran in the fixture, before that."""
+        settings, app, client, factory, cid, npc_id = world
+        wid = settings.world.world_id
+        calls = {"n": 0}
+        app.state.flux_transport_factory = lambda: CountingTransport(calls, fail=True)
+
+        r = client.get(f"/visual/characters/{npc_id}/portrait")
+
+        assert r.status_code == 404, r.text
+        assert r.json()["detail"] == "canonical portrait not found"
+        assert calls["n"] == 1
+        # exactly one one-line WARNING naming world/cid; no traceback (the
+        # contract is one line, not a stack)
+        warnings = [rec for rec in caplog.records
+                    if "lazy NPC portrait generation failed" in rec.getMessage()]
+        assert len(warnings) == 1, caplog.text
+        record = warnings[0]
+        assert record.levelno == logging.WARNING
+        assert f"world={wid}" in record.getMessage()
+        assert f"cid={npc_id}" in record.getMessage()
+        assert record.exc_info is None and not record.stack_info
 
 
 class TestDisabledGate:
