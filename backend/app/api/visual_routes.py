@@ -2,10 +2,18 @@
 
 Registered from create_app; every route is gated by settings.visual.enabled (503).
 Visual layer is read-only over world state (П1-аналог): writes only visual_assets + files.
+#191 exceptions to the gate on GET /visual/characters/{cid}/portrait (both because the
+#191 character guard precedes the gate on the canonical-miss path):
+- an NPC (user_id is None) with visual.enabled=false answers 404 (no transport call);
+- with visual.enabled=false, unknown/dead/non-owned cids answer 404 too (the guard
+  runs before the gate), while an alive player character (own or another player's)
+  keeps the 503 gate — matching the m6/m158 pins.
 NOTE: no `from __future__ import annotations` — it breaks FastAPI resolution of the
 locally-defined Pydantic models (same trap as app.py/ws.py in M5).
 """
 import hashlib
+import threading
+import time
 from typing import Any
 
 from sqlalchemy.orm import Session, sessionmaker
@@ -16,6 +24,56 @@ from app.config.config import Settings
 def _deterministic_seed(*parts: Any) -> int:
     digest = hashlib.sha256(":".join(str(p) for p in parts).encode()).digest()
     return int.from_bytes(digest[:8], "big") % (2**31)
+
+
+# #191 — lazy canonical NPC portrait state (in-process, mirrors the #189 desire
+# cache discipline):
+# - per-(world_id, cid) locks: two parallel GETs of the same NPC portrait must
+#   produce exactly ONE transport call (single-flight + double-check inside);
+# - negative cache: after a FAILED lazy attempt, (world_id, cid) ->
+#   time.monotonic() is remembered for NPC_PORTRAIT_NEGATIVE_TTL_SEC, so
+#   repeat GETs return the same honest 404 without retrying the transport.
+#   A SUCCESSFUL generation pops the entry. Every removal uses dict.pop(key,
+#   None) (never bare ``del``) so a racing thread cannot raise KeyError;
+#   the cache is capped and evicted expired-then-oldest like the desire cache.
+# failure backoff window; 300 matches visual.timeout_sec in PRODUCTION
+# config/production.yaml (default.yaml ships 30).
+NPC_PORTRAIT_NEGATIVE_TTL_SEC = 300.0
+NPC_PORTRAIT_NEGATIVE_MAX = 512
+_npc_portrait_locks: dict[tuple[str, str], threading.Lock] = {}
+_npc_portrait_locks_guard = threading.Lock()
+_npc_portrait_negative: dict[tuple[str, str], float] = {}
+
+
+def clear_npc_portrait_negative_cache() -> None:
+    """Drop negative-cache entries and per-cid locks (tests and admin use)."""
+    with _npc_portrait_locks_guard:
+        _npc_portrait_negative.clear()
+        _npc_portrait_locks.clear()
+
+
+def _npc_portrait_lock(key: tuple[str, str]) -> threading.Lock:
+    """Per-(world_id, cid) single-flight lock (created under the meta-lock)."""
+    with _npc_portrait_locks_guard:
+        lock = _npc_portrait_locks.get(key)
+        if lock is None:
+            lock = threading.Lock()
+            _npc_portrait_locks[key] = lock
+        return lock
+
+
+def _evict_npc_portrait_negative(now: float) -> None:
+    """Enforce NPC_PORTRAIT_NEGATIVE_MAX: drop expired entries first, then oldest."""
+    if len(_npc_portrait_negative) <= NPC_PORTRAIT_NEGATIVE_MAX:
+        return
+    expired = [key for key, ts in _npc_portrait_negative.items()
+               if now - ts >= NPC_PORTRAIT_NEGATIVE_TTL_SEC]
+    for key in expired:
+        _npc_portrait_negative.pop(key, None)  # pop: benign if raced away
+    while len(_npc_portrait_negative) > NPC_PORTRAIT_NEGATIVE_MAX:
+        _npc_portrait_negative.pop(
+            min(_npc_portrait_negative, key=lambda k: _npc_portrait_negative[k]),
+            None)
 
 
 def register_visual_routes(app, settings: Settings, session_factory: sessionmaker) -> None:
@@ -51,8 +109,17 @@ def register_visual_routes(app, settings: Settings, session_factory: sessionmake
         location_id: int | None,
         object_id: int | None,
         actor_id: str | None,
+        is_canonical: bool = False,
     ) -> tuple[dict, bytes]:
-        """§66 pipeline: descriptor -> prompt -> Flux -> image -> asset registration."""
+        """§66 pipeline: descriptor -> prompt -> Flux -> image -> asset registration.
+
+        #191: is_canonical=True (lazy NPC GET path) creates the row canonical
+        in the SAME transaction/commit as the file — no window where a
+        canonical row exists without the file. Default False keeps POST flows
+        byte-identical (they promote via POST /assets/{id}/canonical). The
+        parameter is NOT named ``canonical``: the scene-reference loop below
+        already binds that local name to a VisualAsset row.
+        """
         from app.db.models import VisualAsset, WorldClock
         from app.events.events import EventType, log_event
 
@@ -108,7 +175,7 @@ def register_visual_routes(app, settings: Settings, session_factory: sessionmake
             seed=seed,
             model=visual_settings.model,
             lora=visual_settings.lora or None,
-            canonical=False,
+            canonical=is_canonical,
             created_at=f"ts{game_ts}",
         )
         session.add(asset)
@@ -293,17 +360,103 @@ def register_visual_routes(app, settings: Settings, session_factory: sessionmake
         request_user=Depends(current_user),
         session: Session = Depends(db),
     ):
-        gate()
-        from app.db.models import VisualAsset
+        from app.db.models import Character, VisualAsset
 
+        world_id = settings.world.world_id
         asset = (
             session.query(VisualAsset)
             .filter_by(
-                world_id=settings.world.world_id, asset_type="portrait",
+                world_id=world_id, asset_type="portrait",
                 character_id=cid, canonical=True,
             )
             .first()
         )
-        if asset is None:
-            raise HTTPException(status_code=404, detail="canonical portrait not found")
-        return _asset_payload(asset)
+        if asset is not None:
+            gate()
+            return _asset_payload(asset)
+
+        # #191: canonical miss. Character guard first (pure reads, same 404
+        # JSON as today — no existence leaking): unknown/dead → 404; a PLAYER
+        # character (user_id set — own or another player's) keeps the
+        # pure-read contract (own portraits flow through POST only; another
+        # player's are never generated/served implicitly) and keeps the 503
+        # gate when visual is disabled (m6/m158 pins).
+        def _not_found() -> HTTPException:
+            # Fresh instance per raise (a raised HTTPException carries a
+            # traceback; never share one instance across requests).
+            return HTTPException(
+                status_code=404, detail="canonical portrait not found")
+
+        character = (
+            session.query(Character)
+            .filter_by(world_id=world_id, id=cid)
+            .first()
+        )
+        if character is None or not character.alive:
+            raise _not_found()
+        if character.user_id is not None:
+            gate()
+            raise _not_found()
+        # NPC: visual disabled → honest 404, transport never built.
+        if not visual_settings.enabled:
+            raise _not_found()
+
+        # Lazy canonical generation for an NPC (any auth user may trigger it
+        # once per NPC). Failure honesty: any generation failure (transport
+        # exception / non-2xx → 502, descriptor race, storage error) becomes
+        # the SAME 404 as today, and is remembered in the negative cache so
+        # repeat GETs within the TTL do not retry the transport.
+        key = (world_id, cid)
+        failed_at = _npc_portrait_negative.get(key)
+        if failed_at is not None and (
+            time.monotonic() - failed_at < NPC_PORTRAIT_NEGATIVE_TTL_SEC
+        ):
+            raise _not_found()
+        _npc_portrait_negative.pop(key, None)  # expired entry out (pop: benign)
+
+        with _npc_portrait_lock(key):
+            # Single-flight double-check: a parallel GET may have committed
+            # the canonical asset while this thread waited on the lock.
+            asset = (
+                session.query(VisualAsset)
+                .filter_by(
+                    world_id=world_id, asset_type="portrait",
+                    character_id=cid, canonical=True,
+                )
+                .first()
+            )
+            if asset is not None:
+                _npc_portrait_negative.pop(key, None)
+                return _asset_payload(asset)
+            # Re-check the negative cache: a parallel attempt may have failed
+            # while this thread waited on the lock.
+            failed_at = _npc_portrait_negative.get(key)
+            if failed_at is not None and (
+                time.monotonic() - failed_at < NPC_PORTRAIT_NEGATIVE_TTL_SEC
+            ):
+                raise _not_found()
+            _npc_portrait_negative.pop(key, None)  # retrying: stale entry out
+            try:
+                from app.visual.descriptor import build_portrait_descriptor
+
+                descriptor = build_portrait_descriptor(session, world_id, cid)
+                payload, _ = _generate_asset(
+                    session,
+                    asset_type="portrait",
+                    descriptor=descriptor,
+                    character_id=cid,
+                    location_id=None,
+                    object_id=None,
+                    actor_id=cid,
+                    is_canonical=True,
+                )
+            except Exception:
+                # Same 404 as today; the failure is NOT retried on every
+                # request (negative cache), and the state cannot be poisoned:
+                # _generate_asset commits the canonical row + file in ONE
+                # transaction, or writes nothing.
+                _npc_portrait_negative[key] = time.monotonic()
+                _evict_npc_portrait_negative(time.monotonic())
+                raise _not_found() from None
+            _npc_portrait_negative.pop(key, None)  # success clears the entry
+            return payload
