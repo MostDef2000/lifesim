@@ -53,7 +53,9 @@ def seed_external_world(session: Session, settings, world_id: str, rng: random.R
 
     # Biographical connections (§106): NPCs come from Vladivostok by default
     # (population.birthplace), so every NPC may keep contacts in the city.
-    first_names = list(settings.population.first_names)
+    # #197: name pools are split by sex; contact names stay gender-unlinked
+    # by design, so draw from the union of both pools (same 10 names total).
+    first_names = list(settings.population.first_names_m) + list(settings.population.first_names_f)
     last_names = list(settings.population.last_names)
     contact_types = ["family", "friend", "colleague", "official"]
 

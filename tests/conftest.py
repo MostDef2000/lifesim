@@ -122,7 +122,8 @@ def default_settings():
         population={
             "min_age": 18,
             "max_age": 80,
-            "first_names": ["A"],
+            "first_names_m": ["A"],
+            "first_names_f": ["A"],
             "last_names": ["B"],
             "trait_keys": ["sociability"],
             "jobs": [

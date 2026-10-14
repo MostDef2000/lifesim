@@ -145,7 +145,10 @@ movement:
 population:
   min_age: 18
   max_age: 80
-  first_names: ["Ivan", "Anna", "Dmitry", "Elena", "Sergei", "Olga", "Alexei", "Maria", "Pavel", "Natalia"]
+  # #197: first names split by sex (generator draws sex first, then the
+  # name from the matching pool); every former first_names entry kept once.
+  first_names_m: ["Ivan", "Dmitry", "Sergei", "Alexei", "Pavel"]
+  first_names_f: ["Anna", "Elena", "Olga", "Maria", "Natalia"]
   last_names: ["Ivanov", "Petrov", "Sidorov", "Kuznetsov", "Popov", "Vasilyev", "Sokolov", "Mikhailov", "Novikov", "Fedorov"]
   trait_keys: ["sociability", "discipline", "risk_tolerance"]
   jobs:

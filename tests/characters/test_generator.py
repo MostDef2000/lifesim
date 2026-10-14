@@ -77,8 +77,11 @@ def test_generator_housing_capacity(session: Session, settings: Settings, world_
 def test_generator_full_name_uniqueness(session: Session, settings: Settings, world_id: str):
     """R3: unique full names — cross-product pairing, no duplicates at 20 NPCs."""
     # The default fixture ships a 1x1 name pool (['A'] x ['B']); give the
-    # pairing algorithm a realistic pool to collide against.
-    settings.population.first_names = [f"F{i}" for i in range(10)]
+    # pairing algorithm a realistic pool to collide against. #197: pools are
+    # split by sex — 10 distinct first names across the union (5 per pool),
+    # so 5 first x 5 last = 25 possible pairs still cover the 20 NPCs.
+    settings.population.first_names_m = [f"F{i}" for i in range(5)]
+    settings.population.first_names_f = [f"F{i}" for i in range(5, 10)]
     settings.population.last_names = [f"L{i}" for i in range(5)]
     rng = random.Random(42)
     generate_population(session, settings, rng, world_id, 20)
