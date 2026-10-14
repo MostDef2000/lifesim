@@ -190,7 +190,10 @@ class TestPromptBuilder:
             "characters": [{"id": "c1", "name": "Anna", "sex": "F", "age": 30}],
         }
         prompt = build_prompt(descriptor)
-        assert "adult fictional character" in prompt
+        # 019 Phase 1: the portrait prompt is composed from the canonical
+        # visual profile (guardrail phrase with the real age, sex as
+        # man/woman); pinned to the real new bytes.
+        assert "fictional adult woman character" in prompt
         assert "Anna" in prompt
 
 
