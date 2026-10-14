@@ -20,8 +20,8 @@ from app.inventory import create_object
 def generate_population(session: Session, settings, rng: random.Random, world_id: str, count: int):
     """
     Deterministic NPC creation.
-    - unique first+last names from config lists
-    - sex via rng
+    - unique full names from config pools (first names split by sex, #197)
+    - sex via rng, drawn before the name so the pool matches the sex
     - age via rng in [min_age..max_age], validated >= 18
     - traits: one row per config trait_key, value rng [-100, 100]
     - profile: templated biography (deterministic)
@@ -48,25 +48,31 @@ def generate_population(session: Session, settings, rng: random.Random, world_id
     if not jobs:
         raise ValueError("No jobs available in the world. Seed world first.")
 
-    # Pre-process name lists to ensure uniqueness if possible
-    first_names = settings.population.first_names
+    # Pre-process name pools (#197: first names are split by sex)
+    first_names_m = settings.population.first_names_m
+    first_names_f = settings.population.first_names_f
     last_names = settings.population.last_names
 
-    shuffled_first = list(first_names)
+    shuffled_first_m = list(first_names_m)
+    shuffled_first_f = list(first_names_f)
     shuffled_last = list(last_names)
-    rng.shuffle(shuffled_first)
+    rng.shuffle(shuffled_first_m)
+    rng.shuffle(shuffled_first_f)
     rng.shuffle(shuffled_last)
 
     for i in range(1, count + 1):
         npc_id = f"npc_{i:04d}"
 
-        # Names: distinct (first, last) pairs drawn from the cross-product
-        # so full names are unique for count <= len(first) * len(last).
+        # Sex first (#197): the first name must match the drawn sex.
+        sex = rng.choice(["M", "F"])
+
+        # Names: distinct (first, last) pairs drawn from the cross-product;
+        # full names are unique for count <= max(len(m_pool), len(f_pool))
+        # * len(last) (disjoint sex pools — #197).
+        # Index-based (no rng) — per-NPC rng order stays sex -> age -> traits.
+        shuffled_first = shuffled_first_m if sex == "M" else shuffled_first_f
         first = shuffled_first[i % len(shuffled_first)]
         last = shuffled_last[(i // len(shuffled_first)) % len(shuffled_last)]
-
-        # Sex
-        sex = rng.choice(["M", "F"])
 
         # Age
         min_age = settings.population.min_age

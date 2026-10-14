@@ -106,7 +106,12 @@ class MovementConfig(BaseModel):
 class PopulationConfig(BaseModel):
     min_age: int
     max_age: int
-    first_names: List[str]
+    # #197: first names are split by sex — the generator draws sex first,
+    # then picks the first name from the matching pool. The legacy single
+    # mixed `first_names` key is gone; pydantic ignores unknown extra keys,
+    # so an external config still carrying it loads (with both new pools set).
+    first_names_m: List[str]
+    first_names_f: List[str]
     last_names: List[str]
     trait_keys: List[str]
     jobs: List[Dict[str, Any]]

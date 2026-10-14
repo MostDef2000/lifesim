@@ -77,7 +77,9 @@ DECISION_ROLELESS_SHA = (
     "2f8b98d99f87303e1231560428fd390f1971f50db09feebd519b046690ae2483"
 )
 DIALOGUE_ROLELESS_SHA = (
-    "79148d3c114578fb174e726a2429dc31ef2077018f5e00563c34f2b413d95117"
+    # 2026-10-14: updated for #197 (gendered name pools) — the generated NPC
+    # name changed, the prompt STRUCTURE stays byte-pinned (asserted above).
+    "d7928f7003e9e87b563e0026e8f3b8af235e44fa361736cc642985915e32d5a7"
 )
 
 PW = "Correct-Horse-9!"
