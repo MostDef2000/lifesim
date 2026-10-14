@@ -163,10 +163,11 @@ def test_no_double_dispatch_navigation():
     # No `route();` on the same line as or within the 2 lines after a
     # `location.hash = "#/world";` assignment.
     assert _double_dispatch_hits(JS.split("\n")) == []
-    # POST-EDIT TRUE COUNT (grep-verified): 3 — viewWorld's plain
+    # POST-EDIT TRUE COUNT (grep-verified): 4 — +#69 viewPeople Find-on-map;
+        # original count 3 — viewWorld's plain
     # unconditional assignment, gotoWorld's else branch, and the substring
     # inside route()'s empty-hash normalization.
-    assert JS.count('location.hash = "#/world";') == 3
+    assert JS.count('location.hash = "#/world";') == 4
     # The gotoWorld helper exists exactly once…
     assert JS.count("function gotoWorld()") == 1
     # …with the same-fragment guard in its body. NOTE: the literal operand
@@ -220,7 +221,7 @@ def test_regression_byte_pins_of_b3_survive():
     # #173: viewShop joins the #93 retry pattern → 6 alpha-critical sites.
     # #175: viewExternal + viewAdmin drop their toast-only catches → 8
     # (#67: viewProfile adds its own retry via route()).
-    assert JS.count("loadRetryNode(loading, () => view") == 8
+    assert JS.count("loadRetryNode(loading, () => view") == 9
     # #170 F2: the desire interpret-preview failure path reuses the shared
     # hint constant (m158 keeps the const def + profile-save literal).
     assert JS.count("RETRY_HINT") == 4

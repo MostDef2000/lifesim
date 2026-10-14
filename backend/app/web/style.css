@@ -1729,6 +1729,114 @@ button.danger:hover { background: #93301f; }
   .profile-shell { grid-template-columns: 1fr; }
 }
 
+/* ---------- issue #69: people screen ----------
+   #/people renders outside .world-shell, so the cool :root tokens would
+   leak in; mirror the warm custom properties (same values as
+   .profile-shell/.desire-shell/.shop-shell). Same deliberate deviation:
+   NO --w-line definition here — the pinned token count stays 4, and the
+   :root fallback (#172) carries the IDENTICAL value, so var(--w-line)
+   resolves to the same color inside .people-shell. Layout per the #69
+   reference: hero portrait of the selected person on the left (spans both
+   rows), the detail card (meters) and «Как мир тебя видит» stacked on the
+   right, the horizontal people strip full-width below; ≤1100px collapses
+   to one column (profile-shell precedent). Relationship meters are SIGNED
+   (-100..100): the fill grows from the center tick — accent rightward for
+   positive, muted hostile red leftward for negative. */
+.people-shell {
+  --w-bg: #0a1016;
+  --w-panel: rgba(23, 33, 42, 0.72);
+  --w-panel-deep: rgba(12, 19, 25, 0.6);
+  --w-text: #dde5ec;
+  --w-dim: #8fa1b1;
+  --w-accent: #e2b45a;
+  --w-warm: rgba(226, 180, 90, 0.15);
+  --w-warm-line: rgba(226, 180, 90, 0.4);
+  --w-warm-ink: #1d1506;
+  /* #69: hostile red mirror — the token is chat-shell-scoped (line ~1376),
+     without this mirror var(--w-rel-hostile) resolves to transparent here. */
+  --w-rel-hostile: #e07070;
+  display: grid;
+  gap: 14px;
+  align-items: start;
+}
+.people-shell .panel {
+  background: var(--w-panel);
+  border-color: var(--w-line);
+  border-radius: 14px;
+  backdrop-filter: blur(10px);
+  box-shadow: 0 12px 30px rgba(2, 8, 14, 0.35);
+}
+.people-shell .muted { color: var(--w-dim); }
+.people-shell h2 { color: var(--w-dim); }
+.people-shell button:hover { border-color: var(--w-accent); }
+.people-shell .people-card:hover { border-color: var(--w-accent); }
+
+.people-main {
+  display: grid;
+  grid-template-columns: minmax(0, 1.1fr) minmax(0, 1fr);
+  gap: 14px;
+  align-items: start;
+}
+.people-hero {
+  grid-row: span 2;
+  padding: 0;
+  overflow: hidden;
+  background:
+    radial-gradient(640px 240px at 18% 0%, rgba(226, 180, 90, 0.10), transparent 62%),
+    linear-gradient(180deg, rgba(23, 33, 42, 0.55), var(--w-panel-deep));
+}
+.people-portrait { min-height: 220px; display: grid; align-content: center; }
+.people-portrait .portrait-img {
+  width: 100%;
+  display: block;
+  object-fit: cover;
+  aspect-ratio: 3 / 4;
+}
+.people-portrait .portrait-status { padding: 14px; text-align: center; }
+.people-identity { padding: 12px 16px 16px; }
+.people-name { font-size: 24px; font-weight: 700; line-height: 1.2; }
+.people-status { margin-top: 2px; font-size: 13px; }
+.people-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
+
+.people-meters { display: grid; gap: 10px; margin-top: 6px; }
+.people-track { position: relative; }
+/* Signed meters must beat the global `.need .bar > div` (0,2,1) fill color:
+   shell-scoped overrides (0,3,1), same pattern as .profile-shell. */
+.people-shell .need .bar > .people-mid {
+  position: absolute; left: 50%; top: 0; bottom: 0; width: 2px;
+  transform: translateX(-1px); background: var(--w-line); z-index: 1;
+}
+.people-shell .need .bar > .people-fill {
+  position: absolute; top: 0; bottom: 0;
+  background: var(--w-accent);
+}
+.people-shell .need .bar > .people-fill.neg { background: var(--w-rel-hostile); }
+.people-shell .need .row span:last-child { color: var(--w-text); }
+
+.people-rep-list { display: grid; gap: 8px; }
+.people-rep-role { display: grid; gap: 2px; }
+.people-rep-title { font-weight: 600; }
+.people-rep-reason { font-size: 12px; }
+
+.people-strip {
+  display: flex; gap: 10px; overflow-x: auto; padding-bottom: 4px;
+}
+.people-card {
+  min-width: 150px; text-align: left; display: grid; gap: 6px;
+  align-content: start; padding: 10px 12px; border-radius: 10px;
+}
+.people-card.sel { border-color: var(--w-accent); color: var(--w-text); }
+.people-card-name { font-weight: 600; }
+.people-card-status { font-size: 12px; }
+.people-warmth { height: 6px; position: relative; margin-top: 2px; }
+.people-shell .people-warmth > div { background: var(--w-accent); }
+.people-shell .people-warmth > div.neg { background: var(--w-rel-hostile); }
+
+@media (max-width: 1100px) {
+  .people-main { grid-template-columns: 1fr; }
+  .people-hero { grid-row: auto; }
+}
+
 /* #175: connection banner — persistent offline signal driven by consecutive
    pollEvents failures (WS close is routine on navigation, never drives it).
    Warm-warn family on the dark panel bg; fixed top-center, below nothing —

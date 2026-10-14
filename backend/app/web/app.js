@@ -122,6 +122,7 @@ function dayTime(ts) {
 
 const routes = {
   "#/login": viewAuth, "#/world": viewWorld, "#/chat": viewChat,
+  "#/people": viewPeople,
   "#/inventory": viewInventory, "#/shop": viewShop, "#/tasks": viewTasks, "#/desire": viewDesire,
   "#/profile": viewProfile, "#/admin": viewAdmin, "#/external": viewExternal,
 };
@@ -629,8 +630,9 @@ function weatherLabel() {
 }
 
 function topbar(active) {
-  const tabs = [["#/world", "Мир"], ["#/chat", "Чат"], ["#/inventory", "Инвентарь"],
-    ["#/shop", "Рынок"], ["#/tasks", "Дела"], ["#/desire", "Цель"], ["#/profile", "Профиль"]];
+  const tabs = [["#/world", "Мир"], ["#/chat", "Чат"], ["#/people", "Люди"],
+    ["#/inventory", "Инвентарь"], ["#/shop", "Рынок"], ["#/tasks", "Дела"],
+    ["#/desire", "Цель"], ["#/profile", "Профиль"]];
   if (["admin", "developer", "moderator"].includes(S.user.role)) {
     tabs.push(["#/admin", "Админ"]);
   }
@@ -2976,6 +2978,215 @@ function renderProfile(modeSel) {
 
   app.replaceChildren(topbar("#/profile"),
     el("div", { class: "grid profile-shell" }, hero, side));
+}
+
+/* ---------- #69: people screen (relationships UI) ---------- */
+
+// #69: deterministic people-card status from the two authoritative signed
+// scalars (Relationship columns are -100..100 per the db CheckConstraints;
+// no invented data — only trust/affection drive the line). Mapping, kept
+// deliberately simple and documented here for the stranger:
+//   trust < 0 OR affection < 0 → «Напряжённые»  (any negative signal wins —
+//                                                 a hostile pair is not a friend)
+//   affection >= 25            → «Друг»         (v1 cut: midpoint of the chat
+//                                                 relationship widget's warm band)
+//   otherwise                  → «Знакомый»     (neutral; also the fallback for
+//                                                 missing/NaN scalars)
+function peopleStatus(rel) {
+  const a = Number(rel && rel.affection);
+  const t = Number(rel && rel.trust);
+  if ((Number.isFinite(t) && t < 0) || (Number.isFinite(a) && a < 0)) {
+    return "Напряжённые";
+  }
+  return Number.isFinite(a) && a >= 25 ? "Друг" : "Знакомый";
+}
+
+// #69: relationship meters are SIGNED (-100..100), so each bar maps the
+// value around a neutral center tick: positive fills rightward from the
+// midpoint, negative leftward (a clamp-to-≥0 mapping was rejected — it would
+// render hostility as a calm zero). The displayed number keeps its sign.
+function peopleMeter(label, v) {
+  const num = Number(v);
+  const ok = Number.isFinite(num);
+  const val = ok ? Math.max(-100, Math.min(100, num)) : 0;
+  const half = Math.round(Math.abs(val) / 2);
+  return el("div", { class: "need people-meter" },
+    el("div", { class: "row" },
+      el("span", {}, label),
+      el("span", {}, ok ? String(Math.round(num)) : "—")),
+    el("div", { class: "bar people-track" },
+      el("div", { class: "people-mid" }),
+      el("div", {
+        class: "people-fill" + (val < 0 ? " neg" : ""),
+        style: `width:${ok ? half : 0}%;left:${val < 0 ? 50 - half : 50}%`,
+      })));
+}
+
+async function viewPeople() {
+  location.hash = "#/people";
+  const loading = el("div", { class: "muted" }, "Загрузка…");
+  app.replaceChildren(topbar("#/people"), loading);
+  try {
+    // Cold-load safety (the shared route-view pattern): #/people can be the
+    // first route after reload — the by-user hydration omits location_id,
+    // so read the authoritative character first, exactly like the siblings.
+    if (S.character.location_id == null) {
+      const me = await api(`/characters/${S.character.id}`);
+      S.character = { ...S.character, ...me };
+    }
+    const cid = S.character.id;
+    const rels = await api(`/characters/${cid}/relationships`);
+    renderPeople(cid, rels);
+  } catch (e) {
+    // #93: transient failure — explicit retry instead of a dead «Загрузка…».
+    loadRetryNode(loading, () => viewPeople());
+    toast(e.message, true);
+  }
+}
+
+function renderPeople(cid, rels) {
+  // Names: the relationships response already carries other_name (joined
+  // from Character rows server-side). The contacts endpoint is the EXTERNAL
+  // services roster, not island people — no second name source to merge.
+  const people = rels.map((r) => ({
+    id: r.other_id, name: r.other_name || r.other_id, rel: r,
+  }));
+  if (!people.length) {
+    app.replaceChildren(topbar("#/people"),
+      el("div", { class: "grid people-shell" },
+        el("div", { class: "panel people-empty" },
+          el("div", { class: "muted" }, "Пока никого. Начни диалог на острове."),
+          el("a", { href: "#/world" }, "К карте острова"))));
+    return;
+  }
+  // Selection persists across re-entries; default to the first person.
+  if (!people.some((p) => p.id === S.peopleSelId)) {
+    S.peopleSelId = people[0].id;
+  }
+
+  const heroName = el("div", { class: "people-name" }, "—");
+  const heroStatus = el("div", { class: "muted people-status" }, "");
+  const heroPortrait = el("div", { class: "people-portrait" });
+  const actions = el("div", { class: "people-actions" });
+  const metersBox = el("div", { class: "people-meters" });
+
+  // «Как мир тебя видит» — the player's OWN public roles (title + reason
+  // from the derive-on-read roles endpoint): honest public facts only,
+  // no invented reputation score. One per-panel fetch, .catch → «недоступно».
+  const repList = el("div", { class: "people-rep-list muted" }, "…");
+  api(`/characters/${cid}/roles`).then((r) => {
+    const roles = r.roles || [];
+    repList.classList.remove("muted");
+    repList.replaceChildren(...(roles.length
+      ? roles.map((x) => el("div", { class: "people-rep-role" },
+          el("span", { class: "people-rep-title" }, x.title || x.id || "—"),
+          x.reason
+            ? el("span", { class: "muted people-rep-reason" }, x.reason) : null))
+      : [el("span", { class: "muted" }, "Пока без заметных ролей")]));
+  }).catch(() => {
+    repList.classList.remove("muted");
+    repList.replaceChildren(el("span", { class: "muted" }, "недоступно"));
+  });
+
+  // Bottom strip: one card per relationship; the small warmth bar maps
+  // affection around the center tick (same signed semantics as the meters,
+  // warm fill in the shell scope).
+  const cards = people.map((p) => {
+    const warmth = Number(p.rel && p.rel.affection);
+    const ok = Number.isFinite(warmth);
+    const val = ok ? Math.max(-100, Math.min(100, warmth)) : 0;
+    const half = Math.round(Math.abs(val) / 2);
+    return {
+      id: p.id,
+      node: el("button", {
+        class: "people-card",
+        onclick: () => { S.peopleSelId = p.id; draw(); mark(); },
+      },
+        el("span", { class: "people-card-name" }, p.name),
+        el("span", { class: "muted people-card-status" }, peopleStatus(p.rel)),
+        el("div", { class: "bar people-warmth" },
+          el("div", {
+            class: "people-fill" + (val < 0 ? " neg" : ""),
+            style: `width:${ok ? half : 0}%;left:${val < 0 ? 50 - half : 50}%`,
+          }))),
+    };
+  });
+  function mark() {
+    for (const c of cards) {
+      c.node.classList.toggle("sel", c.id === S.peopleSelId);
+    }
+  }
+
+  function draw() {
+    const sel = people.find((p) => p.id === S.peopleSelId) || people[0];
+    heroName.textContent = sel.name;
+    heroStatus.textContent = peopleStatus(sel.rel);
+    actions.replaceChildren(
+      el("button", { onclick: () => {
+        // Hand the person to the chat screen through its OWN persisted
+        // selection mechanism: the chat view restores S.chatNpcId whenever
+        // the id is among the NPCs at the player's location; otherwise chat
+        // opens normally on its default target (no partner-param endpoint
+        // exists in v1 — noted in issue #69).
+        S.chatNpcId = sel.id;
+        location.hash = "#/chat";
+      } }, "Поговорить"),
+      el("button", { onclick: () => { location.hash = "#/world"; } },
+        "Найти на карте"));
+    metersBox.replaceChildren(
+      peopleMeter("Доверие", sel.rel.trust),
+      peopleMeter("Симпатия", sel.rel.affection),
+      peopleMeter("Романтика", sel.rel.romantic_interest),
+      peopleMeter("Уважение", sel.rel.respect));
+    // Portrait: the canonical-asset → file-blob two-step is composed right
+    // here (the shared blob-fetch helper's call-site count is pinned, so
+    // this view builds its own <img>) with the distinct fallback string.
+    heroPortrait.replaceChildren(
+      el("div", { class: "portrait-status muted" }, "Портрет…"));
+    const visualOn = !S.visualDisabled;
+    if (visualOn) {
+      const want = sel.id;
+      (async () => {
+        try {
+          const asset = await api(`/visual/characters/${sel.id}/portrait`);
+          const file = await fetch(`/visual/assets/${asset.id}/file`,
+            { credentials: "same-origin" });
+          if (!file.ok) throw new Error(`HTTP ${file.status}`);
+          const url = URL.createObjectURL(await file.blob());
+          if (S.peopleSelId !== want) return;  // selection moved on mid-flight
+          heroPortrait.replaceChildren(el("img", {
+            class: "portrait-img", src: url, alt: "Портрет",
+          }));
+        } catch (e) {
+          if (S.peopleSelId !== want) return;
+          heroPortrait.replaceChildren(el("div", { class: "portrait-status muted" },
+            "Портрет недоступен"));
+        }
+      })();
+    } else {
+      heroPortrait.replaceChildren(el("div", { class: "portrait-status muted" },
+        "Портрет недоступен"));
+    }
+  }
+
+  draw();
+  mark();
+
+  app.replaceChildren(topbar("#/people"),
+    el("div", { class: "grid people-shell" },
+      el("div", { class: "people-main" },
+        el("section", { class: "panel people-hero" },
+          heroPortrait,
+          el("div", { class: "people-identity" }, heroName, heroStatus, actions)),
+        el("section", { class: "panel people-detail" },
+          el("h2", {}, "Отношения"),
+          metersBox),
+        el("section", { class: "panel people-rep" },
+          el("h2", {}, "Как мир тебя видит"),
+          repList)),
+      el("section", { class: "panel people-strip-panel" },
+        el("h2", {}, "Круг общения"),
+        el("div", { class: "people-strip" }, ...cards.map((c) => c.node)))));
 }
 
 /* ---------- admin (§83-86) ---------- */

@@ -72,12 +72,12 @@ def test_load_retry_sites_9_external_and_admin():
     # alpha-critical sites: viewExternal (site #7) and viewAdmin (site #8)
     # replaced their toast-only catches — a transient fetch failure now
     # explains itself and offers «Повторить» instead of a dead «Загрузка…».
-    assert js.count("loadRetryNode(loading, () => view") == 8
+    assert js.count("loadRetryNode(loading, () => view") == 9
     assert js.count("loadRetryNode(loading, () => viewExternal());") == 1
     assert js.count("loadRetryNode(loading, () => viewAdmin());") == 1
     # Both views keep a named loading node in scope for the retry rewrite;
     # 9 views carry the pattern (6 pre-#175 + 2 from #175 + profile from #67).
-    assert js.count("const loading = el(\"div\", { class: \"muted\" }, \"Загрузка…\");") == 9
+    assert js.count("const loading = el(\"div\", { class: \"muted\" }, \"Загрузка…\");") == 10
 
 
 # ---------- B: connection banner (poll failures are the liveness oracle) ----------
@@ -214,7 +214,7 @@ def test_hygiene_and_neighbour_pins_untouched():
     assert js.count("S.visualDisabled = true") == 1
     assert js.count("S.visualDisabled = false") == 1
     # m162 WS/navigation hard pins survive the #175 edits.
-    assert js.count('location.hash = "#/world";') == 3
+    assert js.count('location.hash = "#/world";') == 4
     assert js.count("gotoWorld();") == 4
     assert js.count("S.ws = null;") <= 2
     assert js.count("if (S.ws === ws) S.ws = null;") == 1

@@ -721,6 +721,10 @@ def create_app(settings, session_factory: sessionmaker):
                 "other_name": other_name,
                 "trust": r.trust, "affection": r.affection, "familiarity": r.familiarity,
                 "romantic_interest": r.romantic_interest, "updated_at": r.updated_at,
+                # #69 (additive read, same pattern as #67): the Relationship
+                # model already carries respect — expose it for the people
+                # screen's «Уважение» meter. No other keys touched.
+                "respect": r.respect,
             })
         return out
 

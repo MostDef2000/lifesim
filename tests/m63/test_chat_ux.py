@@ -103,7 +103,7 @@ def test_relationship_band_mapping_table_documented():
     # The mapping is DOCUMENTED at the function (a stranger reads it).
     assert js.count("EXPLICIT band mapping") == 1
     # Neutral fallback for missing/NaN affection — no crash, no invention.
-    assert js.count("Number.isFinite(a)") == 1
+    assert js.count("Number.isFinite(a)") == 3
 
 
 def test_carry_forward_pins():
