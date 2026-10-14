@@ -51,6 +51,9 @@ from app.db.models import (  # noqa: E402
 )
 from app.desire.desire import interpret_desire  # noqa: E402
 from app.desire.llm_interpret import (  # noqa: E402
+    DESIRE_CACHE_MAX,
+    DESIRE_CACHE_TTL_SEC,
+    clear_desire_interpretation_cache,
     llm_interpret_desire,
     resolve_desire_interpretation,
 )
@@ -415,3 +418,195 @@ def test_real_stub_transport_end_to_end(world_llm):
         rows = s.query(CharacterDesire).filter_by(character_id=cid).all()
         assert len(rows) == 1 and rows[0].status == "active"
         assert rows[0].catalog_key == "relationship"
+
+
+# ---------- 3. #189 — in-process interpretation cache ----------
+#
+# Preview → create must not pay for TWO LLM round-trips on the same text
+# (prod reality: home-PC ollama over a tunnel, ~90s/call). The cache lives
+# in app.desire.llm_interpret: TTL 600s, cap 128, sha256 of the normalized
+# (case/whitespace-insensitive) text, only USABLE LLM results cached,
+# llm-off bypasses it entirely, hits return shallow copies.
+
+@pytest.fixture(autouse=True)
+def _clean_desire_cache():
+    """#189: the module-level cache must never leak between tests.
+
+    Autouse on purpose — it also guards the pre-#189 tests above: every
+    test in this module starts with an empty interpretation cache.
+    """
+    clear_desire_interpretation_cache()
+    yield
+
+
+class _CountingTransport:
+    """Fake transport returning the SAME valid reply on every complete()
+    and counting the calls (the cache must collapse duplicate resolves)."""
+
+    def __init__(self, reply):
+        self.reply = reply
+        self.calls = 0
+        self.purposes = []
+
+    def complete(self, prompt, purpose):
+        self.calls += 1
+        self.purposes.append(purpose)
+        return self.reply
+
+
+def test_cache_hit_same_text_one_transport_call(monkeypatch):
+    """Same text (different case/whitespace) resolved twice → the transport
+    is called exactly ONCE, both results identical; a hit returns a shallow
+    copy (mutating a returned dict cannot poison the cache)."""
+    reply = json.dumps({
+        "catalog_key": "relationship", "confidence_note": "о близости",
+    })
+    transport = _patch_transport(monkeypatch, _CountingTransport(reply))
+    first = resolve_desire_interpretation("ХОЧУ   найти друзей ", _llm_on())
+    second = resolve_desire_interpretation("хочу найти ДРУЗЕЙ", _llm_on())
+    assert transport.calls == 1  # second resolve came from the cache
+    assert transport.purposes == ["desire"]
+    assert first == second
+    assert first["interpreted_by"] == "llm"
+    first["catalog_key"] = "business"  # mutate the returned SHALLOW COPY
+    third = resolve_desire_interpretation("хочу найти друзей", _llm_on())
+    assert third["catalog_key"] == "relationship"  # cache entry unharmed
+
+
+def test_cache_different_text_two_transport_calls(monkeypatch):
+    """Distinct texts are distinct keys: two complete() calls."""
+    reply = json.dumps({"catalog_key": "quiet_life", "confidence_note": "о покое"})
+    transport = _patch_transport(monkeypatch, _CountingTransport(reply))
+    resolve_desire_interpretation("хочу найти друзей", _llm_on())
+    resolve_desire_interpretation("хочу тишины и покоя", _llm_on())
+    assert transport.calls == 2
+    assert transport.purposes == ["desire", "desire"]
+
+
+def test_disabled_bypasses_cache(monkeypatch):
+    """llm.enabled=false does not read and does not write the cache: after
+    an llm-on resolve of T, an llm-off resolve of T returns the
+    deterministic result and the transport is still at exactly 1 call
+    (llm-off behavior byte-identical to pre-#189, m157 pins intact)."""
+    reply = json.dumps({"catalog_key": "business", "confidence_note": "о деле"})
+    transport = _patch_transport(monkeypatch, _CountingTransport(reply))
+    text = "хочу найти друзей"
+    llm_result = resolve_desire_interpretation(text, _llm_on())
+    assert llm_result["interpreted_by"] == "llm"
+    off_result = resolve_desire_interpretation(text, _llm_off())
+    assert off_result == interpret_desire(text)  # deterministic, NOT the cached dict
+    assert "interpreted_by" not in off_result
+    assert transport.calls == 1  # llm-off resolve never touched the transport
+
+
+def test_none_failure_not_cached(monkeypatch):
+    """A garbage reply (LLM failure → None) is NEVER cached: the second
+    resolve retries the transport, both answers are the deterministic
+    fallback."""
+    transport = _patch_transport(
+        monkeypatch, _CountingTransport("not json at all"))
+    text = "хочу найти друзей"
+    deterministic = interpret_desire(text)
+    first = resolve_desire_interpretation(text, _llm_on())
+    second = resolve_desire_interpretation(text, _llm_on())
+    assert transport.calls == 2  # retried: failures are never cached
+    assert first == deterministic
+    assert second == deterministic
+    assert "interpreted_by" not in first and "interpreted_by" not in second
+
+
+def test_e2e_preview_then_create_single_llm_call(monkeypatch, world_llm):
+    """#189 keystone, full TestClient: POST interpret + POST desire with the
+    SAME text cost exactly ONE transport call; the desire is created 201
+    with the honest interpreted_by "llm" marker; the one-active-desire
+    replace flow is unaffected."""
+    _settings, _app, client, factory, cid, _engine = world_llm
+    reply = json.dumps({
+        "catalog_key": "relationship", "confidence_note": "о близости",
+    })
+    transport = _patch_transport(monkeypatch, _CountingTransport(reply))
+    text = "мечтаю о душевной близости"
+    p = client.post(f"/characters/{cid}/desire/interpret", json={"text": text})
+    assert p.status_code == 200, p.text
+    assert p.json()["interpretation"]["interpreted_by"] == "llm"
+    r = client.post(f"/characters/{cid}/desire", json={"text": text})
+    assert r.status_code == 201, r.text
+    first = r.json()["desire"]
+    assert r.json()["interpretation"]["interpreted_by"] == "llm"
+    assert transport.calls == 1  # create reused the preview's interpretation
+    with factory() as s:
+        rows = s.query(CharacterDesire).filter_by(character_id=cid).all()
+        assert len(rows) == 1 and rows[0].status == "active"
+        stored = rows[0].interpretation
+        if isinstance(stored, str):
+            stored = json.loads(stored)
+        assert stored["interpreted_by"] == "llm"
+    # replace flow unaffected: a different text is a fresh resolve (call 2)
+    # and still replaces the previous active desire (m157 scenario intact)
+    r2 = client.post(f"/characters/{cid}/desire", json={"text": "хочу своё дело"})
+    assert r2.status_code == 201, r2.text
+    second = r2.json()["desire"]
+    assert transport.calls == 2
+    with factory() as s:
+        rows = (s.query(CharacterDesire).filter_by(character_id=cid)
+                .order_by(CharacterDesire.id).all())
+        actives = [x for x in rows if x.status == "active"]
+        replaced = [x for x in rows if x.status == "replaced"]
+        assert len(actives) == 1 and actives[0].id == second["id"]
+        assert len(replaced) == 1 and replaced[0].id == first["id"]
+        assert replaced[0].replaced_by == actives[0].id
+
+
+def test_ttl_expiry_recalls_transport(monkeypatch):
+    """Past DESIRE_CACHE_TTL_SEC the entry is stale: the next resolve calls
+    the transport again. time.monotonic is monkeypatched (the module calls
+    it as time.monotonic(), so the patch applies)."""
+    import app.desire.llm_interpret as llm_module
+
+    reply = json.dumps({"catalog_key": "quiet_life", "confidence_note": "о покое"})
+    transport = _patch_transport(monkeypatch, _CountingTransport(reply))
+    clock = {"now": 1000.0}
+    monkeypatch.setattr(llm_module.time, "monotonic", lambda: clock["now"])
+    text = "хочу найти друзей"
+    resolve_desire_interpretation(text, _llm_on())
+    assert transport.calls == 1
+    resolve_desire_interpretation(text, _llm_on())
+    assert transport.calls == 1  # fresh entry: cache hit
+    clock["now"] += DESIRE_CACHE_TTL_SEC + 1  # advance past the TTL
+    resolve_desire_interpretation(text, _llm_on())
+    assert transport.calls == 2  # expired: transport re-called
+
+
+def test_ttl_boundary_exactly_ttl_is_expired(monkeypatch):
+    """TTL boundary: advancing the clock by EXACTLY DESIRE_CACHE_TTL_SEC
+    (age == TTL, not age > TTL) already counts as expired — the next
+    resolve calls the transport again."""
+    import app.desire.llm_interpret as llm_module
+
+    reply = json.dumps({"catalog_key": "quiet_life", "confidence_note": "о покое"})
+    transport = _patch_transport(monkeypatch, _CountingTransport(reply))
+    clock = {"now": 1000.0}
+    monkeypatch.setattr(llm_module.time, "monotonic", lambda: clock["now"])
+    text = "хочу найти друзей"
+    resolve_desire_interpretation(text, _llm_on())
+    assert transport.calls == 1
+    clock["now"] += DESIRE_CACHE_TTL_SEC  # exactly the TTL — no epsilon
+    resolve_desire_interpretation(text, _llm_on())
+    assert transport.calls == 2  # boundary: entry treated as expired
+
+
+def test_cap_evicts_oldest_entry(monkeypatch):
+    """Over DESIRE_CACHE_MAX the OLDEST entry is evicted: re-resolving it
+    triggers a fresh transport call, while the most recent entry still hits."""
+    reply = json.dumps({"catalog_key": "business", "confidence_note": "о деле"})
+    transport = _patch_transport(monkeypatch, _CountingTransport(reply))
+    texts = [f"желание номер {i}" for i in range(DESIRE_CACHE_MAX + 1)]
+    for text in texts:
+        resolve_desire_interpretation(text, _llm_on())
+    assert transport.calls == DESIRE_CACHE_MAX + 1
+    # the most recent entry survived the eviction
+    resolve_desire_interpretation(texts[-1], _llm_on())
+    assert transport.calls == DESIRE_CACHE_MAX + 1
+    # the oldest was evicted: a new transport call proves the miss
+    resolve_desire_interpretation(texts[0], _llm_on())
+    assert transport.calls == DESIRE_CACHE_MAX + 2
