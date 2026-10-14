@@ -2671,8 +2671,10 @@ function renderDesire(desire, opps, preview) {
 }
 
 /* #90: long-term Desire — one active desire, replace/abandon here. Kept
-   strictly separate from the short-term CharacterGoal shown on #/tasks. */
-function profileDesireBlock() {
+   strictly separate from the short-term CharacterGoal shown on #/tasks.
+   #67: optional extraDesireNode (the «Текущая ситуация» row value) is
+   filled by the same refresh() — one shared fetch for the whole screen. */
+function profileDesireBlock(extraDesireNode) {
   const line = el("div", { class: "muted", id: "profile-desire" }, "Желание: …");
   const status = el("div", { class: "muted" });
   const input = el("input", {
@@ -2682,10 +2684,20 @@ function profileDesireBlock() {
   function refresh() {
     api(`/characters/${S.character.id}/desire`).then((r) => {
       const d = r.desire;
+      // #67: the «Текущая ситуация» row mirrors the same authoritative read
+      // through THIS shared fetch — m157 pins the bare-desire literal at
+      // exactly five sites, so the profile never re-fetches the desire.
+      if (extraDesireNode) {
+        extraDesireNode.textContent = d && d.source_text ? d.source_text : "Не задано";
+        extraDesireNode.classList.remove("muted");
+      }
       if (!d) { line.textContent = "Желание: не задано"; return; }
       const cat = (d.interpretation && d.interpretation.title_ru) || d.catalog_key || "—";
       line.textContent = "Желание: " + d.source_text + " / каталог: " + cat;
-    }).catch(() => { line.textContent = "Желание: недоступно"; });
+    }).catch(() => {
+      line.textContent = "Желание: недоступно";
+      if (extraDesireNode) extraDesireNode.textContent = "недоступно";
+    });
   }
   const saveBtn = el("button", {
     onclick: async () => {
@@ -2735,7 +2747,15 @@ function profileDesireBlock() {
     status);
 }
 
-/* ---------- profile (§77) ---------- */
+/* ---------- profile (§77; #67 increment 1 — read-model hero + cards) ---------- */
+
+/* #67: trait chips are read-only display labels; the authoritative keys are
+   the configured trait_keys (sociability/discipline/risk_tolerance). */
+const PROFILE_TRAIT_LABELS = {
+  sociability: "Общительность",
+  discipline: "Дисциплина",
+  risk_tolerance: "Склонность к риску",
+};
 
 async function viewProfile() {
   // #128: route() falls through to #/profile with S.character null (the
@@ -2747,60 +2767,215 @@ async function viewProfile() {
     el("option", { value: "DIRECT" }, "DIRECT (вы командуете)"),
     el("option", { value: "GUIDED" }, "GUIDED (цели)"));
   modeSel.value = S.character.control_mode || "AUTONOMOUS";
-  app.replaceChildren(topbar("#/profile"),
-    el("div", { class: "grid" },
-      el("div", { class: "panel" },
-        el("h2", {}, "Аккаунт"),
-        el("div", {}, S.user.username),
-        el("div", { class: "muted" }, `${S.user.email} · роль: ${S.user.role}`),
-        // #89 profile hook: public roles from the authoritative read model.
-        (() => {
-          const rolesLine = el("div", { class: "muted profile-roles" }, "Роли: …");
-          api(`/characters/${S.character.id}/roles`).then((r) => {
-            const rolesText = (r.roles || []).map((x) => x.title).join(", ");
-            rolesLine.textContent = "Роли: " + (rolesText || "нет");
-          }).catch(() => { rolesLine.textContent = "Роли: недоступны"; });
-          return rolesLine;
-        })(),
-        profileDesireBlock(),
-        el("div", { style: "margin-top:8px" },
-          el("button", { onclick: async () => {
-            await api("/auth/logout", { method: "POST", body: {} });
+  const loading = el("div", { class: "muted" }, "Загрузка…");
+  app.replaceChildren(topbar("#/profile"), loading);
+  try {
+    // Cold-load safety (same pattern as the other views): #/profile can be
+    // the first route after reload — the by-user hydration omits location_id
+    // and the owner status rows, so read the authoritative character first;
+    // the merge carries looks/biography/traits/health (#67 read model).
+    // Same null-check shape as the other cold-load sites (#67).
+    if (S.character.location_id == null) {
+      const me = await api(`/characters/${S.character.id}`);
+      S.character = { ...S.character, ...me };
+    }
+    renderProfile(modeSel);
+  } catch (e) {
+    // #93: transient failure — explicit retry; the retry re-dispatches
+    // the current hash via route().
+    loadRetryNode(loading, () => route());
+    toast(e.message, true);
+  }
+}
+
+function renderProfile(modeSel) {
+  const ch = S.character;
+
+  /* #67 fixed decision: the hero embeds the shared portrait block builder
+     verbatim (zero new portrait call sites); .profile-shell CSS restyles it
+     full-bleed. The gate is a read-only copy of the visual-off flag. */
+  const visualOn = !S.visualDisabled;
+
+  // hero identity chips — async ones start muted and fill in place.
+  const locChipV = el("span", { class: "profile-chip-v muted" }, "…");
+  const jobChipV = el("span", { class: "profile-chip-v" }, ch.job ? String(ch.job) : "—");
+  const partnerChipV = el("span", { class: "profile-chip-v muted" }, "…");
+  const locChip = el("span", { class: "profile-chip" },
+    el("span", { class: "profile-chip-k" }, "Локация"), locChipV);
+  const jobChip = el("span", { class: "profile-chip" },
+    el("span", { class: "profile-chip-k" }, "Работа"), jobChipV);
+  const partnerChip = el("span", { class: "profile-chip" },
+    el("span", { class: "profile-chip-k" }, "Партнёр"), partnerChipV);
+
+  // «Текущая ситуация» values — the muted sub-panel pattern (placeholder →
+  // fill, .catch → «недоступно»), same as the roles line below.
+  const locValue = el("span", { class: "muted" }, "…");
+  const jobValue = el("span", {}, ch.job ? String(ch.job) : "—");
+  const partnerValue = el("span", { class: "muted" }, "…");
+  const desireValue = el("span", { class: "muted" }, "…");
+
+  const sexLabel = ch.sex === "F" ? "жен"
+    : ch.sex === "M" ? "муж" : String(ch.sex || "—");
+  const hero = el("section", { class: "panel profile-hero" },
+    portraitBlock(),
+    visualOn ? null
+      : el("div", { class: "muted profile-visual-note" },
+        "Визуал недоступен, показываю профиль"),
+    el("div", { class: "profile-identity" },
+      el("div", { class: "profile-name" }, ch.name || "—"),
+      el("div", { class: "muted profile-sub" },
+        `${ch.age ?? "—"} лет | пол: ${sexLabel}`),
+      el("div", { class: "profile-chips" }, locChip, jobChip, partnerChip)));
+
+  // Локация chip + situation row share one sub-panel fetch.
+  (() => {
+    api(`/locations/${S.character.location_id}`).then((loc) => {
+      const name = loc && loc.name ? String(loc.name) : "—";
+      locChipV.textContent = name;
+      locChipV.classList.remove("muted");
+      locValue.textContent = name;
+      locValue.classList.remove("muted");
+    }).catch(() => {
+      locChipV.textContent = "недоступно";
+      locValue.textContent = "недоступно";
+    });
+  })();
+
+  // Роли: ONE fetch feeding the pinned summary line, the partner chip/row
+  // and the detail list (m63/m156 pin the roles literal at exactly one call
+  // site — the redesigned card reuses it, never re-fetches).
+  const rolesList = el("div", { class: "profile-rolelist muted" }, "…");
+  const rolesBlock = (() => {
+    const rolesLine = el("div", { class: "muted profile-roles" }, "Роли: …");
+    api(`/characters/${S.character.id}/roles`).then((r) => {
+      const rolesText = (r.roles || []).map((x) => x.title).join(", ");
+      rolesLine.textContent = "Роли: " + (rolesText || "нет");
+      const roles = r.roles || [];
+      // #182: the authoritative partnership role carries id "partner"
+      // (roles.py _partner_role); the title match is the robustness
+      // fallback for future catalog renames.
+      const partner = roles.find((x) => x.id === "partner")
+        || roles.find((x) => String(x.title || "").toLowerCase().includes("партнёр"));
+      partnerChipV.textContent = partner ? String(partner.title) : "Нет";
+      partnerChipV.classList.remove("muted");
+      partnerValue.textContent = partner ? String(partner.title) : "Нет";
+      partnerValue.classList.remove("muted");
+      rolesList.classList.remove("muted");
+      rolesList.replaceChildren(...(roles.length ? roles.map((x) =>
+        el("div", { class: "profile-role" },
+          el("span", { class: "profile-role-title" }, x.title || x.id || "—"),
+          x.reason ? el("span", { class: "muted profile-role-reason" }, x.reason) : null))
+        : [el("span", { class: "muted" }, "Ролей нет")]));
+    }).catch(() => {
+      rolesLine.textContent = "Роли: недоступны";
+      partnerChipV.textContent = "недоступно";
+      partnerValue.textContent = "недоступно";
+      rolesList.replaceChildren(el("span", { class: "muted" }, "недоступно"));
+    });
+    return el("div", {}, rolesLine, rolesList);
+  })();
+
+  // «Основное» — label+bar+value rows in the existing .need markup style;
+  // the fill recolors to the single warm token inside .profile-shell.
+  function statBar(label, pct, display) {
+    const w = (pct === null || pct === undefined || !Number.isFinite(pct)) ? 0
+      : Math.max(0, Math.min(100, Math.round(pct)));
+    return el("div", { class: "need profile-stat" },
+      el("div", { class: "row" }, el("span", {}, label), el("span", {}, display)),
+      el("div", { class: "bar" }, el("div", { style: `width:${w}%` })));
+  }
+  const healthVal = ch.health && Number.isFinite(Number(ch.health.health))
+    ? Number(ch.health.health) : null;
+  const energyVal = ch.needs && Number.isFinite(Number(ch.needs.energy))
+    ? Number(ch.needs.energy) : null;
+  const balanceText = (ch.balance === undefined || ch.balance === null) ? "—"
+    : `${Number(ch.balance).toLocaleString("ru-RU")} ₽`;
+  const traits = Array.isArray(ch.traits) ? ch.traits : [];
+
+  const side = el("aside", { class: "profile-side" },
+    el("div", { class: "panel" },
+      el("h2", {}, "Основное"),
+      statBar("Здоровье", healthVal,
+        healthVal === null ? "—" : String(Math.round(healthVal))),
+      statBar("Энергия", energyVal,
+        energyVal === null ? "—" : String(Math.round(energyVal))),
+      // v1: balance has no 0-100 scale — its bar is a decorative full strip
+      // (the formatted value carries the data; an empty bar would misread
+      // as zero and an invented scale would be gameplay magic).
+      statBar("Деньги", 100, balanceText)),
+    el("div", { class: "panel" },
+      el("h2", {}, "Черты характера"),
+      el("div", { class: "profile-chips" },
+        ...(traits.length ? traits.map((t) =>
+          el("span", { class: "profile-chip profile-trait" },
+            el("span", { class: "profile-chip-k" },
+              PROFILE_TRAIT_LABELS[t.trait_key] || t.trait_key),
+            el("span", { class: "profile-chip-v" }, String(t.value))))
+          : [el("span", { class: "muted" }, "Нет данных о чертах")]))),
+    el("div", { class: "panel" },
+      el("h2", {}, "Текущая ситуация"),
+      el("div", { class: "profile-rows" },
+        el("div", { class: "profile-row" },
+          el("span", { class: "profile-row-k" }, "Локация"), locValue),
+        el("div", { class: "profile-row" },
+          el("span", { class: "profile-row-k" }, "Работа"), jobValue),
+        el("div", { class: "profile-row" },
+          el("span", { class: "profile-row-k" }, "Партнёр"), partnerValue),
+        el("div", { class: "profile-row" },
+          el("span", { class: "profile-row-k" }, "Желание"), desireValue))),
+    // #90/#170: the editable desire box keeps its pinned id/buttons/link;
+    // its refresh() also fills the Ситуация row above (shared fetch).
+    el("div", { class: "panel" },
+      el("h2", {}, "Желание"),
+      profileDesireBlock(desireValue)),
+    el("div", { class: "panel" },
+      el("h2", {}, "Роли"),
+      rolesBlock),
+    el("div", { class: "panel" },
+      el("h2", {}, "Режим управления"),
+      modeSel,
+      el("div", { style: "margin-top:8px" }, el("button", {
+        class: "primary", onclick: async () => {
+          try {
+            await api(`/characters/${S.character.id}/control`, {
+              method: "POST", body: { mode: modeSel.value } });
+            S.character.control_mode = modeSel.value;
+            toast("Режим обновлён");
+          } catch (e) { toast(e.message, true); }
+        } }, "Применить"))),
+    el("div", { class: "panel" },
+      el("h2", {}, "Аккаунт"),
+      el("div", {}, S.user.username),
+      el("div", { class: "muted" }, `${S.user.email} · роль: ${S.user.role}`),
+      el("div", { style: "margin-top:8px" },
+        el("button", { onclick: async () => {
+          await api("/auth/logout", { method: "POST", body: {} });
+          S.user = null; S.character = null;
+          S.authProbed = false;
+          location.hash = "#/login";
+          route();
+        } }, "Выйти")),
+      el("div", { class: "danger-zone", style: "margin-top:12px" },
+        el("div", { class: "muted", style: "font-size:11px" },
+          "Удаление необратимо: персонаж, диалоги и все связанные данные будут стёрты."),
+        el("input", { type: "text", placeholder: S.user.username,
+          "aria-label": "Подтверждение: имя аккаунта",
+          oninput: (e) => { S.confirmDelete = e.target.value; } }),
+        el("button", { class: "danger", onclick: async () => {
+          try {
+            await api("/auth/account/delete", { method: "POST", body: { confirm: S.confirmDelete || "" } });
             S.user = null; S.character = null;
-            S.authProbed = false;
+            // #138: no S.authProbed reset here (m132 pins exactly two reset
+            // sites) — after deletion auth state is known-gone and the
+            // cookie is cleared server-side; a re-probe would only 401.
+            toast("Аккаунт удалён");
             location.hash = "#/login";
             route();
-          } }, "Выйти")),
-        el("div", { class: "danger-zone", style: "margin-top:12px" },
-          el("div", { class: "muted", style: "font-size:11px" },
-            "Удаление необратимо: персонаж, диалоги и все связанные данные будут стёрты."),
-          el("input", { type: "text", placeholder: S.user.username,
-            "aria-label": "Подтверждение: имя аккаунта",
-            oninput: (e) => { S.confirmDelete = e.target.value; } }),
-          el("button", { class: "danger", onclick: async () => {
-            try {
-              await api("/auth/account/delete", { method: "POST", body: { confirm: S.confirmDelete || "" } });
-              S.user = null; S.character = null;
-              // #138: no S.authProbed reset here (m132 pins exactly two reset
-              // sites) — after deletion auth state is known-gone and the
-              // cookie is cleared server-side; a re-probe would only 401.
-              toast("Аккаунт удалён");
-              location.hash = "#/login";
-              route();
-            } catch (e) { toast(e.message, true); }
-          } }, "Удалить аккаунт"))),
-      el("div", { class: "panel" },
-        el("h2", {}, "Режим управления"),
-        modeSel,
-        el("div", { style: "margin-top:8px" }, el("button", {
-          class: "primary", onclick: async () => {
-            try {
-              await api(`/characters/${S.character.id}/control`, {
-                method: "POST", body: { mode: modeSel.value } });
-              S.character.control_mode = modeSel.value;
-              toast("Режим обновлён");
-            } catch (e) { toast(e.message, true); }
-          } }, "Применить")))));
+          } catch (e) { toast(e.message, true); }
+        } }, "Удалить аккаунт"))));
+
+  app.replaceChildren(topbar("#/profile"),
+    el("div", { class: "grid profile-shell" }, hero, side));
 }
 
 /* ---------- admin (§83-86) ---------- */

@@ -66,7 +66,7 @@ def test_external_route_registered():
     assert js.count('location.hash = "#/external";') == 1
 
 
-def test_load_retry_sites_8_external_and_admin():
+def test_load_retry_sites_9_external_and_admin():
     js = _read(APP_JS)
     # #175 raised the #93 transient-failure pattern from 6 to 8
     # alpha-critical sites: viewExternal (site #7) and viewAdmin (site #8)
@@ -76,8 +76,8 @@ def test_load_retry_sites_8_external_and_admin():
     assert js.count("loadRetryNode(loading, () => viewExternal());") == 1
     assert js.count("loadRetryNode(loading, () => viewAdmin());") == 1
     # Both views keep a named loading node in scope for the retry rewrite;
-    # 8 views total carry the pattern (6 pre-#175 + these 2).
-    assert js.count("const loading = el(\"div\", { class: \"muted\" }, \"Загрузка…\");") == 8
+    # 9 views carry the pattern (6 pre-#175 + 2 from #175 + profile from #67).
+    assert js.count("const loading = el(\"div\", { class: \"muted\" }, \"Загрузка…\");") == 9
 
 
 # ---------- B: connection banner (poll failures are the liveness oracle) ----------

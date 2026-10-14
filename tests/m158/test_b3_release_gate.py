@@ -378,7 +378,8 @@ def test_ui_transient_failure_catch_pins():
     # "loadRetryNode(loading," — pin the calls by their retry closures).
     # #170: viewDesire joins the #93 transient-failure pattern.
     # #173: viewShop joins the #93 retry pattern → 6 alpha-critical sites.
-    # #175: viewExternal + viewAdmin replace their toast-only catches → 8.
+    # #175: viewExternal + viewAdmin replace their toast-only catches → 8
+    # (#67: viewProfile adds its own retry via route()).
     assert js.count("loadRetryNode(loading, () => view") == 8
     assert js.count('"Загрузка не удалась. " + RETRY_HINT') == 1
     assert js.count('el("button", { type: "button", onclick: retry }, "Повторить")') == 1

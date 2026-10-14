@@ -1783,7 +1783,14 @@ def create_app(settings, session_factory: sessionmaker):
 
     @app.get("/characters/{cid}")
     def get_character(cid: str, user: User = Depends(current_user), session: Session = Depends(db)):
-        from app.db.models import Account, CharacterJob, CharacterNeeds, Job
+        from app.db.models import (
+            Account,
+            CharacterHealth,
+            CharacterJob,
+            CharacterNeeds,
+            CharacterTrait,
+            Job,
+        )
 
         character = (
             session.query(Character)
@@ -1824,6 +1831,27 @@ def create_app(settings, session_factory: sessionmaker):
                 .first()
             )
             out["job"] = job[1].title if job else None
+            # #67 increment 1 (profile read model, additive owner-only keys):
+            # hero identity + status data for the redesigned Profile screen.
+            out["looks"] = character.looks
+            out["biography"] = character.biography
+            out["home_location_id"] = character.home_location_id
+            out["traits"] = [
+                {"trait_key": t.trait_key, "value": t.value}
+                for t in (
+                    session.query(CharacterTrait)
+                    .filter_by(character_id=cid)
+                    .order_by(CharacterTrait.id)
+                    .all()
+                )
+            ]
+            health = (
+                session.query(CharacterHealth).filter_by(character_id=cid).first()
+            )
+            if health is not None:
+                out["health"] = {
+                    "health": health.health, "stress": health.stress,
+                }
         return out
 
 

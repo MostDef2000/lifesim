@@ -601,7 +601,7 @@ def test_ui_tasks_screen_pins():
     assert js.count("if (!S.mapFocusManual && character.location_id != null)") == 1
     # Cold-load safety mirrors viewChat's authoritative character read.
     # #170 review F1: viewDesire joins the pattern → 3 sites.
-    assert js.count("if (S.character.location_id == null)") == 3
+    assert js.count("if (S.character.location_id == null)") == 4
 
 
 def test_ui_inventory_screen_pins():
