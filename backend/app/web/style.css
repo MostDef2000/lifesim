@@ -1837,6 +1837,56 @@ button.danger:hover { background: #93301f; }
   .people-hero { grid-row: auto; }
 }
 
+/* #107: first-visit concierge welcome card — rendered as the FIRST child of
+   .world-shell, so it needs the full-width grid span to read above the
+   2-column panel rows (map stage / secondary). Chrome and colors come from
+   the .world-shell .panel rules and the shell's --w-* tokens — no new
+   color literals (same convention as .people-shell .panel). */
+.world-shell .welcome-card {
+  grid-column: 1 / -1;
+  display: grid;
+  gap: 10px;
+  justify-items: start;
+  padding: 14px 16px;
+  /* (0,2,0) — must match .world-shell .panel specificity or the warm chrome
+     loses the cascade to its flat background/border (peer-review fix). */
+  border-color: var(--w-warm-line);
+  background:
+    radial-gradient(560px 180px at 12% 0%, var(--w-warm), transparent 65%),
+    var(--w-panel);
+}
+.welcome-photos {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 140px));
+  gap: 10px;
+}
+.welcome-photos img {
+  width: 100%;
+  aspect-ratio: 3 / 4;
+  object-fit: cover;
+  border-radius: 10px;
+  border: 1px solid var(--w-line);
+  display: block;
+}
+.world-shell .welcome-card h2 { margin: 0; color: var(--w-text); }
+.welcome-copy { margin: 0; color: var(--w-text); }
+.welcome-tips { display: grid; gap: 6px; }
+.welcome-tip {
+  padding: 8px 10px;
+  border: 1px solid var(--w-line);
+  border-radius: 10px;
+  background: var(--w-panel-deep);
+  color: var(--w-dim);
+}
+.welcome-close { margin: 0; }
+.world-shell .welcome-card button { border-color: var(--w-warm-line); }
+.world-shell .welcome-card button:hover { border-color: var(--w-accent); }
+@media (max-width: 900px) {
+  .world-shell .welcome-card { padding: 12px; }
+  .welcome-photos { grid-template-columns: 1fr; }
+  .welcome-photos img { max-width: 240px; }
+}
+
 /* #175: connection banner — persistent offline signal driven by consecutive
    pollEvents failures (WS close is routine on navigation, never drives it).
    Warm-warn family on the dark panel bg; fixed top-center, below nothing —
