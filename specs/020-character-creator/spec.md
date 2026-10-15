@@ -32,6 +32,14 @@ visual generation — presentation layer.
   (+ free-text appearance prompt). Поля дополняют free-text, не
   взаимоисключающие. Хранение: compact dictionary в `looks` (≤500) НЕ
   влезет — см. Data model.
+- **Outfit / nudity control** (owner request 2026-10-15): отдельное поле
+  «Одежда» с режимами `auto` (дефолт, как сегодня: носимые предметы мира,
+  иначе промпт молчит) / `casual` / `formal` / `nude`. Реализация — через
+  существующий wearing-fragment путь (`descriptor.py:319-322`, вставка
+  ПОСЛЕ endswith-якоря m119 — пины не ломаются). Guardrail-фраза и
+  age-защита никогда не изменяются этим полем. Пин-сивидуальность:
+  m6:196 substring + m119 exact-байты (startswith/endswith/порядок секций)
+  должны остаться зелёными.
 - **Biography tag cloud**: нейтральный набор ингредиентов (профессии,
   происхождение, характер, мечты — без жёстких гендерных стереотипов;
   проверка набора — отдельный тест). Клик по тегу добавляет ingredient;
