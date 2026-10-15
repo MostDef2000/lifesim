@@ -74,6 +74,11 @@ def build_graph(model_key: str, prompt: str, seed: int, width: int,
                 height: int, lora: str) -> dict:
     """Minimal txt2img API-format graph. Node ids fixed for testability."""
     ckpt = resolve_model(model_key)
+    # flux-dev is guidance-distilled: the guidance value lives in the
+    # FluxGuidance node ("8") and KSampler cfg stays 1.0 — cfg>1 double-
+    # applies guidance and makes portraits soft/oversaturated (#204).
+    # Pony keeps the legacy cfg>1 sampler path unchanged.
+    is_flux = ckpt == "flux1-dev-fp8.safetensors"
     graph = {
         "1": {"class_type": "CheckpointLoaderSimple",
               "inputs": {"ckpt_name": ckpt}},
@@ -87,10 +92,12 @@ def build_graph(model_key: str, prompt: str, seed: int, width: int,
               "inputs": {"width": width, "height": height,
                          "batch_size": 1}},
         "5": {"class_type": "KSampler",
-              "inputs": {"seed": seed, "steps": 20, "cfg": 7.0,
+              "inputs": {"seed": seed, "steps": 28 if is_flux else 20,
+                         "cfg": 1.0 if is_flux else 7.0,
                          "sampler_name": "euler", "scheduler": "normal",
                          "denoise": 1.0, "model": ["1", 0],
-                         "positive": ["2", 0], "negative": ["3", 0],
+                         "positive": ["8", 0] if is_flux else ["2", 0],
+                         "negative": ["3", 0],
                          "latent_image": ["4", 0]}},
         "6": {"class_type": "VAEDecode",
               "inputs": {"samples": ["5", 0], "vae": ["1", 2]}},
@@ -98,6 +105,11 @@ def build_graph(model_key: str, prompt: str, seed: int, width: int,
               "inputs": {"filename_prefix": "lifesim",
                          "images": ["6", 0]}},
     }
+    if is_flux:
+        # node "8": FluxGuidance between the positive encode and KSampler
+        # (guidance-distilled flux-dev; id fixed for testability)
+        graph["8"] = {"class_type": "FluxGuidance",
+                      "inputs": {"guidance": 3.5, "conditioning": ["2", 0]}}
     model_out, clip_out = ["1", 0], ["1", 1]
     if lora and lora.strip().lower() in KNOWN_LORAS:
         graph["0"] = {"class_type": "LoraLoader",

@@ -105,6 +105,14 @@ class TestAdapterContract:
         # flux prompt passes through unchanged
         assert graph["2"]["inputs"]["text"] == "Portrait of Anna"
         assert FakeComfy.last_prompt["client_id"] == "lifesim-adapter"
+        # #204 portrait sampling: guidance-distilled flux-dev carries its
+        # guidance in a FluxGuidance node; sampler runs cfg 1.0 / steps 28
+        assert graph["8"]["class_type"] == "FluxGuidance"
+        assert graph["8"]["inputs"]["guidance"] == 3.5
+        assert graph["8"]["inputs"]["conditioning"] == ["2", 0]
+        assert graph["5"]["inputs"]["steps"] == 28
+        assert graph["5"]["inputs"]["cfg"] == 1.0
+        assert graph["5"]["inputs"]["positive"] == ["8", 0]
 
     def test_pony_tags_and_checkpoint(self):
         post = make_adapter_client()
@@ -120,6 +128,11 @@ class TestAdapterContract:
             comfy_adapter.PONY_POSITIVE_PREFIX)
         assert graph["3"]["inputs"]["text"].startswith(
             comfy_adapter.PONY_NEGATIVE_PREFIX)
+        # #204: pony path unchanged — no FluxGuidance, legacy cfg>1 sampler
+        assert "8" not in graph
+        assert graph["5"]["inputs"]["steps"] == 20
+        assert graph["5"]["inputs"]["cfg"] == 7.0
+        assert graph["5"]["inputs"]["positive"] == ["2", 0]
 
     def test_lora_node_wiring(self):
         post = make_adapter_client()
@@ -135,6 +148,8 @@ class TestAdapterContract:
         assert graph["5"]["inputs"]["model"] == ["0", 0]
         assert graph["2"]["inputs"]["clip"] == ["0", 1]
         assert graph["3"]["inputs"]["clip"] == ["0", 1]
+        # #204: LoRA wiring leaves the FluxGuidance path intact
+        assert graph["5"]["inputs"]["positive"] == ["8", 0]
 
     def test_unknown_model_422(self):
         post = make_adapter_client()
