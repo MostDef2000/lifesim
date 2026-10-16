@@ -26,8 +26,8 @@ FIXTURE_CHARACTER = {
 
 LOOKS = FIXTURE_CHARACTER["looks"]
 CASTING_PRESET = (
-    "Chest-up portrait, head fully in frame, neutral warm-gray studio, "
-    "soft frontal beauty lighting"
+    "Chest-up portrait, entire head visible with clear margin above the hair, "
+    "neutral warm-gray studio, soft frontal beauty lighting"
 )
 SCENE_PRESET = "natural environment lighting, candid composition"
 CANONICAL_NEGATIVE = (
@@ -169,18 +169,24 @@ class TestPortraitPrompt:
         assert positions == sorted(positions)
 
     def test_prompt_keeps_framing_anchor(self):
-        """W204b: the casting preset's framing anchor survives into the prompt.
+        """W204b/#205b: the casting preset's framing anchor survives into the prompt.
 
         Owner feedback 2026-10-16: flux at guidance 3.5 crops the head unless
-        the prompt itself anchors composition — the built portrait prompt must
-        carry "head fully in frame".
+        the prompt itself anchors composition — "head fully in frame" alone
+        still cropped faces at guidance 3.5 (#205b), so the anchor now names
+        the margin explicitly: "entire head visible with clear margin above
+        the hair".
         """
         descriptor = {
             "camera": "portrait",
             "characters": [{"id": "c1", "name": "Ivan", "sex": "M", "age": 63}],
             "visual_profile": build_visual_profile(FIXTURE_CHARACTER),
         }
-        assert "head fully in frame" in build_prompt(descriptor)
+        # #205b: explicit-margin anchor (stronger than "head fully in frame").
+        assert (
+            "entire head visible with clear margin above the hair"
+            in build_prompt(descriptor)
+        )
 
 
 class TestDescriptorIntegration:

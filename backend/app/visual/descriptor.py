@@ -69,12 +69,12 @@ def _time_of_day(hour: int) -> str:
 # a negative-prompt transport contract are later phases; the canonical
 # negative stays stored on the profile until lane B moves the transport).
 _PROFILE_CASTING_PRESET = (
-    "Chest-up portrait, head fully in frame, neutral warm-gray studio, "
-    "soft frontal beauty lighting"
+    "Chest-up portrait, entire head visible with clear margin above the hair, "
+    "neutral warm-gray studio, soft frontal beauty lighting"
 )
-# W204b (owner feedback 2026-10-16): flux at guidance 3.5 no longer
-# over-clamps composition, so the preset must anchor framing itself —
-# without the anchor the head gets cropped out of the chest-up portrait.
+# W205b (owner feedback 2026-10-16): "head fully in frame" alone still crops
+# faces at guidance 3.5 — the stronger compositional anchor names the margin
+# explicitly (clear space above the hair).
 _PROFILE_SCENE_PRESET = "natural environment lighting, candid composition"
 _PROFILE_CANONICAL_NEGATIVE = (
     "child, teen, teenage, underage, minor, loli, lolicon, shota, kid, "
@@ -377,7 +377,13 @@ def build_prompt(descriptor: dict, visual_config_weather: str = "clear") -> str:
         else:
             mode = descriptor.get("outfit_mode") or "auto"
             if mode == "casual":
-                base += ", wearing casual everyday clothes"
+                # #205b (owner feedback 2026-10-16): "casual everyday clothes"
+                # was too weak against the uncensored LoRA (topless renders) —
+                # name the garments and state "fully clothed" outright.
+                base += (
+                    ", wearing casual clothes: a plain t-shirt and jeans, "
+                    "fully clothed"
+                )
             elif mode == "formal":
                 base += ", wearing formal attire"
             elif mode == "nude":
