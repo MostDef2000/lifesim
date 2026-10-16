@@ -35,8 +35,12 @@ def _time_of_day(hour: int) -> str:
 # a negative-prompt transport contract are later phases; the canonical
 # negative stays stored on the profile until lane B moves the transport).
 _PROFILE_CASTING_PRESET = (
-    "Chest-up portrait, neutral warm-gray studio, soft frontal beauty lighting"
+    "Chest-up portrait, head fully in frame, neutral warm-gray studio, "
+    "soft frontal beauty lighting"
 )
+# W204b (owner feedback 2026-10-16): flux at guidance 3.5 no longer
+# over-clamps composition, so the preset must anchor framing itself —
+# without the anchor the head gets cropped out of the chest-up portrait.
 _PROFILE_SCENE_PRESET = "natural environment lighting, candid composition"
 _PROFILE_CANONICAL_NEGATIVE = (
     "child, teen, teenage, underage, minor, loli, lolicon, shota, kid, "
