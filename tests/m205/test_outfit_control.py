@@ -48,13 +48,15 @@ SETTINGS = None
 # The hardcoded PRE-#205 portrait prompt for PORTRAIT_DESCRIPTOR below —
 # built the old way (no outfit logic): guardrail phrase, face, body, style,
 # casting preset, clean background. Auto mode must reproduce these EXACT
-# bytes (the hard requirement of the work order).
+# bytes (the hard requirement of the work order). Byte-identity oracle is
+# relative to the world WITH the #207 framing anchor (pre-outfit bytes,
+# post-framing): the casting section carries "head fully in frame" (#207).
 OLD_WAY_AUTO_PROMPT = (
     "Portrait of Anna, 30-year-old fictional adult woman character, "
     "natural, well-groomed features, healthy adult woman build, "
     "modest, casual everyday styling, "
-    "Chest-up portrait, neutral warm-gray studio, soft frontal beauty "
-    "lighting, clean background, detailed face"
+    "Chest-up portrait, head fully in frame, neutral warm-gray studio, "
+    "soft frontal beauty lighting, clean background, detailed face"
 )
 
 PORTRAIT_DESCRIPTOR = {
