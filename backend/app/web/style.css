@@ -1627,8 +1627,14 @@ button.danger:hover { background: #93301f; }
   width: 100%;
   margin: 0;
   border-radius: 0;
-  aspect-ratio: 16 / 10;
+  aspect-ratio: 1 / 1;
+  max-width: min(100%, 480px);
+  margin-inline: auto;
   object-fit: cover;
+  /* W205c (owner feedback 2026-10-16): the 16/10 band cropped the 1:1
+     portrait (top+bottom ~37% of height) — faces rendered half-cut; square
+     container matches the generator aspect. World view (portraitBlock fill)
+     is already 1:1. */
   display: block;
 }
 .profile-shell .profile-hero .portrait .portrait-status {

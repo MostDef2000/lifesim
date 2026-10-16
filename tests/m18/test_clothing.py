@@ -103,7 +103,9 @@ class TestClothing:
         client.post("/auth/login", json={
             "username": "odezhda", "password": "password123"})
 
-        # baseline portrait: byte-identical, no wearing fragment
+        # baseline portrait: no worn items — #205c (owner feedback
+        # 2026-10-16) means the auto clothing anchor IS present now; the
+        # worn-LIST fragment (", wearing: [...") must still be absent.
         from app.visual.descriptor import (
             build_portrait_descriptor,
             build_prompt,
@@ -111,7 +113,8 @@ class TestClothing:
         with factory() as session:
             base = build_prompt(build_portrait_descriptor(
                 session, settings.world.world_id, npc_id))
-        assert "wearing" not in base
+        assert ", wearing: [" not in base
+        assert "wearing everyday clothes, fully clothed" in base
 
         # wear on
         r = client.post("/wear", json={"object_id": jacket_id})
@@ -133,7 +136,10 @@ class TestClothing:
         with factory() as session:
             prompt_off = build_prompt(build_portrait_descriptor(
                 session, settings.world.world_id, char.id))
-        assert "wearing" not in prompt_off
+        # #205c: no worn items -> back to the auto clothing anchor, no
+        # worn-LIST fragment.
+        assert ", wearing: [" not in prompt_off
+        assert "wearing everyday clothes, fully clothed" in prompt_off
 
     def test_foreign_and_non_wearable(self, tmp_path):
         settings = make_settings(tmp_path)
