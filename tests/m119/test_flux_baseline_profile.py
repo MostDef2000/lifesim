@@ -9,6 +9,7 @@ from types import SimpleNamespace
 
 from app.db.models import Character, CharacterTrait, Location
 from app.visual.descriptor import (
+    _AUTO_OUTFIT_POOL,
     build_portrait_descriptor,
     build_prompt,
     build_scene_descriptor,
@@ -147,11 +148,12 @@ class TestPortraitPrompt:
         assert "healthy adult woman build" in prompt
         assert "modest, casual everyday styling" in prompt
         assert CASTING_PRESET in prompt
-        # #205c: the absent-outfit_mode (auto) descriptor now ends with the
-        # clothing anchor appended after the clean-background tail.
+        # #205d: the absent-outfit_mode (auto) descriptor now ends with the
+        # auto pool head (concrete garments beat generic phrasing against
+        # the LoRA prior) appended after the clean-background tail.
         assert prompt.endswith(
             ", clean background, detailed face"
-            ", wearing everyday clothes, fully clothed"
+            f", {_AUTO_OUTFIT_POOL[0]}"
         )
 
     def test_prompt_deterministic_with_profile(self):
@@ -235,11 +237,11 @@ class TestDescriptorIntegration:
         assert "healthy adult man build" in prompt
         assert "sociable, outgoing presence" in prompt
         assert CASTING_PRESET in prompt
-        # #205c: DB-path auto mode ends with the clothing anchor appended
+        # #205d: DB-path auto mode ends with the auto pool head appended
         # after the clean-background tail.
         assert prompt.endswith(
             ", clean background, detailed face"
-            ", wearing everyday clothes, fully clothed"
+            f", {_AUTO_OUTFIT_POOL[0]}"
         )
 
     def test_scene_descriptor_carries_player_profile(self, session, world_id):

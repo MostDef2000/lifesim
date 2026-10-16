@@ -114,7 +114,9 @@ class TestClothing:
             base = build_prompt(build_portrait_descriptor(
                 session, settings.world.world_id, npc_id))
         assert ", wearing: [" not in base
-        assert "wearing everyday clothes, fully clothed" in base
+        # #205d: the auto pool item rotates per seed — pin the durable
+        # "fully clothed" phrase, not the garment.
+        assert "fully clothed" in base
 
         # wear on
         r = client.post("/wear", json={"object_id": jacket_id})
@@ -136,10 +138,10 @@ class TestClothing:
         with factory() as session:
             prompt_off = build_prompt(build_portrait_descriptor(
                 session, settings.world.world_id, char.id))
-        # #205c: no worn items -> back to the auto clothing anchor, no
-        # worn-LIST fragment.
+        # #205c: no worn items -> back to the auto pool item, no worn-LIST
+        # fragment (#205d: pin the durable "fully clothed" phrase).
         assert ", wearing: [" not in prompt_off
-        assert "wearing everyday clothes, fully clothed" in prompt_off
+        assert "fully clothed" in prompt_off
 
     def test_foreign_and_non_wearable(self, tmp_path):
         settings = make_settings(tmp_path)
