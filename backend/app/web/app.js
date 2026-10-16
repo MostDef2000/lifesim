@@ -2994,7 +2994,10 @@ function renderProfile(modeSel) {
           el("option", { value: "formal" }, "formal — строгая одежда"),
           el("option", { value: "nude" }, "nude — без одежды (18+)"));
         outfitSel.value = ch.outfit_mode || "auto";
-        return el("div", { style: "margin-top:8px" }, el("button", {
+        // runtime acceptance 2026-10-16 found the select unattached
+        // (created, value set, never mounted) — panel showed
+        // heading+button only.
+        return el("div", { style: "margin-top:8px" }, outfitSel, el("button", {
           class: "primary", onclick: async () => {
             try {
               await api(`/characters/${S.character.id}/outfit`, {
