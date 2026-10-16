@@ -137,6 +137,11 @@ def create_app(settings, session_factory: sessionmaker):
         # and additive-only (no destructive migration by design).
         from app.db.models import Base
         Base.metadata.create_all(bind=session_factory.kw["bind"])
+        # #205: same self-heal seam for the new characters.outfit column —
+        # create_all adds tables, never columns on existing ones.
+        from app.db.models import ensure_outfit_column
+
+        ensure_outfit_column(session_factory.kw["bind"])
         tick_task = None
         if settings.world.live_tick_enabled:
             from app.api.ticker import start_tick_driver
@@ -931,6 +936,41 @@ def create_app(settings, session_factory: sessionmaker):
         character.updated_at = now_ts
         session.commit()
         return {"id": cid, "control_mode": body.mode, "cancelled": cancelled}
+
+    # ---------- #205: outfit mode (020 §Outfit / nudity control) ----------
+
+    class OutfitIn(BaseModel):
+        outfit_mode: str
+
+    @app.patch("/characters/{cid}/outfit")
+    def set_outfit(
+        cid: str, body: OutfitIn,
+        user: User = Depends(current_user), session: Session = Depends(db)
+    ):
+        """#205: per-character outfit mode (owner-only). The prompt fragment
+        itself is composed in app/visual/descriptor.py; this endpoint only
+        persists the enum. Guardrail phrase / canonical_negative are never
+        touched by this field (#119 invariant)."""
+        # Same manual-enum pattern as POST /characters/{cid}/control (422).
+        if body.outfit_mode not in ("auto", "casual", "formal", "nude"):
+            raise HTTPException(
+                status_code=422,
+                detail="outfit_mode must be auto|casual|formal|nude")
+        character = _owned_character(session, user, cid)
+        # 18+ gate (П4): nude is an opt-in for an age-confirmed owner. The
+        # requester IS the owner here (_owned_character), so the stored
+        # flag is checked directly; build_portrait_descriptor re-checks the
+        # same DB truth defensively (rows edited outside this endpoint).
+        # Registration already enforces age_confirmed=true; the check is
+        # defense in depth, not the primary gate.
+        if body.outfit_mode == "nude" and not user.age_confirmed:
+            raise HTTPException(
+                status_code=422, detail="nude requires an age-confirmed account")
+        if character.outfit != body.outfit_mode:
+            character.outfit = body.outfit_mode
+            character.updated_at = _world_now(session)
+            session.commit()
+        return {"id": cid, "outfit_mode": character.outfit or "auto"}
 
     # ---------- Direct actions (R5, §80) ----------
 
@@ -1839,6 +1879,9 @@ def create_app(settings, session_factory: sessionmaker):
             # hero identity + status data for the redesigned Profile screen.
             out["looks"] = character.looks
             out["biography"] = character.biography
+            # #205: outfit mode for the profile selector (owner-only key —
+            # never leaks to a reader, same discipline as looks/biography).
+            out["outfit_mode"] = character.outfit or "auto"
             out["home_location_id"] = character.home_location_id
             out["traits"] = [
                 {"trait_key": t.trait_key, "value": t.value}

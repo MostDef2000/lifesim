@@ -2981,6 +2981,29 @@ function renderProfile(modeSel) {
             toast("Режим обновлён");
           } catch (e) { toast(e.message, true); }
         } }, "Применить"))),
+    // #205: per-character outfit mode. "auto" — как сейчас (носимые
+    // предметы мира говорят сами, промпт молчит); явные режимы добавляют
+    // фрагмент одежды в портретный промпт (см. descriptor.py). Owner-only
+    // PATCH; ошибки тостом, как в панели режима управления выше.
+    el("div", { class: "panel" },
+      el("h2", {}, "Одежда"),
+      (() => {
+        const outfitSel = el("select", {},
+          el("option", { value: "auto" }, "auto — как сейчас"),
+          el("option", { value: "casual" }, "casual — повседневная одежда"),
+          el("option", { value: "formal" }, "formal — строгая одежда"),
+          el("option", { value: "nude" }, "nude — без одежды (18+)"));
+        outfitSel.value = ch.outfit_mode || "auto";
+        return el("div", { style: "margin-top:8px" }, el("button", {
+          class: "primary", onclick: async () => {
+            try {
+              await api(`/characters/${S.character.id}/outfit`, {
+                method: "PATCH", body: { outfit_mode: outfitSel.value } });
+              S.character.outfit_mode = outfitSel.value;
+              toast("Одежда обновлена");
+            } catch (e) { toast(e.message, true); }
+          } }, "Применить"));
+      })()),
     el("div", { class: "panel" },
       el("h2", {}, "Аккаунт"),
       el("div", {}, S.user.username),

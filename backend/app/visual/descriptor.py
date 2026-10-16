@@ -12,10 +12,44 @@ from app.db.models import (
     Character,
     CharacterTrait,
     Location,
+    User,
     WorldClock,
     WorldEvent,
     WorldObject,
 )
+
+# #205 (020 §Outfit / nudity control): per-character outfit modes. "auto"
+# (the default, and the reading for NULL/unknown values on legacy rows)
+# never appends a fragment — prompt bytes stay identical to pre-#205.
+_OUTFIT_MODES = ("auto", "casual", "formal", "nude")
+
+
+def _effective_outfit_mode(session: Session, character) -> str:
+    """#205: raw characters.outfit -> effective mode.
+
+    Normalization rules (all documented invariants of 020):
+    - NULL / unknown / blank value -> "auto" (legacy rows, hand-made rows:
+      EXACTLY the pre-#205 prompt behavior);
+    - "nude" requires the OWNING user to have age_confirmed (П4 18+, stored
+      on users and enforced at registration). No owner (NPC — the lazy
+      canonical portrait GET can be triggered by any authenticated user) or
+      an owner without the flag collapses to "auto", so the nude fragment
+      can only ever be produced from an age-confirmed owner's stored state;
+    - worn clothing takes precedence at PROMPT level (build_prompt): an
+      explicitly worn WorldObject means the character is dressed in EVERY
+      mode, including nude — worn items always win.
+    """
+    mode = (getattr(character, "outfit", None) or "auto").strip().lower()
+    if mode not in _OUTFIT_MODES:
+        return "auto"
+    if mode == "nude":
+        owner_id = character.user_id
+        if owner_id is None:
+            return "auto"  # NPC: no owning user -> never nude
+        owner = session.get(User, owner_id)
+        if owner is None or not owner.age_confirmed:
+            return "auto"
+    return mode
 
 
 def _time_of_day(hour: int) -> str:
@@ -291,6 +325,12 @@ def build_portrait_descriptor(session: Session, world_id: str, character_id: str
     wearing = wearing_phrases(session, world_id, character_id)
     if wearing:
         descriptor["wearing"] = wearing
+    # #205 (020 §Outfit / nudity control): the effective outfit mode travels
+    # with the descriptor as an ADDITIVE top-level key (the m119 pins freeze
+    # the visual_profile key set — this key lives on the descriptor itself,
+    # which no pin fixes). Legacy/hand-made descriptors without the key read
+    # as "auto" in build_prompt (byte-identical).
+    descriptor["outfit_mode"] = _effective_outfit_mode(session, character)
     # 019 Phase 1 (T3): the canonical visual profile travels with the
     # descriptor (persisted on the VisualAsset scene_descriptor JSON — no
     # model/endpoint change). Built from the same committed state as above.
@@ -320,10 +360,28 @@ def build_prompt(descriptor: dict, visual_config_weather: str = "clear") -> str:
             f"{profile['face']}, {profile['body']}, {profile['style']}, "
             f"{profile['scenes']['casting']}, clean background, detailed face"
         )
-        # 018 (§28): wearing fragment only when worn items exist
+        # 018 (§28): wearing fragment only when worn items exist.
+        # #205 (020 §Outfit / nudity control): the per-character outfit mode
+        # adds an explicit fragment ONLY when nothing is worn — worn
+        # WorldObjects take precedence in EVERY mode including nude (an
+        # explicitly worn item means the character is dressed; decided per
+        # 020, documented here). "auto" (and legacy descriptors without the
+        # outfit_mode key) append nothing — byte-identical to pre-#205.
+        # The nude fragment only ever reaches this point for an
+        # age-confirmed owner: _effective_outfit_mode collapses every other
+        # case to "auto" (guardrail phrase / canonical_negative above are
+        # untouched by this field, #119 invariant).
         wearing = descriptor.get("wearing") or []
         if wearing:
             base += f", wearing: {wearing}"
+        else:
+            mode = descriptor.get("outfit_mode") or "auto"
+            if mode == "casual":
+                base += ", wearing casual everyday clothes"
+            elif mode == "formal":
+                base += ", wearing formal attire"
+            elif mode == "nude":
+                base += ", nude"
         return base
     loc = descriptor["location"]
     parts = [
