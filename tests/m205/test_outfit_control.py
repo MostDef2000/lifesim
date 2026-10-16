@@ -49,14 +49,17 @@ SETTINGS = None
 # built the old way (no outfit logic): guardrail phrase, face, body, style,
 # casting preset, clean background. Auto mode must reproduce these EXACT
 # bytes (the hard requirement of the work order). Byte-identity oracle is
-# relative to the world WITH the #207 framing anchor (pre-outfit bytes,
-# post-framing): the casting section carries "head fully in frame" (#207).
+# relative to the world WITH the #205b framing anchor (pre-outfit bytes,
+# post-framing): the casting section carries the explicit-margin anchor
+# "entire head visible with clear margin above the hair" (#205b —
+# "head fully in frame" alone still cropped faces at guidance 3.5).
 OLD_WAY_AUTO_PROMPT = (
     "Portrait of Anna, 30-year-old fictional adult woman character, "
     "natural, well-groomed features, healthy adult woman build, "
     "modest, casual everyday styling, "
-    "Chest-up portrait, head fully in frame, neutral warm-gray studio, "
-    "soft frontal beauty lighting, clean background, detailed face"
+    "Chest-up portrait, entire head visible with clear margin above the hair, "
+    "neutral warm-gray studio, soft frontal beauty lighting, "
+    "clean background, detailed face"
 )
 
 PORTRAIT_DESCRIPTOR = {
@@ -137,7 +140,10 @@ FIXTURE = {
 
 class TestOutfitFragments:
     @pytest.mark.parametrize("mode,fragment", [
-        ("casual", ", wearing casual everyday clothes"),
+        # #205b (owner feedback 2026-10-16): the casual fragment now names
+        # the garments and states "fully clothed" — "casual everyday clothes"
+        # was too weak against the uncensored LoRA (topless renders).
+        ("casual", ", wearing casual clothes: a plain t-shirt and jeans, fully clothed"),
         ("formal", ", wearing formal attire"),
         ("nude", ", nude"),
     ])
@@ -148,6 +154,13 @@ class TestOutfitFragments:
         # The fragment lands AFTER the m119 endswith anchor.
         assert prompt.startswith("Portrait of Anna, ")
         assert ", clean background, detailed face" in prompt
+
+    def test_casual_mode_prompt_is_fully_clothed(self):
+        """#205b (owner feedback 2026-10-16): the built casual-mode prompt
+        contains "fully clothed" — the old "casual everyday clothes" fragment
+        was too weak against the uncensored LoRA (topless casual renders)."""
+        prompt = build_prompt({**PORTRAIT_DESCRIPTOR, "outfit_mode": "casual"})
+        assert "fully clothed" in prompt
 
     def test_fragment_order_after_profile_sections(self):
         prompt = build_prompt({**PORTRAIT_DESCRIPTOR, "outfit_mode": "formal"})
@@ -169,7 +182,9 @@ class TestOutfitFragments:
         }
         prompt = build_prompt(descriptor)
         assert prompt.endswith(", wearing: ['jacket on upper_body']")
-        assert "wearing casual everyday clothes" not in prompt
+        # #205b: the casual fragment now reads "...fully clothed" — a worn
+        # item must still suppress it along with the other mode fragments.
+        assert "fully clothed" not in prompt
         assert "wearing formal attire" not in prompt
         assert ", nude" not in prompt
 
@@ -335,7 +350,9 @@ class TestOutfitAPI:
         with factory() as session:
             prompt = build_prompt(
                 build_portrait_descriptor(session, world_id, cid))
-        assert prompt.endswith(", wearing casual everyday clothes")
+        # #205b: casual fragment names the garments and is "fully clothed".
+        assert prompt.endswith(
+            ", wearing casual clothes: a plain t-shirt and jeans, fully clothed")
         # back to auto
         r = client.patch(f"/characters/{cid}/outfit",
                          json={"outfit_mode": "auto"})
