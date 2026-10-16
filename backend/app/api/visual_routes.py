@@ -146,10 +146,6 @@ def register_visual_routes(app, settings: Settings, session_factory: sessionmake
                     reference_ids.append(canonical.id)
         descriptor = {**descriptor, "references": reference_ids}
 
-        from app.visual.descriptor import build_prompt
-
-        prompt = build_prompt(descriptor)
-
         existing = (
             session.query(VisualAsset)
             .filter_by(world_id=world_id, asset_type=asset_type)
@@ -158,6 +154,17 @@ def register_visual_routes(app, settings: Settings, session_factory: sessionmake
         seed = _deterministic_seed(
             world_id, character_id or location_id, asset_type, existing
         )
+
+        from app.visual.descriptor import _AUTO_OUTFIT_POOL, build_prompt
+
+        # W205d: seed depends on existing-asset count, so each regeneration
+        # rotates the auto outfit pool; scene prompts ignore the key.
+        if asset_type == "portrait":
+            descriptor["outfit_auto_variant"] = _AUTO_OUTFIT_POOL[
+                seed % len(_AUTO_OUTFIT_POOL)
+            ]
+
+        prompt = build_prompt(descriptor)
 
         try:
             bytes_out = transport_factory().generate(

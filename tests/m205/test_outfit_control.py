@@ -2,12 +2,12 @@
 
 Contract under test:
 - characters.outfit: auto|casual|formal|nude; NULL/unknown -> "auto";
-  default "auto" = the pre-#205 prompt bytes plus the #205c clothing
-  anchor (owner feedback 2026-10-16: without it the uncensored LoRA
-  drifts to nudity). Byte-identity is the hard requirement, proved
-  against a hardcoded fixture string AND against an outfit_mode-less
-  descriptor — absent-key == auto == fixture (all three carry the
-  anchor).
+  default "auto" = the pre-#205 prompt bytes plus one #205d
+  concrete-garment pool item (owner feedback 2026-10-16: generic phrasing
+  loses to the uncensored LoRA prior). Byte-identity is the hard
+  requirement, proved against a hardcoded fixture string AND against an
+  outfit_mode-less descriptor — absent-key == auto == fixture (all three
+  carry the pool head; the route rotates the pool per regeneration).
 - The outfit fragment lands in the portrait branch only, AFTER the m119
   endswith anchor; worn WorldObjects ALWAYS win in every mode (including
   nude — an explicitly worn item means dressed).
@@ -41,6 +41,7 @@ from app.db.models import (  # noqa: E402
     ensure_outfit_column,
 )
 from app.visual.descriptor import (  # noqa: E402
+    _AUTO_OUTFIT_POOL,
     build_portrait_descriptor,
     build_prompt,
     build_visual_profile,
@@ -48,21 +49,22 @@ from app.visual.descriptor import (  # noqa: E402
 
 SETTINGS = None
 
-# #205c: the auto clothing anchor, appended after the m119 clean-background
-# tail (shared by absent-key == auto == fixture below).
-AUTO_TAIL = ", wearing everyday clothes, fully clothed"
+# #205d: the auto pool item, appended after the m119 clean-background tail
+# (shared by absent-key == auto == fixture below). The fixture pins pool[0];
+# the route seed-rotates the pool per regeneration.
+AUTO_TAIL = f", {_AUTO_OUTFIT_POOL[0]}"
 
 # The hardcoded portrait prompt for PORTRAIT_DESCRIPTOR below —
 # #205c: contract changed by owner feedback 2026-10-16 — default auto now
 # includes a clothing anchor (previously byte-identical to the bare
 # prompt); canonical reuse keeps old portraits untouched. The fixture is
 # recomputed to the NEW auto bytes: guardrail phrase, face, body, style,
-# casting preset, clean background, then the #205c anchor. Auto mode must
-# reproduce these EXACT bytes (the hard requirement of the work order).
-# Byte-identity oracle is relative to the world WITH the #205b framing
-# anchor (pre-outfit bytes, post-framing): the casting section carries the
-# explicit-margin anchor "entire head visible with clear margin above the
-# hair" (#205b — "head fully in frame" alone still cropped faces at
+# casting preset, clean background, then the #205d auto pool head (pool[0]).
+# Auto mode must reproduce these EXACT bytes (the hard requirement of the
+# work order). Byte-identity oracle is relative to the world WITH the #205b
+# framing anchor (pre-outfit bytes, post-framing): the casting section
+# carries the explicit-margin anchor "entire head visible with clear margin
+# above the hair" (#205b — "head fully in frame" alone still cropped faces at
 # guidance 3.5).
 OLD_WAY_AUTO_PROMPT = (
     "Portrait of Anna, 30-year-old fictional adult woman character, "
@@ -93,9 +95,9 @@ class TestAutoByteIdentity:
     def test_absent_key_equals_auto_equals_old_bytes(self):
         """HARD requirement: outfit_mode="auto" is byte-identical to the
         outfit_mode-less (pre-#205 shape) descriptor AND to the hardcoded
-        OLD_WAY_AUTO_PROMPT string. #205c: all three now carry the
-        clothing anchor (appended after the m119 clean-background tail);
-        the equality itself is unchanged."""
+        OLD_WAY_AUTO_PROMPT string. #205d: all three now carry the
+        concrete-garment pool head (appended after the m119 clean-background
+        tail); the equality itself is unchanged."""
         old_prompt = build_prompt(_without_outfit(PORTRAIT_DESCRIPTOR))
         auto_prompt = build_prompt({**PORTRAIT_DESCRIPTOR, "outfit_mode": "auto"})
         assert auto_prompt == old_prompt
@@ -157,7 +159,9 @@ class TestOutfitFragments:
         # was too weak against the uncensored LoRA (topless renders).
         ("casual", ", wearing casual clothes: a plain t-shirt and jeans, fully clothed"),
         ("formal", ", wearing formal attire"),
-        ("nude", ", nude"),
+        # W205d: bare ", nude" lost to the modest style phrase — concrete
+        # nudity terms anchor the render.
+        ("nude", ", nude, completely unclothed, wearing nothing"),
     ])
     def test_fragment_per_mode(self, mode, fragment):
         descriptor = {**PORTRAIT_DESCRIPTOR, "outfit_mode": mode}
@@ -180,7 +184,7 @@ class TestOutfitFragments:
             ", wearing formal attire")
 
     def test_auto_no_nude_fragment(self):
-        """#205c: auto now carries the everyday-clothes anchor (see the
+        """#205d: auto now carries a concrete-garment pool item (see the
         dedicated test below); what must NEVER ride the auto path is the
         nude fragment — nude stays an explicit mode."""
         prompt = build_prompt({**PORTRAIT_DESCRIPTOR, "outfit_mode": "auto"})
@@ -188,13 +192,48 @@ class TestOutfitFragments:
         assert prompt.endswith(AUTO_TAIL)
 
     def test_auto_mode_prompt_is_fully_clothed(self):
-        """#205c (owner feedback 2026-10-16): the default (auto) prompt
-        contains "fully clothed" and ends with the clothing anchor —
-        mirror of the casual test; without it the uncensored LoRA drifts
-        to nudity when the prompt says nothing about clothes."""
+        """#205d (owner feedback 2026-10-16): the default (auto) prompt
+        contains "fully clothed" and ends with the auto pool head —
+        mirror of the casual test; without concrete garments the
+        uncensored LoRA drifts to nudity even when the prompt says
+        "everyday clothes"."""
         prompt = build_prompt({**PORTRAIT_DESCRIPTOR, "outfit_mode": "auto"})
         assert "fully clothed" in prompt
-        assert prompt.endswith(", wearing everyday clothes, fully clothed")
+        assert prompt.endswith(AUTO_TAIL)
+
+    # W205d new pins -------------------------------------------------------
+
+    def test_auto_variant_key_selects_pool_item_verbatim(self):
+        """#205d: the route's seed-selected variant rides the descriptor and
+        renders verbatim — pool membership doubles as validation."""
+        variant = _AUTO_OUTFIT_POOL[2]
+        prompt = build_prompt({
+            **PORTRAIT_DESCRIPTOR,
+            "outfit_mode": "auto",
+            "outfit_auto_variant": variant,
+        })
+        assert variant in prompt
+        assert prompt.endswith(f", {variant}")
+
+    def test_auto_unknown_variant_falls_back_to_pool_head(self):
+        """#205d: an unknown outfit_auto_variant string (and the absent key)
+        fall back to pool[0] — the tuple membership check is the validation;
+        direct build_prompt callers stay deterministic."""
+        prompt = build_prompt({
+            **PORTRAIT_DESCRIPTOR,
+            "outfit_mode": "auto",
+            "outfit_auto_variant": "wearing a spacesuit, fully clothed",
+        })
+        assert prompt.endswith(AUTO_TAIL)
+        assert "spacesuit" not in prompt
+
+    def test_nude_prompt_anchors_concrete_nudity(self):
+        """#205d (owner feedback): bare ", nude" lost to the modest style
+        phrase and rendered clothed — concrete nudity terms anchor the
+        render (symmetric to the concrete-garment fix)."""
+        prompt = build_prompt({**PORTRAIT_DESCRIPTOR, "outfit_mode": "nude"})
+        assert "wearing nothing" in prompt
+        assert prompt.endswith(", nude, completely unclothed, wearing nothing")
 
     @pytest.mark.parametrize("mode", ["auto", "casual", "formal", "nude"])
     def test_worn_items_always_win(self, mode):
@@ -244,7 +283,9 @@ class TestDescriptorAgeGate:
             session, world_id, "w205_nude_ok", outfit="nude", user_id=user.id)
         descriptor = build_portrait_descriptor(session, world_id, cid)
         assert descriptor["outfit_mode"] == "nude"
-        assert build_prompt(descriptor).endswith(", nude")
+        # #205d: the nude tail now carries the explicit nudity anchor.
+        assert build_prompt(descriptor).endswith(
+            ", nude, completely unclothed, wearing nothing")
 
     def test_nude_owner_not_age_confirmed_collapses_to_auto(self, session, world_id):
         from app.db.models import User
