@@ -147,7 +147,12 @@ class TestPortraitPrompt:
         assert "healthy adult woman build" in prompt
         assert "modest, casual everyday styling" in prompt
         assert CASTING_PRESET in prompt
-        assert prompt.endswith(", clean background, detailed face")
+        # #205c: the absent-outfit_mode (auto) descriptor now ends with the
+        # clothing anchor appended after the clean-background tail.
+        assert prompt.endswith(
+            ", clean background, detailed face"
+            ", wearing everyday clothes, fully clothed"
+        )
 
     def test_prompt_deterministic_with_profile(self):
         descriptor = {
@@ -230,7 +235,12 @@ class TestDescriptorIntegration:
         assert "healthy adult man build" in prompt
         assert "sociable, outgoing presence" in prompt
         assert CASTING_PRESET in prompt
-        assert prompt.endswith(", clean background, detailed face")
+        # #205c: DB-path auto mode ends with the clothing anchor appended
+        # after the clean-background tail.
+        assert prompt.endswith(
+            ", clean background, detailed face"
+            ", wearing everyday clothes, fully clothed"
+        )
 
     def test_scene_descriptor_carries_player_profile(self, session, world_id):
         location_id = self._add_character(

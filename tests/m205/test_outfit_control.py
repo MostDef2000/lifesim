@@ -2,9 +2,12 @@
 
 Contract under test:
 - characters.outfit: auto|casual|formal|nude; NULL/unknown -> "auto";
-  default "auto" = EXACTLY the pre-#205 prompt bytes (byte-identity is the
-  hard requirement, proved against a hardcoded old-way fixture string AND
-  against an outfit_mode-less descriptor).
+  default "auto" = the pre-#205 prompt bytes plus the #205c clothing
+  anchor (owner feedback 2026-10-16: without it the uncensored LoRA
+  drifts to nudity). Byte-identity is the hard requirement, proved
+  against a hardcoded fixture string AND against an outfit_mode-less
+  descriptor — absent-key == auto == fixture (all three carry the
+  anchor).
 - The outfit fragment lands in the portrait branch only, AFTER the m119
   endswith anchor; worn WorldObjects ALWAYS win in every mode (including
   nude — an explicitly worn item means dressed).
@@ -45,14 +48,22 @@ from app.visual.descriptor import (  # noqa: E402
 
 SETTINGS = None
 
-# The hardcoded PRE-#205 portrait prompt for PORTRAIT_DESCRIPTOR below —
-# built the old way (no outfit logic): guardrail phrase, face, body, style,
-# casting preset, clean background. Auto mode must reproduce these EXACT
-# bytes (the hard requirement of the work order). Byte-identity oracle is
-# relative to the world WITH the #205b framing anchor (pre-outfit bytes,
-# post-framing): the casting section carries the explicit-margin anchor
-# "entire head visible with clear margin above the hair" (#205b —
-# "head fully in frame" alone still cropped faces at guidance 3.5).
+# #205c: the auto clothing anchor, appended after the m119 clean-background
+# tail (shared by absent-key == auto == fixture below).
+AUTO_TAIL = ", wearing everyday clothes, fully clothed"
+
+# The hardcoded portrait prompt for PORTRAIT_DESCRIPTOR below —
+# #205c: contract changed by owner feedback 2026-10-16 — default auto now
+# includes a clothing anchor (previously byte-identical to the bare
+# prompt); canonical reuse keeps old portraits untouched. The fixture is
+# recomputed to the NEW auto bytes: guardrail phrase, face, body, style,
+# casting preset, clean background, then the #205c anchor. Auto mode must
+# reproduce these EXACT bytes (the hard requirement of the work order).
+# Byte-identity oracle is relative to the world WITH the #205b framing
+# anchor (pre-outfit bytes, post-framing): the casting section carries the
+# explicit-margin anchor "entire head visible with clear margin above the
+# hair" (#205b — "head fully in frame" alone still cropped faces at
+# guidance 3.5).
 OLD_WAY_AUTO_PROMPT = (
     "Portrait of Anna, 30-year-old fictional adult woman character, "
     "natural, well-groomed features, healthy adult woman build, "
@@ -60,6 +71,7 @@ OLD_WAY_AUTO_PROMPT = (
     "Chest-up portrait, entire head visible with clear margin above the hair, "
     "neutral warm-gray studio, soft frontal beauty lighting, "
     "clean background, detailed face"
+    + AUTO_TAIL
 )
 
 PORTRAIT_DESCRIPTOR = {
@@ -80,10 +92,10 @@ def _without_outfit(descriptor):
 class TestAutoByteIdentity:
     def test_absent_key_equals_auto_equals_old_bytes(self):
         """HARD requirement: outfit_mode="auto" is byte-identical to the
-        pre-#205 behavior — proved three ways: descriptor WITHOUT the key
-        (pre-#205 shape), descriptor with outfit_mode="auto", and the
-        hardcoded OLD_WAY_AUTO_PROMPT string composed exactly as the old
-        code did (profile sections + clean background tail, no fragment)."""
+        outfit_mode-less (pre-#205 shape) descriptor AND to the hardcoded
+        OLD_WAY_AUTO_PROMPT string. #205c: all three now carry the
+        clothing anchor (appended after the m119 clean-background tail);
+        the equality itself is unchanged."""
         old_prompt = build_prompt(_without_outfit(PORTRAIT_DESCRIPTOR))
         auto_prompt = build_prompt({**PORTRAIT_DESCRIPTOR, "outfit_mode": "auto"})
         assert auto_prompt == old_prompt
@@ -167,10 +179,22 @@ class TestOutfitFragments:
         assert prompt.index("Chest-up portrait") < prompt.index(
             ", wearing formal attire")
 
-    def test_auto_no_fragment(self):
+    def test_auto_no_nude_fragment(self):
+        """#205c: auto now carries the everyday-clothes anchor (see the
+        dedicated test below); what must NEVER ride the auto path is the
+        nude fragment — nude stays an explicit mode."""
         prompt = build_prompt({**PORTRAIT_DESCRIPTOR, "outfit_mode": "auto"})
-        assert "wearing" not in prompt
-        assert "nude" not in prompt
+        assert ", nude" not in prompt
+        assert prompt.endswith(AUTO_TAIL)
+
+    def test_auto_mode_prompt_is_fully_clothed(self):
+        """#205c (owner feedback 2026-10-16): the default (auto) prompt
+        contains "fully clothed" and ends with the clothing anchor —
+        mirror of the casual test; without it the uncensored LoRA drifts
+        to nudity when the prompt says nothing about clothes."""
+        prompt = build_prompt({**PORTRAIT_DESCRIPTOR, "outfit_mode": "auto"})
+        assert "fully clothed" in prompt
+        assert prompt.endswith(", wearing everyday clothes, fully clothed")
 
     @pytest.mark.parametrize("mode", ["auto", "casual", "formal", "nude"])
     def test_worn_items_always_win(self, mode):

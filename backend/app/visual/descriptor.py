@@ -20,7 +20,8 @@ from app.db.models import (
 
 # #205 (020 §Outfit / nudity control): per-character outfit modes. "auto"
 # (the default, and the reading for NULL/unknown values on legacy rows)
-# never appends a fragment — prompt bytes stay identical to pre-#205.
+# appends the everyday-clothes anchor since #205c (pre-W205c it appended
+# nothing — prompt bytes were identical to pre-#205).
 _OUTFIT_MODES = ("auto", "casual", "formal", "nude")
 
 
@@ -308,7 +309,8 @@ def build_portrait_descriptor(session: Session, world_id: str, character_id: str
     character = session.get(Character, character_id)
     if character is None or character.world_id != world_id:
         raise LookupError(f"character not found: {character_id}")
-    # 018 (§28): worn clothing -> "wearing" list (empty -> byte-identical)
+    # 018 (§28): worn clothing -> "wearing" list (empty -> auto anchor only,
+    # no worn-LIST fragment; pre-#205c this was byte-identical)
     from app.social.clothing import wearing_phrases
 
     descriptor = {
@@ -329,7 +331,8 @@ def build_portrait_descriptor(session: Session, world_id: str, character_id: str
     # with the descriptor as an ADDITIVE top-level key (the m119 pins freeze
     # the visual_profile key set — this key lives on the descriptor itself,
     # which no pin fixes). Legacy/hand-made descriptors without the key read
-    # as "auto" in build_prompt (byte-identical).
+    # as "auto" in build_prompt (which since #205c carries the clothing
+    # anchor; pre-#205c this read was byte-identical).
     descriptor["outfit_mode"] = _effective_outfit_mode(session, character)
     # 019 Phase 1 (T3): the canonical visual profile travels with the
     # descriptor (persisted on the VisualAsset scene_descriptor JSON — no
@@ -366,7 +369,9 @@ def build_prompt(descriptor: dict, visual_config_weather: str = "clear") -> str:
         # WorldObjects take precedence in EVERY mode including nude (an
         # explicitly worn item means the character is dressed; decided per
         # 020, documented here). "auto" (and legacy descriptors without the
-        # outfit_mode key) append nothing — byte-identical to pre-#205.
+        # outfit_mode key) share one fragment: since #205c it is the
+        # everyday-clothes anchor (previously nothing, byte-identical to
+        # pre-#205).
         # The nude fragment only ever reaches this point for an
         # age-confirmed owner: _effective_outfit_mode collapses every other
         # case to "auto" (guardrail phrase / canonical_negative above are
@@ -388,6 +393,12 @@ def build_prompt(descriptor: dict, visual_config_weather: str = "clear") -> str:
                 base += ", wearing formal attire"
             elif mode == "nude":
                 base += ", nude"
+            else:
+                # W205c (owner feedback): without a clothing anchor the
+                # uncensored LoRA defaults toward nudity — default portraits
+                # must be dressed (flux varies the outfit across seeds);
+                # nude stays an explicit mode.
+                base += ", wearing everyday clothes, fully clothed"
         return base
     loc = descriptor["location"]
     parts = [
