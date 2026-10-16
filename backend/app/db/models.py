@@ -99,6 +99,16 @@ class Character(Base):
     # M5 (SPEC §60/104): player ownership + control mode
     user_id = Column(Integer, ForeignKey("users.id"), nullable=True)
     control_mode = Column(String, nullable=False, default="AUTONOMOUS")  # AUTONOMOUS|GUIDED|DIRECT
+    # #205 (020 §Outfit / nudity control): per-character outfit mode
+    # auto|casual|formal|nude. Nullable BY DESIGN: rows that pre-date the
+    # column read NULL-or-'auto' (SQLite ALTER TABLE ADD COLUMN back-fills
+    # DEFAULT 'auto' onto existing rows at heal time; NULL only for rows
+    # created in the edge window between create_all-without-heal and the
+    # heal) — both resolve to "auto" in the descriptor resolver: pre-#205
+    # prompt bytes preserved. New ORM rows default to "auto" here.
+    # Guardrail phrase / canonical_negative are NEVER derived from this
+    # field (#119 invariant).
+    outfit = Column(String, nullable=True, default="auto")
 
 # 7. character_profiles
 class CharacterProfile(Base):
@@ -665,6 +675,37 @@ def create_engine_factory(settings: Settings):
         cursor.close()
 
     return engine
+
+def ensure_outfit_column(bind) -> None:
+    """#205 additive schema self-heal (same discipline as the B2-review F3
+    table self-heal in create_app._lifespan): a pre-#205 dev/prod DB has a
+    `characters` table without the `outfit` column, and create_all is
+    additive-only for TABLES — it never alters existing ones. Idempotent:
+    a PRAGMA table_info check gates the ALTER. SQLite back-fills the
+    non-NULL DEFAULT 'auto' onto existing rows when the column is added, so
+    healed rows read 'auto'; only rows created in the edge window between
+    create_all-without-heal and the heal can hold NULL — the descriptor
+    resolver reads NULL-or-'auto' alike as "auto" (pre-#205 prompt bytes).
+    Accepts an Engine or a Connection (SQLAlchemy 2.0 removed
+    Engine.execute)."""
+    from sqlalchemy import Engine, text
+
+    def _run(conn):
+        rows = conn.execute(text("PRAGMA table_info(characters)")).fetchall()
+        if not rows:
+            # No characters table yet — create_all creates it with the column.
+            return
+        if any(row[1] == "outfit" for row in rows):
+            return
+        conn.execute(text(
+            "ALTER TABLE characters ADD COLUMN outfit VARCHAR DEFAULT 'auto'"))
+
+    if isinstance(bind, Engine):
+        with bind.begin() as conn:
+            _run(conn)
+    else:
+        _run(bind)
+
 
 def bootstrap(engine, settings: Settings, seed: int):
     Base.metadata.create_all(engine)
