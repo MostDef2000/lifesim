@@ -1789,8 +1789,14 @@ def create_app(settings, session_factory: sessionmaker):
         ]
 
     @app.get("/characters/by-user/{user_id}")
-    def characters_by_user(user_id: int, session: Session = Depends(db)):
-        """M9: characters of the authenticated user (client bootstrap)."""
+    def characters_by_user(
+        user_id: int,
+        user: User = Depends(current_user),
+        session: Session = Depends(db),
+    ):
+        """M9: the authenticated user's own characters (client bootstrap, no PII)."""
+        if user_id != user.id:
+            raise HTTPException(status_code=403, detail="not your user")
         from app.db.models import Character
 
         rows = (
@@ -1803,8 +1809,7 @@ def create_app(settings, session_factory: sessionmaker):
         )
         return [
             {"id": c.id, "name": f"{c.first_name} {c.last_name}",
-             "alive": bool(c.alive), "control_mode": c.control_mode,
-             "looks": c.looks, "biography": c.biography}
+             "alive": bool(c.alive), "control_mode": c.control_mode}
             for c in rows
         ]
 
