@@ -484,26 +484,29 @@ class TestOutfitAPI:
         assert "outfit_mode" not in data  # owner-only key (m67 discipline)
 
     def test_by_user_payload_has_no_outfit_mode(self, world):
-        """F1 (review): /characters/by-user/{id} is UNAUTHENTICATED in base
-        (pre-existing IDOR, separate ticket) — outfit_mode must NOT ride it.
-        The profile UI reads the value from the owner-gated
-        GET /characters/{cid} cold-load (covered by
-        test_patch_owner_sets_mode_and_read_model). Regression pin: the
-        by-user payload stays outfit-free for anonymous AND authenticated
-        callers alike."""
+        """F1 (review) → #214: /characters/by-user/{id} used to be
+        UNAUTHENTICATED (pre-existing IDOR) — outfit_mode must NOT ride it.
+        Since #214 the endpoint is auth-gated (anonymous callers get 401)
+        and the bootstrap payload is pinned to
+        {id, name, alive, control_mode} (tests/m214). The profile UI reads
+        the value from the owner-gated GET /characters/{cid} cold-load
+        (covered by test_patch_owner_sets_mode_and_read_model).
+        Regression pin: the payload stays outfit-free for the
+        authenticated owner."""
         client, factory, _, cid = world
-        # owner sets a non-default mode, then anyone may list the row
+        # owner sets a non-default mode, then lists their own rows
         r = client.patch(f"/characters/{cid}/outfit",
                          json={"outfit_mode": "formal"})
         assert r.status_code == 200, r.text
         me = client.get("/auth/me").json()
         anon = TestClient(client.app)
-        # anonymous AND authenticated callers alike
-        for cl in (anon, client):
-            rows = cl.get(f"/characters/by-user/{me['id']}").json()
-            assert len(rows) == 1
-            assert "outfit_mode" not in rows[0], (
-                "outfit_mode leaked into the unauthenticated by-user payload")
+        # #214: the anonymous channel is closed outright
+        r = anon.get(f"/characters/by-user/{me['id']}")
+        assert r.status_code == 401, r.text
+        rows = client.get(f"/characters/by-user/{me['id']}").json()
+        assert len(rows) == 1
+        assert "outfit_mode" not in rows[0], (
+            "outfit_mode leaked into the by-user payload")
 
     def test_patch_npc_character_403(self, world):
         """F4: NPCs have no owning user — a PATCH can never be authorized."""

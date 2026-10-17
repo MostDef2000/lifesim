@@ -87,11 +87,11 @@ class TestBioLooks:
                 user_id=user.id).one()
             assert char.looks == "Рыжая, веснушки"
             assert "Владивостоке" in char.biography
-            # by-user endpoint exposes both
-            rows = client.get(
-                f"/characters/by-user/{user.id}").json()
-            assert rows[0]["looks"] == "Рыжая, веснушки"
-            assert "Рейнеке" in rows[0]["biography"]
+            # by-user no longer carries PII (#214) — the owner-gated
+            # detail endpoint does
+            data = client.get(f"/characters/{char.id}").json()
+            assert data["looks"] == "Рыжая, веснушки"
+            assert "Рейнеке" in data["biography"]
 
     def test_optional_empty(self, env):
         settings, factory, client = env
