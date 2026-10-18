@@ -121,7 +121,7 @@ function dayTime(ts) {
 /* ---------- routing ---------- */
 
 const routes = {
-  "#/login": viewAuth, "#/world": viewWorld, "#/chat": viewChat,
+  "#/login": viewAuth, "#/create": viewCreateCharacter, "#/world": viewWorld, "#/chat": viewChat,
   "#/people": viewPeople,
   "#/inventory": viewInventory, "#/shop": viewShop, "#/tasks": viewTasks, "#/desire": viewDesire,
   "#/profile": viewProfile, "#/admin": viewAdmin, "#/external": viewExternal,
@@ -143,6 +143,11 @@ async function route() {
     } catch (e) { S.character = null; }
   }
   const hash = location.hash;  // #161: empty hash is normalized at the top of route(); no fallback needed
+  // 020/#118 P1: a user without a character gets the creator screen for ANY
+  // hash. The #/profile carve-out below is deliberate: #/profile falls
+  // through to viewProfile, whose #128 null-guard hands off to the creator,
+  // and the creator normalizes the address to #/create (its own route).
+  // Every other hash short-circuits straight into the creator.
   if (!S.character && hash !== "#/profile") return viewCreateCharacter();
   (routes[hash] || viewWorld)();
 }
@@ -238,6 +243,7 @@ function viewAuth() {
       S.user = await api("/auth/me");
       S.authProbed = false;
       S.character = null;
+      creatorResetDraft();  // W118-RV1 F1: fresh login must not inherit the previous session's draft
       gotoWorld();  // #161: single dispatch — no direct route() next to the hash assignment
     } catch (e) { err.textContent = e.message; }
     finally {
@@ -287,37 +293,213 @@ function viewAuth() {
   app.replaceChildren(landing);
 }
 
-/* ---------- character creation ---------- */
+/* ---------- character creation (020/#118 P1: the #/create screen) ---------- */
+
+/* 020 P1: structured appearance fields are UI-ONLY until the P2 migration
+   (character_appearances). Their values live in CREATOR_DRAFT so P2 can wire
+   persistence; ONLY the free-text prompt persists into `looks` (≤500) at
+   confirm — the POST body stays name/sex/age/looks/biography (m14). */
+const CREATOR_FIELDS = [
+  ["face", "Лицо"], ["eyes", "Глаза"], ["nose", "Нос"], ["lips", "Губы"],
+  ["hair", "Волосы"], ["hairColor", "Цвет волос"], ["skin", "Кожа"],
+  ["height", "Рост"], ["weight", "Вес"], ["build", "Телосложение"],
+  ["chest", "Грудь"], ["extra", "Дополнительные особенности"],
+];
+
+/* 020 P1: the COMMON biography tag pool is deliberately gender-neutral —
+   every ingredient is a present-tense verb, a prepositional construction,
+   or a clause with an inanimate subject: no gendered person-nouns, no
+   past-tense person verbs, no gendered adjective forms (tests/m120 pins
+   this neutrality against a blacklist). */
+const CREATOR_TAGS = [
+  ["origin", ["из Владивостока", "с материка", "из приморского посёлка",
+    "детство прошло в городе", "давно на острове", "недавно на острове"]],
+  ["work", ["работает в кафе", "чинит лодки", "ловит и коптит рыбу",
+    "ведёт маленький магазин", "пишет картины", "учится на повара",
+    "ухаживает за садом"]],
+  ["nature", ["любит море", "любит тишину и книги", "легко знакомится",
+    "держится особняком", "не боится рисковать", "всё считает заранее",
+    "любит шумные компании", "умеет слушать"]],
+  ["dreams", ["ищет новую жизнь", "мечтает о семье", "хочет открыть своё дело",
+    "хочет увидеть большой город", "хочет построить дом у пирса",
+    "мечтает о путешествиях", "ищет новых друзей"]],
+];
+const CREATOR_GROUP_NAMES = { origin: "Откуда", work: "Занятия",
+  nature: "Характер", dreams: "Мечты" };
+
+/* 020 P1: creator draft state lives OUTSIDE the rendered tree — the view
+   re-renders once when the queued hash normalization re-enters route()
+   (the viewAuth pattern), and inputs unmounted by that render would lose
+   typed values. Seed on build + capture on input keeps the draft. */
+const CREATOR_DRAFT = { appearance: {}, appearancePrompt: "", bio: "", tags: [] };
+
+/* W118-RV1 F1: the draft is per-session private input (name, bio, appearance).
+   Reset it on every auth transition — logout, account deletion, successful
+   creation, and fresh login — so the next user of the same browser never
+   sees the previous user's identity data prefilled. */
+function creatorResetDraft() {
+  CREATOR_DRAFT.appearance = {};
+  CREATOR_DRAFT.appearancePrompt = "";
+  CREATOR_DRAFT.bio = "";
+  CREATOR_DRAFT.tags = [];
+}
+
+/* 020 P1: draft assembly is deterministic TEMPLATE concatenation — no LLM
+   (the world must work without one): fixed group order (the CREATOR_TAGS
+   order), ingredients joined with ", ", groups with ". ", leading capital.
+   Free text stays first-class: the biography textarea is rebuilt ONLY by an
+   explicit assembly action — a tag click or the «Собрать черновик» button.
+   Nothing else ever writes into it (no auto-assembly on render, navigation
+   or confirm), so manual edits cannot be clobbered; confirm reads the
+   textarea value itself, so the last user edit always wins. */
+function creatorAssembleBio(selected) {
+  const cap = (s) => s.charAt(0).toUpperCase() + s.slice(1);
+  const parts = [];
+  for (const [group] of CREATOR_TAGS) {
+    const items = selected.filter((t) => t.group === group).map((t) => t.text);
+    if (items.length) parts.push(cap(items.join(", ")));
+  }
+  return parts.length ? parts.join(". ") + "." : "";
+}
 
 function viewCreateCharacter() {
-  location.hash = "#/profile";
+  // One character per player: a stale #/create deep link with a character
+  // already on the island lands on the profile (the character-management
+  // screen) instead of offering a second creation. The no-character path
+  // below normalizes the address to #/create — this view's own route.
+  if (S.character) { location.hash = "#/profile"; return; }
+  location.hash = "#/create";
   const name = el("input", { placeholder: "Имя Фамилия" });
   const sex = el("select", {},
     el("option", { value: "F" }, "Ж"), el("option", { value: "M" }, "М"));
   const age = el("input", { type: "number", value: "28", min: "18", max: "80" });
   const looks = el("textarea", { placeholder: "Внешность (необязательно)", maxlength: "500" });
   const biography = el("textarea", { placeholder: "Биография (необязательно)", maxlength: "2000" });
+
+  // Draft persistence across re-renders: seed from CREATOR_DRAFT, capture
+  // every keystroke (the chat-draft pattern).
+  looks.value = CREATOR_DRAFT.appearancePrompt || "";
+  looks.addEventListener("input", () => { CREATOR_DRAFT.appearancePrompt = looks.value; });
+  biography.value = CREATOR_DRAFT.bio || "";
+  biography.addEventListener("input", () => { CREATOR_DRAFT.bio = biography.value; });
+
+  // The ONLY draft-writing sites are this function and the two explicit
+  // assembly actions (tag click / «Собрать черновик» button) below.
+  function rebuildDraft() {
+    const draft = creatorAssembleBio(CREATOR_DRAFT.tags);
+    biography.value = draft;
+    CREATOR_DRAFT.bio = draft;
+  }
+
+  // 12 structured appearance inputs — UI-only in P1 (see CREATOR_FIELDS).
+  const appearanceGrid = el("div", { class: "creator-appearance" },
+    ...CREATOR_FIELDS.map(([key, lbl]) => {
+      const input = el("input", { placeholder: lbl, "aria-label": lbl });
+      input.value = CREATOR_DRAFT.appearance[key] || "";
+      input.addEventListener("input", () => { CREATOR_DRAFT.appearance[key] = input.value; });
+      return el("div", { class: "creator-field" }, el("label", {}, lbl), input);
+    }));
+
+  // «Одежда» rides the EXISTING #205 outfit control (app.py enum
+  // auto|casual|formal|nude — owner-only PATCH; auto is the no-touch default).
+  const outfit = el("select", {},
+    el("option", { value: "auto" }, "auto — как сейчас"),
+    el("option", { value: "casual" }, "casual — повседневная одежда"),
+    el("option", { value: "formal" }, "formal — строгая одежда"),
+    el("option", { value: "nude" }, "nude — без одежды (18+)"));
+
+  // Tag cloud: a click toggles the ingredient AND rebuilds the draft (the
+  // documented explicit-assembly path). Selection styling is restored on
+  // re-render from CREATOR_DRAFT.tags.
+  const tagCloud = el("div", { class: "creator-tags" },
+    ...CREATOR_TAGS.map(([group, items]) =>
+      el("div", { class: "creator-tag-group" },
+        el("div", { class: "muted creator-tag-group-name" }, CREATOR_GROUP_NAMES[group]),
+        el("div", { class: "creator-tag-row" },
+          ...items.map((text) => {
+            const chip = el("button", {
+              type: "button",
+              class: "creator-tag",
+              onclick: () => {
+                const i = CREATOR_DRAFT.tags.findIndex(
+                  (t) => t.group === group && t.text === text);
+                if (i >= 0) CREATOR_DRAFT.tags.splice(i, 1);
+                else CREATOR_DRAFT.tags.push({ group, text });
+                chip.classList.toggle("sel", i < 0);
+                rebuildDraft();
+              },
+            }, text);
+            if (CREATOR_DRAFT.tags.some(
+                (t) => t.group === group && t.text === text)) {
+              chip.classList.add("sel");
+            }
+            return chip;
+          })))));
+
   const err = el("div", { class: "err-text" });
-  app.replaceChildren(el("div", { class: "authbox panel" },
-    el("h1", {}, "Новый житель Рейнеке"),
-    el("label", {}, "Имя"), name,
-    el("label", {}, "Пол"), sex,
-    el("label", {}, "Возраст"), age,
-    el("label", {}, "Внешность"), looks,
-    el("label", {}, "Биография"), biography,
-    el("div", { style: "margin-top:10px" }, el("button", {
-      class: "primary", onclick: async () => {
-        try {
-          const r = await api("/characters", { method: "POST", body: {
-            name: name.value, sex: sex.value, age: Number(age.value),
-            looks: looks.value.trim() || undefined,
-            biography: biography.value.trim() || undefined } });
-          S.character = r;
-          gotoWorld();  // #161: single dispatch — no direct route() next to the hash assignment
-        } catch (e) { err.textContent = e.message; }
-      },
-    }, "Появиться на острове")), err,
-  ));
+  const confirmBtn = el("button", {
+    class: "primary", type: "button", onclick: async () => {
+      if (confirmBtn.disabled) return;  // no double-submit while in flight
+      confirmBtn.disabled = true;
+      try {
+        const r = await api("/characters", { method: "POST", body: {
+          name: name.value, sex: sex.value, age: Number(age.value),
+          looks: looks.value.trim() || undefined,
+          biography: biography.value.trim() || undefined } });
+        creatorResetDraft();  // W118-RV1 F1: consumed draft must not leak on logout
+        S.character = r;
+        // 020: outfit control through the existing #205 endpoint, only for
+        // an explicit non-default mode; best-effort — the character exists
+        // at this point, a failed PATCH must not block the arrival.
+        if (outfit.value !== "auto") {
+          try {
+            await api(`/characters/${r.id}/outfit`, { method: "PATCH",
+              body: { outfit_mode: outfit.value } });
+            S.character.outfit_mode = outfit.value;
+          } catch (e) { toast(e.message, true); }
+        }
+        gotoWorld();  // #161: single dispatch — no direct route() next to the hash assignment
+      } catch (e) { err.textContent = e.message; }
+      finally { confirmBtn.disabled = false; }
+    },
+  }, "Появиться на острове");
+
+  app.replaceChildren(el("main", { class: "creator-shell" },
+    el("section", { class: "panel creator-hero" },
+      el("div", { class: "muted creator-eyebrow" }, "ВЛ1: Рейнеке"),
+      el("h1", {}, "Новый житель Рейнеке"),
+      el("p", { class: "creator-intro" },
+        "Соберите образ и биографию до появления на острове. Всё, кроме имени, необязательно — свободный текст главный.")),
+    el("div", { class: "creator-form" },
+      el("section", { class: "panel" },
+        el("h2", {}, "Кто вы"),
+        el("label", {}, "Имя"), name,
+        el("label", {}, "Пол"), sex,
+        el("label", {}, "Возраст"), age),
+      el("section", { class: "panel" },
+        el("h2", {}, "Образ"),
+        appearanceGrid,
+        el("label", {}, "Внешность"), looks,
+        el("p", { class: "muted creator-note" },
+          "Свободное описание — основное; отдельные поля подсказывают детали. Превью внешности появится позже (P2).")),
+      el("section", { class: "panel" },
+        el("h2", {}, "Одежда"),
+        el("label", {}, "Одежда"), outfit,
+        el("p", { class: "muted creator-note" },
+          "Как персонаж одевается по умолчанию: auto — как сегодня, остальные режимы добавляют одежду в портрет. nude — только для 18+. Изменить можно позже в профиле.")),
+      el("section", { class: "panel" },
+        el("h2", {}, "Биография"),
+        el("p", { class: "muted creator-note" },
+          "Клик по ингредиенту добавит его в черновик. Можно писать что угодно своими словами — ваша правка не сотрётся, пока вы сами не нажмёте сборку."),
+        tagCloud,
+        el("div", { class: "creator-bio-actions" },
+          el("button", { type: "button", onclick: rebuildDraft }, "Собрать черновик")),
+        el("label", {}, "Биография"), biography,
+        el("p", { class: "muted creator-note" },
+          "Биография видна миру и помогает острову понять, кто вы.")),
+      el("section", { class: "panel creator-confirm" },
+        err,
+        el("div", { class: "creator-actions" }, confirmBtn)))));
 }
 
 /* ---------- portrait + scene (014, M6 visual pipeline) ---------- */
@@ -3016,6 +3198,7 @@ function renderProfile(modeSel) {
           await api("/auth/logout", { method: "POST", body: {} });
           S.user = null; S.character = null;
           S.authProbed = false;
+          creatorResetDraft();  // W118-RV1 F1: logout clears the creator draft
           location.hash = "#/login";
           route();
         } }, "Выйти")),
@@ -3029,6 +3212,7 @@ function renderProfile(modeSel) {
           try {
             await api("/auth/account/delete", { method: "POST", body: { confirm: S.confirmDelete || "" } });
             S.user = null; S.character = null;
+            creatorResetDraft();  // W118-RV1 F1: deletion clears the creator draft
             // #138: no S.authProbed reset here (m132 pins exactly two reset
             // sites) — after deletion auth state is known-gone and the
             // cookie is cleared server-side; a re-probe would only 401.
