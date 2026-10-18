@@ -8,6 +8,9 @@ Visual layer is read-only over world state (П1-аналог): writes only visua
 - with visual.enabled=false, unknown/dead/non-owned cids answer 404 too (the guard
   runs before the gate), while an alive player character (own or another player's)
   keeps the 503 gate — matching the m6/m158 pins.
+#193 R1: a canonical portrait (or any asset) linked to a PLAYER character is
+readable only by its owner; a foreign user gets the same 404 as the miss path
+(no-disclosure), also before the gate. NPC-linked and scene assets stay any-auth.
 NOTE: no `from __future__ import annotations` — it breaks FastAPI resolution of the
 locally-defined Pydantic models (same trap as app.py/ws.py in M5).
 """
@@ -234,6 +237,30 @@ def register_visual_routes(app, settings: Settings, session_factory: sessionmake
             raise HTTPException(status_code=403, detail="not your character")
         return character
 
+    def _asset_player_owner_id(session: Session, asset) -> int | None:
+        """#193 R1: user_id of the player character linked to this asset.
+
+        None for scene assets (character_id NULL) and NPC-linked assets
+        (character_id -> user_id NULL): those stay any-auth for reads and
+        canonical writes. Player-linked assets are private to their owner.
+        A dangling character_id (no row — an integrity violation) is
+        treated as unowned (conservative vs 404-everyone: the asset stays
+        reachable, the invariant flags the dangling state separately).
+        """
+        from app.db.models import Character
+
+        if asset.character_id is None:
+            return None
+        character = (
+            session.query(Character)
+            .filter_by(
+                world_id=settings.world.world_id, id=asset.character_id)
+            .first()
+        )
+        if character is None:
+            return None
+        return character.user_id
+
     class CanonicalIn(BaseModel):
         canonical: bool
 
@@ -328,6 +355,38 @@ def register_visual_routes(app, settings: Settings, session_factory: sessionmake
         asset = session.get(VisualAsset, asset_id)
         if asset is None or asset.world_id != settings.world.world_id:
             raise HTTPException(status_code=404, detail="asset not found")
+        # #193 R1 (write side): an asset linked to a PLAYER character may be
+        # canonical-flipped (promote or demote) only by its owner — 403 BEFORE
+        # any mutation (write-primitive convention, mirrors
+        # _owned_character_for_portrait). NPC-linked (user_id NULL) and scene
+        # assets (character_id NULL) stay writable by any authenticated user.
+        owner_id = _asset_player_owner_id(session, asset)
+        if owner_id is not None and owner_id != request_user.id:
+            raise HTTPException(status_code=403, detail="not your character")
+        # #193 R2: single-canonical invariant, app-level (CharacterDesire
+        # pattern, no DDL): promoting a portrait demotes every sibling
+        # canonical portrait of the same character in THIS transaction
+        # (demote-before-promote), then the promote lands below. Idempotent
+        # for an already-canonical asset; the integrity invariant (R10)
+        # watches the same tuple.
+        if (
+            body.canonical
+            and asset.asset_type == "portrait"
+            and asset.character_id is not None
+        ):
+            siblings = (
+                session.query(VisualAsset)
+                .filter_by(
+                    world_id=settings.world.world_id,
+                    asset_type="portrait",
+                    character_id=asset.character_id,
+                    canonical=True,
+                )
+                .filter(VisualAsset.id != asset.id)
+                .all()
+            )
+            for sibling in siblings:
+                sibling.canonical = False
         asset.canonical = body.canonical
         session.commit()
         return _asset_payload(asset)
@@ -344,6 +403,12 @@ def register_visual_routes(app, settings: Settings, session_factory: sessionmake
         asset = session.get(VisualAsset, asset_id)
         if asset is None or asset.world_id != settings.world.world_id:
             raise HTTPException(status_code=404, detail="asset not found")
+        # #193 R1: an asset linked to a PLAYER character is visible only to
+        # its owner; a foreign user gets the SAME 404 as the miss path above
+        # (no-disclosure). NPC-linked and scene assets stay any-auth.
+        owner_id = _asset_player_owner_id(session, asset)
+        if owner_id is not None and owner_id != request_user.id:
+            raise HTTPException(status_code=404, detail="asset not found")
         return _asset_payload(asset)
 
     @app.get("/visual/assets/{asset_id}/file")
@@ -357,6 +422,11 @@ def register_visual_routes(app, settings: Settings, session_factory: sessionmake
 
         asset = session.get(VisualAsset, asset_id)
         if asset is None or asset.world_id != settings.world.world_id:
+            raise HTTPException(status_code=404, detail="asset not found")
+        # #193 R1: same ownership rule as GET /visual/assets/{id} — the
+        # asset-id bypass (metadata vs bytes) is closed identically.
+        owner_id = _asset_player_owner_id(session, asset)
+        if owner_id is not None and owner_id != request_user.id:
             raise HTTPException(status_code=404, detail="asset not found")
         try:
             data = store.read(asset.storage_path)
@@ -373,6 +443,13 @@ def register_visual_routes(app, settings: Settings, session_factory: sessionmake
         from app.db.models import Character, VisualAsset
 
         world_id = settings.world.world_id
+
+        def _not_found() -> HTTPException:
+            # Fresh instance per raise (a raised HTTPException carries a
+            # traceback; never share one instance across requests).
+            return HTTPException(
+                status_code=404, detail="canonical portrait not found")
+
         asset = (
             session.query(VisualAsset)
             .filter_by(
@@ -382,7 +459,27 @@ def register_visual_routes(app, settings: Settings, session_factory: sessionmake
             .first()
         )
         if asset is not None:
+            # #193 R1: a canonical portrait linked to a PLAYER character is
+            # readable only by its owner; a foreign user gets the SAME 404
+            # as the canonical-miss path when visual is enabled
+            # (no-disclosure). W193-RV F1: gate() runs FIRST on the found
+            # branch too — otherwise, with visual disabled, foreign users
+            # could binary-probe canonical existence (404 vs 503). With the
+            # gate first: disabled → 503 for every found-read (own, NPC,
+            # foreign — uniform, as on base); enabled → 404/404. NPC canons
+            # (user_id NULL) stay any-auth.
             gate()
+            character = (
+                session.query(Character)
+                .filter_by(world_id=world_id, id=cid)
+                .first()
+            )
+            if (
+                character is not None
+                and character.user_id is not None
+                and character.user_id != request_user.id
+            ):
+                raise _not_found()
             return _asset_payload(asset)
 
         # #191: canonical miss. Character guard first (pure reads, same 404
@@ -391,12 +488,6 @@ def register_visual_routes(app, settings: Settings, session_factory: sessionmake
         # pure-read contract (own portraits flow through POST only; another
         # player's are never generated/served implicitly) and keeps the 503
         # gate when visual is disabled (m6/m158 pins).
-        def _not_found() -> HTTPException:
-            # Fresh instance per raise (a raised HTTPException carries a
-            # traceback; never share one instance across requests).
-            return HTTPException(
-                status_code=404, detail="canonical portrait not found")
-
         character = (
             session.query(Character)
             .filter_by(world_id=world_id, id=cid)
