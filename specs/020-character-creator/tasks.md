@@ -2,15 +2,15 @@
 
 ## Волна 1 — P1 (креатор + биография-теги)
 
-- [ ] Экран `#/create` заменяет короткую форму `viewCreateCharacter`
+- [x] Экран `#/create` заменяет короткую форму `viewCreateCharacter`
       (визуально выраженный onboarding-блок).
-- [ ] Structured appearance form: 12 полей + free-text prompt (P1 —
+- [x] Structured appearance form: 12 полей + free-text prompt (P1 —
       сохранение free-text в `looks`, structured ждёт P2-миграции).
-- [ ] Biography tag cloud: нейтральный список ингредиентов, клик добавляет
+- [x] Biography tag cloud: нейтральный список ингредиентов, клик добавляет
       ingredient, draft собирается шаблоном, полностью редактируем.
-- [ ] Теги не обязательны, свободный текст first-class.
-- [ ] Тест-контракт: тег-список без гендерных стереотипов.
-- [ ] Пин-дисциплина: 0 запрещённых литералов; честные bump'ы с трейлами.
+- [x] Теги не обязательны, свободный текст first-class.
+- [x] Тест-контракт: тег-список без гендерных стереотипов.
+- [x] Пин-дисциплина: 0 запрещённых литералов; честные bump'ы с трейлами.
 - [ ] Полный not-slow зелёный + peer review + runtime-скрин.
 
 ## Волна 2 — P2 (preview + canonical appearance)

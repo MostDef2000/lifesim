@@ -1893,6 +1893,118 @@ button.danger:hover { background: #93301f; }
   .welcome-photos img { max-width: 240px; }
 }
 
+/* ---------- 020 P1 (#118): character-creator onboarding screen ----------
+   #/create renders outside .world-shell, so the cool :root tokens would
+   leak in; mirror the warm custom properties (same values as
+   .profile-shell/.people-shell). Same deliberate deviation: NO --w-line
+   definition — the pinned token count stays 4, and the :root fallback
+   (#172) carries the IDENTICAL value, so var(--w-line) resolves to the
+   same color inside .creator-shell. Single centered onboarding column:
+   hero band on top, stacked panels (кто вы / образ / одежда / биография /
+   подтверждение); the appearance grid collapses 3→2→1 columns at 1100px /
+   640px (profile-shell collapse precedent). Every new selector is scoped
+   under .creator-shell (specificity lesson: shell-scoped overrides must
+   beat the flat globals — input/select/textarea, button.primary, .panel). */
+.creator-shell {
+  --w-bg: #0a1016;
+  --w-panel: rgba(23, 33, 42, 0.72);
+  --w-panel-deep: rgba(12, 19, 25, 0.6);
+  --w-text: #dde5ec;
+  --w-dim: #8fa1b1;
+  --w-accent: #e2b45a;
+  --w-warm: rgba(226, 180, 90, 0.15);
+  --w-warm-line: rgba(226, 180, 90, 0.4);
+  --w-warm-ink: #1d1506;
+  display: grid;
+  gap: 14px;
+  align-content: start;
+  max-width: 860px;
+  margin: 0 auto;
+}
+.creator-shell .panel {
+  background: var(--w-panel);
+  border-color: var(--w-line);
+  border-radius: 14px;
+  backdrop-filter: blur(10px);
+  box-shadow: 0 12px 30px rgba(2, 8, 14, 0.35);
+}
+/* the shell stacks panels by grid gap — the flat sibling margin would
+   double the spacing (profile-shell precedent; 0,3,0 beats .panel + .panel
+   at 0,2,0) */
+.creator-shell .panel + .panel { margin-top: 0; }
+.creator-shell .muted { color: var(--w-dim); }
+.creator-shell h1 { color: var(--w-text); }
+.creator-shell h2 { color: var(--w-dim); }
+.creator-shell button.primary {
+  background: var(--w-accent);
+  color: var(--w-warm-ink);
+}
+.creator-shell button.primary:hover { border-color: var(--w-warm-ink); }
+.creator-shell button:hover { border-color: var(--w-accent); }
+.creator-shell input,
+.creator-shell select,
+.creator-shell textarea {
+  background: var(--w-panel-deep);
+  color: var(--w-text);
+  border: 1px solid var(--w-line);
+  border-radius: 10px;
+}
+
+/* hero: warm gradient band over the shell (profile-hero mirror) */
+.creator-shell .creator-hero {
+  padding: 22px 24px;
+  background:
+    radial-gradient(640px 240px at 18% 0%, rgba(226, 180, 90, 0.10), transparent 62%),
+    linear-gradient(180deg, rgba(23, 33, 42, 0.55), var(--w-panel-deep));
+}
+.creator-shell .creator-eyebrow {
+  font-size: 11px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+.creator-shell .creator-intro { margin: 6px 0 0; max-width: 60ch; }
+
+/* structured appearance: 12 fields in a 3-column grid (P1: UI-only) */
+.creator-shell .creator-appearance {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px 10px;
+  margin-bottom: 4px;
+}
+.creator-shell .creator-field { display: grid; gap: 2px; }
+.creator-shell .creator-note { margin: 8px 0 0; font-size: 12px; }
+
+/* biography tag cloud: grouped neutral ingredient chips */
+.creator-shell .creator-tags { display: grid; gap: 8px; margin: 8px 0; }
+.creator-shell .creator-tag-row { display: flex; flex-wrap: wrap; gap: 6px; }
+.creator-shell .creator-tag {
+  padding: 3px 10px;
+  border: 1px solid var(--w-line);
+  border-radius: 999px;
+  background: var(--w-panel-deep);
+  color: var(--w-dim);
+  font-size: 12px;
+}
+.creator-shell .creator-tag:hover { color: var(--w-text); }
+.creator-shell .creator-tag.sel {
+  border-color: var(--w-accent);
+  background: var(--w-warm);
+  color: var(--w-text);
+}
+.creator-shell .creator-bio-actions { margin: 2px 0 4px; }
+
+.creator-shell .creator-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+
+/* responsive collapse: appearance grid 3→2 at ≤1100px (the profile-shell
+   breakpoint), one per row on narrow phones */
+@media (max-width: 1100px) {
+  .creator-shell .creator-appearance { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@media (max-width: 640px) {
+  .creator-shell .creator-appearance { grid-template-columns: 1fr; }
+  .creator-shell .creator-hero { padding: 16px; }
+}
+
 /* #175: connection banner — persistent offline signal driven by consecutive
    pollEvents failures (WS close is routine on navigation, never drives it).
    Warm-warn family on the dark panel bg; fixed top-center, below nothing —
