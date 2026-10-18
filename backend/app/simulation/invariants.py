@@ -828,7 +828,8 @@ def run_invariant_checks(session: Session, world_id: str, settings) -> List[Dict
 
     # visual_asset_integrity (M6, R10): asset_type closed set; canonical flag
     # on real rows; character/location references valid when present;
-    # storage paths unique. Gated on visual.enabled (П2-аналог).
+    # storage paths unique; #193 R2 — at most one canonical portrait per
+    # (world_id, character_id). Gated on visual.enabled (П2-аналог).
     visual_gate = bool(getattr(settings, "visual", None) and settings.visual.enabled)
     if not visual_gate:
         results.append({
@@ -845,6 +846,7 @@ def run_invariant_checks(session: Session, world_id: str, settings) -> List[Dict
             loc.id for loc in session.query(_Loc).filter_by(world_id=world_id).all()
         }
         seen_paths = set()
+        canonical_portraits: dict[str, int] = {}
         for a in assets:
             if a.asset_type not in ("portrait", "scene"):
                 va_violations.append(f"asset {a.id}: bad type {a.asset_type}")
@@ -855,6 +857,20 @@ def run_invariant_checks(session: Session, world_id: str, settings) -> List[Dict
             if a.storage_path in seen_paths:
                 va_violations.append(f"asset {a.id}: duplicate path {a.storage_path}")
             seen_paths.add(a.storage_path)
+            # #193 R2: single-canonical portrait per character (app-level
+            # demote-before-promote in set_canonical keeps this true).
+            if (
+                a.asset_type == "portrait"
+                and a.character_id is not None
+                and a.canonical
+            ):
+                canonical_portraits[a.character_id] = (
+                    canonical_portraits.get(a.character_id, 0) + 1
+                )
+        for cid_, count in canonical_portraits.items():
+            if count > 1:
+                va_violations.append(
+                    f"character {cid_}: {count} canonical portraits")
         results.append({
             "name": "visual_asset_integrity",
             "ok": len(va_violations) == 0,
