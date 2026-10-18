@@ -1668,8 +1668,12 @@ def create_app(settings, session_factory: sessionmaker):
 
     @app.get("/world/events")
     def get_world_events(
-        since: int = 0, limit: int = 100, session: Session = Depends(db)
+        since: int = 0, limit: int = 100,
+        session: Session = Depends(db), user: User = Depends(current_user),
     ):
+        """#215: world event feed — auth required (401 anonymous), current world
+        only, id-ascending cursor since, payload served verbatim to
+        authenticated users (may contain player identity fields)."""
         from app.db.models import WorldEvent
 
         limit = max(1, min(limit, 500))
