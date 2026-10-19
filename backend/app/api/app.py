@@ -1851,7 +1851,13 @@ def create_app(settings, session_factory: sessionmaker):
         ]
 
     @app.get("/locations/{loc_id}")
-    def get_location(loc_id: int, session: Session = Depends(db)):
+    def get_location(
+        loc_id: int, user: User = Depends(current_user), session: Session = Depends(db)
+    ):
+        """#217: auth-gated (same family as the #215 /world/events gate) —
+        presence ids (characters_here) are disclosed only to authenticated
+        users; anonymous callers get 401. Authenticated response shape is
+        unchanged (spec 005 R8)."""
         from app.db.models import Character, Location
 
         loc = session.get(Location, loc_id)

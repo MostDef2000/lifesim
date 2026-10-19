@@ -133,8 +133,12 @@ class TestAuthGate:
 
         anon = TestClient(create_app(settings, sessionmaker(bind=engine)))
         # endpoints the SPA hits after login all reject anonymous callers
-        # (/world/events gated since #215 — spec 009 AE4: 401 without cookie)
-        for path in ["/auth/me", "/locations", "/admin/overview", "/world/events"]:
+        # (/world/events gated since #215 — spec 009 AE4: 401 without cookie;
+        # /locations/{id} gated since #217 — presence-ids leak, spec 005 R8)
+        for path in [
+            "/auth/me", "/locations", "/locations/1",
+            "/admin/overview", "/world/events",
+        ]:
             assert anon.get(path).status_code == 401, path
 
 
