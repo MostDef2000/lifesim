@@ -12,9 +12,9 @@ observable artifact.
 - Route + structure: "#/create" registered, the four panels + confirm,
   the 12 structured appearance fields (CREATOR_FIELDS verbatim), the
   free-text maxlengths (looks ≤500, biography ≤2000).
-- P1 persistence contract: POST /characters keeps the m14 body shape
-  (name/sex/age/looks/biography, empty → undefined); structured appearance
-  is UI-ONLY — no CREATOR_FIELDS key may appear in ANY request body.
+- P2 persistence contract (evolved from P1's UI-only shape, plan.md:26):
+  POST /characters carries name/sex/age/looks/biography + appearance/
+  appearance_prompt; appearance is omitted when every field is empty.
 - Outfit contract: the select mirrors the backend enum exactly
   (app.py set_outfit — cross-checked against the server source), PATCH
   /characters/{id}/outfit fires only for a non-auto choice, auto is the
@@ -143,33 +143,50 @@ def test_creator_fields_pins():
     assert view.count('el("div", { class: "creator-appearance" },') == 1
 
 
-# ---------- 2. P1 persistence contract ----------
+# ---------- 2. P2 persistence contract ----------
 
 def test_p1_persistence_contract_pins():
+    # 020 P2: payload contract evolved per plan.md:26 (structured appearance
+    # persists at confirm) — pin updated deliberately, not weakened. The
+    # P1 "UI-ONLY" leak assertions are superseded: the confirm POST now
+    # carries appearance + appearance_prompt; the empty case is omitted
+    # client-side (absent == the pre-020 server behavior).
     js = _read(APP_JS)
-    # Draft state exists (module-level; P2 will wire its persistence).
+    # Draft state exists (module-level; P2 wired its persistence).
     assert js.count('const CREATOR_DRAFT = { appearance: {}, appearancePrompt: "", '
                     'bio: "", tags: [] };') == 1
-    # POST /characters keeps the m14 body shape exactly (verbatim block).
+    # POST /characters body shape (verbatim block, 020 P2 contract).
     post = ('const r = await api("/characters", { method: "POST", body: {\n'
             '          name: name.value, sex: sex.value, age: Number(age.value),\n'
             '          looks: looks.value.trim() || undefined,\n'
-            '          biography: biography.value.trim() || undefined } });')
+            '          biography: biography.value.trim() || undefined,\n'
+            '          appearance: Object.keys(appearance).length ? appearance : undefined,\n'
+            '          appearance_prompt: looks.value.trim() || undefined } });')
     assert js.count(post) == 1
     assert js.count('api("/characters", { method: "POST"') == 1
-    assert js.count("looks.value.trim() || undefined") == 1
+    # the free text rides BOTH keys (looks unchanged + appearance_prompt)
+    assert js.count("looks.value.trim() || undefined") == 2
     assert js.count("biography.value.trim() || undefined") == 1
-    # The POST body key set is EXACTLY name/sex/age/looks/biography.
+    # The POST body key set is EXACTLY name/sex/age/looks/biography/
+    # appearance/appearance_prompt. NOTE: the ternary "appearance : undefined"
+    # also matches the key regex — assert the SET plus first-occurrence
+    # order (deduped), not the raw findall list.
     block = _body_blocks(js)
     post_block = next(b for b in block if "name: name.value" in b)
-    assert re.findall(r"(?<![\w$])(\w+)\s*:", post_block) == \
-        ["name", "sex", "age", "looks", "biography"]
-    # Structured appearance is UI-ONLY in P1: NO CREATOR_FIELDS key may
-    # appear as a property in ANY request body construction in app.js.
-    for body in block:
-        for key, _label in EXPECTED_FIELDS:
-            assert not re.search(rf"(?<!\w){key}\s*:", body), \
-                f"appearance key {key!r} leaked into a request body: {body[:60]!r}"
+    keys = re.findall(r"(?<![\w$])(\w+)\s*:", post_block)
+    assert set(keys) == {"name", "sex", "age", "looks", "biography",
+                         "appearance", "appearance_prompt"}
+    assert list(dict.fromkeys(keys)) == [
+        "name", "sex", "age", "looks", "biography",
+        "appearance", "appearance_prompt"]
+    # appearance is omitted ENTIRELY when every field is empty; the payload
+    # builder sends filled fields only, mapped to the canonical snake_case
+    # storage keys (hairColor→hair_color, extra→features).
+    assert js.count("function creatorAppearancePayload() {") == 1
+    assert js.count("const appearance = creatorAppearancePayload();") == 1
+    assert js.count('const rename = { hairColor: "hair_color", extra: "features" };') == 1
+    assert js.count('const v = (CREATOR_DRAFT.appearance[key] || "").trim();') == 1
+    assert js.count("if (v) out[rename[key] || key] = v;") == 1
 
 
 # ---------- 3. outfit contract ----------

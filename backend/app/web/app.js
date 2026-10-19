@@ -295,10 +295,11 @@ function viewAuth() {
 
 /* ---------- character creation (020/#118 P1: the #/create screen) ---------- */
 
-/* 020 P1: structured appearance fields are UI-ONLY until the P2 migration
-   (character_appearances). Their values live in CREATOR_DRAFT so P2 can wire
-   persistence; ONLY the free-text prompt persists into `looks` (≤500) at
-   confirm — the POST body stays name/sex/age/looks/biography (m14). */
+/* 020 P1: structured appearance fields (P1 was UI-only; since P2 they
+   persist). Their values live in CREATOR_DRAFT; at confirm the filled
+   fields ride the POST body as `appearance` (creatorAppearancePayload,
+   canonical snake_case keys) and the free-text prompt goes BOTH to
+   `appearance_prompt` and to `looks` (≤500) as today. */
 const CREATOR_FIELDS = [
   ["face", "Лицо"], ["eyes", "Глаза"], ["nose", "Нос"], ["lips", "Губы"],
   ["hair", "Волосы"], ["hairColor", "Цвет волос"], ["skin", "Кожа"],
@@ -342,6 +343,20 @@ function creatorResetDraft() {
   CREATOR_DRAFT.appearancePrompt = "";
   CREATOR_DRAFT.bio = "";
   CREATOR_DRAFT.tags = [];
+}
+
+/* 020 P2: the draft's structured appearance → POST payload. Filled fields
+   only (empty strings dropped); the creator's camelCase draft keys map to
+   the canonical storage keys (APPEARANCE_FIELDS on the server):
+   hairColor→hair_color, extra→features, the rest are already canonical. */
+function creatorAppearancePayload() {
+  const rename = { hairColor: "hair_color", extra: "features" };
+  const out = {};
+  for (const [key] of CREATOR_FIELDS) {
+    const v = (CREATOR_DRAFT.appearance[key] || "").trim();
+    if (v) out[rename[key] || key] = v;
+  }
+  return out;
 }
 
 /* 020 P1: draft assembly is deterministic TEMPLATE concatenation — no LLM
@@ -391,7 +406,7 @@ function viewCreateCharacter() {
     CREATOR_DRAFT.bio = draft;
   }
 
-  // 12 structured appearance inputs — UI-only in P1 (see CREATOR_FIELDS).
+  // 12 structured appearance inputs — persisted at confirm since P2 (see CREATOR_FIELDS).
   const appearanceGrid = el("div", { class: "creator-appearance" },
     ...CREATOR_FIELDS.map(([key, lbl]) => {
       const input = el("input", { placeholder: lbl, "aria-label": lbl });
@@ -442,10 +457,19 @@ function viewCreateCharacter() {
       if (confirmBtn.disabled) return;  // no double-submit while in flight
       confirmBtn.disabled = true;
       try {
+        // 020 P2: the structured appearance rides the confirm POST
+        // (omitted entirely when every field is empty — the server treats
+        // absent as the pre-020 behavior, so a client without these keys
+        // stays compatible). appearance_prompt carries the same free text
+        // as `looks` (the looks behavior is unchanged); limits are
+        // enforced server-side (422 surfaces in err).
+        const appearance = creatorAppearancePayload();
         const r = await api("/characters", { method: "POST", body: {
           name: name.value, sex: sex.value, age: Number(age.value),
           looks: looks.value.trim() || undefined,
-          biography: biography.value.trim() || undefined } });
+          biography: biography.value.trim() || undefined,
+          appearance: Object.keys(appearance).length ? appearance : undefined,
+          appearance_prompt: looks.value.trim() || undefined } });
         creatorResetDraft();  // W118-RV1 F1: consumed draft must not leak on logout
         S.character = r;
         // 020: outfit control through the existing #205 endpoint, only for
@@ -481,7 +505,7 @@ function viewCreateCharacter() {
         appearanceGrid,
         el("label", {}, "Внешность"), looks,
         el("p", { class: "muted creator-note" },
-          "Свободное описание — основное; отдельные поля подсказывают детали. Превью внешности появится позже (P2).")),
+          "Свободное описание — основное; отдельные поля подсказывают детали. Превью внешности появится позже.")),
       el("section", { class: "panel" },
         el("h2", {}, "Одежда"),
         el("label", {}, "Одежда"), outfit,

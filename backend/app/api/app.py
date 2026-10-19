@@ -296,6 +296,12 @@ def create_app(settings, session_factory: sessionmaker):
         age: int = 18
         looks: str | None = None  # 014 (§27): appearance, ≤500 chars
         biography: str | None = None  # 014 (§27): backstory, ≤2000 chars
+        # 020 P2: canonical structured appearance — dict of the 12 creator
+        # fields (validated by validate_appearance: known keys only, str
+        # values ≤120 chars, ≤12 keys) + free-text prompt (≤500). Optional:
+        # absent/empty → no character_appearances row (pre-020 behavior).
+        appearance: dict | None = None
+        appearance_prompt: str | None = None
 
     class MeOut(BaseModel):
         id: int
@@ -416,6 +422,7 @@ def create_app(settings, session_factory: sessionmaker):
         from app.db.models import (
             AdminAuditLog,
             AiRequest,
+            CharacterAppearance,
             CharacterGoal,
             CharacterHealth,
             CharacterJob,
@@ -553,6 +560,12 @@ def create_app(settings, session_factory: sessionmaker):
             session.query(CharacterProfile).filter(
                 CharacterProfile.character_id.in_(cids)
             ).delete(synchronize_session=False)
+            # 020 P2: canonical appearance is a NOT NULL FK child
+            # (character_appearances.character_id) — deleted with its
+            # character or the PRAGMA foreign_keys=ON delete below 500s.
+            session.query(CharacterAppearance).filter(
+                CharacterAppearance.character_id.in_(cids)
+            ).delete(synchronize_session=False)
             session.query(CharacterNeeds).filter(
                 CharacterNeeds.character_id.in_(cids)
             ).delete(synchronize_session=False)
@@ -604,12 +617,22 @@ def create_app(settings, session_factory: sessionmaker):
         body: CharacterIn, user: User = Depends(current_user), session: Session = Depends(db)
     ):
         from app.characters.player import create_player_character
+        from app.db.models import CharacterAppearance
+        from app.visual.descriptor import validate_appearance
 
         looks = (body.looks or "").strip()
         biography = (body.biography or "").strip()
         if len(looks) > 500 or len(biography) > 2000:
             raise HTTPException(
                 status_code=422, detail="looks ≤500, biography ≤2000")
+        appearance_prompt = (body.appearance_prompt or "").strip()
+        if len(appearance_prompt) > 500:
+            raise HTTPException(
+                status_code=422, detail="appearance_prompt ≤500")
+        try:
+            appearance = validate_appearance(body.appearance)
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc))
         settings_ = state["settings"]
         world_id = settings_.world.world_id
         try:
@@ -623,6 +646,16 @@ def create_app(settings, session_factory: sessionmaker):
             detail = str(exc)
             status = 409 if ("taken" in detail or "already owns" in detail) else 422
             raise HTTPException(status_code=status, detail=detail)
+        # 020 P2: canonical appearance persists in the SAME transaction as the
+        # character row — create_player_character only flushes, the commit
+        # below lands both (player.py owns the character insert; this
+        # companion write lives here). Provided-but-empty == absent: no row.
+        if appearance is not None or appearance_prompt:
+            session.add(CharacterAppearance(
+                character_id=character.id,
+                appearance=appearance,
+                appearance_prompt=appearance_prompt or None,
+            ))
         session.commit()
         return {"id": character.id, "name": f"{character.first_name} {character.last_name}".strip(),
                 "control_mode": character.control_mode, "location_id": character.location_id,
