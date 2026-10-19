@@ -27,7 +27,7 @@ General delivery gates follow the global contract `~/.config/opencode/AGENTS.md`
 
 ## Sandbox
 
-This project runs inside the Docker sandbox described by the global contract `~/.config/opencode/AGENTS.md`. Tool availability never grants permission — see `sandbox-guide` skill and `~/.config/opencode/docs/sandbox/*.md` for filesystem, permissions, MCP, and troubleshooting. `references.shared` (`/home/mostdef/vibe/shared/**`) is only readable when `external_directory` allows it.
+This project runs inside the Docker sandbox described by the global contract `~/.config/opencode/AGENTS.md`. Tool availability never grants permission — see `sandbox-guide` skill and `~/.config/opencode/docs/sandbox/*.md` for filesystem, permissions, MCP, and troubleshooting. The single shared dir for all projects is /home/mostdef/vibe/projects/ai-playground/shared (inside the workspace, always readable).
 
 ## Project-specific rules
 
