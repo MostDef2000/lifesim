@@ -101,12 +101,13 @@ PREVIEW_BODY = {
 # The FULL deterministic prompt for PREVIEW_BODY — every section of the
 # #119 pipeline in pinned order (guardrail -> face -> body -> style ->
 # casting -> clean-background tail -> #205d auto pool head). The face
-# section carries the 020 P2 combine rule: free text FIRST, then the
-# appearance fragments with their DELIBERATE English aspect suffixes
-# ("{} face", "{} hair color" — verbatim stored value + aspect noun).
+# section carries the 020 P2 combine rule: free text FIRST (never
+# translated), then the appearance fragments — structured values render
+# through the #224 build-time RU→EN value map (English aspect suffixes
+# unchanged; unknown values would stay verbatim).
 PREVIEW_PROMPT = (
     "Portrait of the character, 27-year-old fictional adult woman character, "
-    "выразительные глаза, мягкие черты face, рыжий hair color, "
+    "выразительные глаза, soft, gentle face, ginger red hair color, "
     "healthy adult woman build, modest, casual everyday styling, "
     "Chest-up portrait, entire head visible with clear margin above the hair, "
     "neutral warm-gray studio, soft frontal beauty lighting, "
@@ -222,8 +223,9 @@ class TestPreviewContract:
         assert data["prompt"] == PREVIEW_PROMPT
         assert data["prompt"].startswith("Portrait of the character,")
         # appearance fragments ride the face section, English suffixes kept
-        assert "мягкие черты face" in data["prompt"]
-        assert "рыжий hair color" in data["prompt"]
+        # (#224: RU→EN value mapping — deliberate pin evolution)
+        assert "soft, gentle face" in data["prompt"]
+        assert "ginger red hair color" in data["prompt"]
         assert data["seed"] == visual_routes._deterministic_seed(
             "preview", "F", 27, data["prompt"])
         expected_png = StubFluxTransport().generate(
@@ -422,7 +424,8 @@ class TestResolverPriority:
             {"age": 27, "sex": "F", "looks": None, "traits": {}},
             appearance={"face": "мягкие черты", "hair_color": "рыжий"})
         # the DELIBERATE English aspect-suffix design, pinned verbatim
-        assert profile["face"] == "мягкие черты face, рыжий hair color"
+        # (#224: RU→EN value mapping — deliberate pin evolution)
+        assert profile["face"] == "soft, gentle face, ginger red hair color"
         # no body keys -> the derived phrase survives untouched
         assert profile["body"] == "healthy adult woman build"
 
@@ -453,9 +456,11 @@ class TestResolverPriority:
         profile = build_visual_profile(
             {**M119_FIXTURE, "looks": "выразительные глаза"},
             appearance={"face": "мягкие черты", "hair_color": "рыжий"})
-        # exact combined bytes: looks FIRST, ", ", appearance fragments
+        # exact combined bytes: looks FIRST (free text, never translated
+        # — #224 maps structured values only), ", ", appearance fragments
+        # (#224: RU→EN value mapping — deliberate pin evolution)
         assert profile["face"] == (
-            "выразительные глаза, мягкие черты face, рыжий hair color")
+            "выразительные глаза, soft, gentle face, ginger red hair color")
 
     def test_whitespace_only_values_are_dropped(self):
         profile = build_visual_profile(
