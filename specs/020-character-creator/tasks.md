@@ -19,10 +19,10 @@
 - [ ] `POST /visual/preview`: auth-only, rate-limit, без sim-state записей.
 - [ ] Резолвер: appearance > trait-деривация; без appearance — байт-равно
       прежнему канону (m119-регресс).
-- [ ] Подтверждение → canonical appearance persist; портреты/сцены (#191)
+- [x] Подтверждение → canonical appearance persist; портреты/сцены (#191)
       используют его.
-- [ ] Preview rate-limit (VRAM 12GB).
-- [ ] Тесты: endpoint-контракт, no-sim-write (RED-proven), приоритет
+- [x] Preview rate-limit (VRAM 12GB).
+- [x] Тесты: endpoint-контракт, no-sim-write (RED-proven), приоритет
       резолвера, обратная совместимость.
 
 ## Волна 3 — P3 (reference upload)

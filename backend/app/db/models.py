@@ -123,6 +123,27 @@ class CharacterProfile(Base):
     life_goals = Column(Text, nullable=True)
     notes = Column(Text, nullable=True)
 
+# 7a. character_appearances (020 P2): canonical structured appearance —
+# 1:1 companion of Character, PK-is-FK pattern exactly like
+# CharacterProfile above. Written ONCE at character creation
+# (POST /characters); post-create editing is out of v1 (spec 020 Open
+# question 1). appearance: JSON dict of the 12 creator fields (face,
+# eyes, nose, lips, hair, hair_color, skin, height, weight, build,
+# chest, features — the canonical key set is APPEARANCE_FIELDS in
+# app/visual/descriptor.py); appearance_prompt: the free-text
+# «Внешность» prompt (its text also lands on characters.looks, so the
+# resolver keeps one free-text path). Rows are OPTIONAL: a character
+# without a row (every pre-020 character) resolves exactly as before —
+# appearance fields only ADD priority on top of the existing
+# looks/trait derivation. Additive table only: create_all creates it
+# (app.py _lifespan), no alembic, SchemaMeta stays 0.15.0. No
+# relationship() — repo convention is explicit queries.
+class CharacterAppearance(Base):
+    __tablename__ = "character_appearances"
+    character_id = Column(String, ForeignKey("characters.id"), primary_key=True)
+    appearance = Column(JSON, nullable=True)
+    appearance_prompt = Column(Text, nullable=True)
+
 # 8. character_traits
 class CharacterTrait(Base):
     __tablename__ = "character_traits"

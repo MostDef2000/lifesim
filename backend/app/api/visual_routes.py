@@ -14,6 +14,8 @@ readable only by its owner; a foreign user gets the same 404 as the miss path
 NOTE: no `from __future__ import annotations` — it breaks FastAPI resolution of the
 locally-defined Pydantic models (same trap as app.py/ws.py in M5).
 """
+import base64
+import collections
 import hashlib
 import logging
 import threading
@@ -341,6 +343,139 @@ def register_visual_routes(app, settings: Settings, session_factory: sessionmake
             actor_id=None,
         )
         return JSONResponse(status_code=201, content={"asset": payload, "reused": False})
+
+    # ---------- 020 P2: pre-creation preview ----------
+
+    # 020 P2: per-user preview limiter — in-process sliding window (60s),
+    # monotonic timestamps per user id in a deque, guarded by a lock (sync
+    # def routes run on the uvicorn threadpool). Limit comes from
+    # settings.visual.preview_rpm (default 5). Same dependency-free
+    # per-process discipline as the admin rate-limit middleware (app.py);
+    # buckets live for the process lifetime (per-user, bounded by the
+    # account count) and reset on restart.
+    _preview_hits: dict[int, collections.deque] = {}
+    _preview_hits_guard = threading.Lock()
+    _PREVIEW_WINDOW_SEC = 60.0
+
+    def _preview_rate_limited(user_id: int) -> bool:
+        """True when this user already used their preview_rpm quota in the
+        current 60s window (the consuming append happens only when allowed)."""
+        now = time.monotonic()
+        with _preview_hits_guard:
+            bucket = _preview_hits.setdefault(user_id, collections.deque())
+            while bucket and now - bucket[0] > _PREVIEW_WINDOW_SEC:
+                bucket.popleft()
+            if len(bucket) >= visual_settings.preview_rpm:
+                return True
+            bucket.append(now)
+            return False
+
+    class PreviewIn(BaseModel):
+        # 020 P2: preview body. No character exists yet — auth-only, no
+        # ownership. sex matches POST /characters (CharacterIn →
+        # create_player_character: "M"|"F", no Cyrillic contract);
+        # appearance/appearance_prompt carry the same validation as
+        # CharacterIn (validate_appearance / ≤500); outfit_mode mirrors the
+        # #205 enum (auto|casual|formal|nude).
+        sex: str
+        age: int
+        appearance: dict | None = None
+        appearance_prompt: str | None = None
+        outfit_mode: str = "auto"
+
+    @app.post("/visual/preview")
+    def preview_visual(
+        body: PreviewIn,
+        request_user=Depends(current_user),
+    ):
+        """020 P2: ephemeral preview of the canonical image for the creator
+        form — BEFORE any character exists (there is nothing to own).
+
+        STRICT no-write invariant: no VisualAsset row, no WorldEvent, no
+        file, and NO session dependency at all — this handler cannot commit
+        anything by construction (deliberately NOT reusing _generate_asset,
+        which commits). The transport call is the only side effect.
+
+        Pipeline (the same #119/#191 path as a portrait): gate → per-user
+        rate limit (VRAM 12GB, KB 1611) → validation → build_visual_profile
+        with appearance priority → build_prompt portrait branch (outfit
+        mode rides the descriptor; with nothing worn the EXISTING
+        casual/formal/nude/auto-pool fragments fire after the m119
+        endswith-anchor — no new fragment code) → transport → base64 in the
+        response. Response key set is exactly {"prompt", "seed",
+        "image_base64"}."""
+        gate()
+        if _preview_rate_limited(request_user.id):
+            raise HTTPException(status_code=429, detail="preview rate limit exceeded")
+        if body.sex not in ("M", "F"):
+            raise HTTPException(status_code=422, detail="sex must be M|F")
+        if not 18 <= body.age <= 99:
+            raise HTTPException(status_code=422, detail="age must be 18-99")
+        if body.outfit_mode not in ("auto", "casual", "formal", "nude"):
+            raise HTTPException(
+                status_code=422,
+                detail="outfit_mode must be auto|casual|formal|nude")
+        appearance_prompt = (body.appearance_prompt or "").strip()
+        if len(appearance_prompt) > 500:
+            raise HTTPException(status_code=422, detail="appearance_prompt ≤500")
+        try:
+            from app.visual.descriptor import validate_appearance
+
+            appearance = validate_appearance(body.appearance)
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc))
+
+        from app.visual.descriptor import build_prompt, build_visual_profile
+
+        # The free-text prompt plays the same role it plays at creation:
+        # it also lands on characters.looks there. The resolver COMBINES
+        # the free-text face fragment (first) with the appearance face
+        # fragment after it — neither path is discarded when both are
+        # present; appearance fields still outrank trait-derivation for
+        # their aspects.
+        profile = build_visual_profile(
+            {
+                "age": body.age,
+                # validated above ("M"|"F") — straight through, same as
+                # POST /characters passes body.sex
+                "sex": body.sex,
+                "looks": appearance_prompt or None,
+                "traits": {},
+            },
+            appearance=appearance,
+        )
+        # Portrait-branch descriptor built from request facts only (no
+        # character, no world): build_prompt reads the embedded profile,
+        # the guardrail phrase and the outfit mode — all deterministic.
+        descriptor = {
+            "location": None,
+            # "the character" (not ""): the prompt renders "Portrait of
+            # <name>, …" — deliberate neutral scaffolding, no fabricated
+            # identity; bytes pinned later.
+            "characters": [{"id": None, "name": "the character",
+                            "sex": body.sex, "age": body.age}],
+            "objects": [],
+            "weather": "clear",
+            "time": None,
+            "camera": "portrait",
+            "event": None,
+            "references": [],
+            "outfit_mode": body.outfit_mode,
+            "visual_profile": profile,
+        }
+        prompt = build_prompt(descriptor)
+        seed = _deterministic_seed("preview", body.sex, body.age, prompt)
+        try:
+            bytes_out = transport_factory().generate(
+                prompt, seed, visual_settings.image_size
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=502, detail=str(exc))
+        return {
+            "prompt": prompt,
+            "seed": seed,
+            "image_base64": base64.b64encode(bytes_out).decode("ascii"),
+        }
 
     @app.post("/visual/assets/{asset_id}/canonical")
     def set_canonical(

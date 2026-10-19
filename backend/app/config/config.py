@@ -287,6 +287,13 @@ class VisualConfig(BaseModel):
     image_size: str = "512x512"
     timeout_sec: float = 30.0
     default_weather: str = "clear"
+    # 020 P2: per-user preview rate limit (requests per 60s sliding window,
+    # POST /visual/preview). Adapter VRAM is 12GB (KB 1611) — the limiter is
+    # mandatory, the default is deliberately low. In-process only (resets on
+    # restart), mirroring the admin rate-limit middleware discipline; the
+    # limiter scales with worker count (N workers ⇒ N×preview_rpm) — same
+    # known limitation as the admin middleware.
+    preview_rpm: int = Field(5, ge=1)
 
 class ExternalServiceSpec(BaseModel):
     """M7 (SPEC §38): one service at an external location."""

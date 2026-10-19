@@ -105,6 +105,111 @@ _PROFILE_STYLE_HIGH_FRAGMENTS = (
     ("risk_tolerance", "bold, adventurous styling"),
 )
 
+# 020 P2: canonical structured-appearance key set (the 12 creator fields,
+# stored on CharacterAppearance.appearance). The same set is validated for
+# POST /characters (CharacterIn) and POST /visual/preview (PreviewIn) —
+# see validate_appearance below; the creator form's camelCase draft keys
+# (hairColor, extra) are mapped to these keys by the client.
+APPEARANCE_FIELDS = frozenset({
+    "face", "eyes", "nose", "lips", "hair", "hair_color", "skin",
+    "height", "weight", "build", "chest", "features",
+})
+
+# 020 P2: appearance key → prompt-fragment template ({} = the stored
+# value). Face keys compose the profile's face fragment, body keys the
+# body fragment (spec 020 P2 mapping); tuple order is the deterministic
+# fragment order. Only non-empty values contribute; with no contributing
+# field at all the resolver falls back to the exact pre-020 bytes.
+_APPEARANCE_FACE_TEMPLATES = (
+    ("face", "{} face"),
+    ("eyes", "{} eyes"),
+    ("nose", "{} nose"),
+    ("lips", "{} lips"),
+    ("hair", "{} hair"),
+    ("hair_color", "{} hair color"),
+    ("skin", "{} skin"),
+    ("features", "{}"),  # free-form extras, appended verbatim
+)
+_APPEARANCE_BODY_TEMPLATES = (
+    ("height", "height {}"),
+    ("weight", "weight {}"),
+    ("build", "{} build"),
+    ("chest", "{} chest"),
+)
+
+
+def _appearance_fragments(appearance) -> tuple[str, str]:
+    """020 P2: structured appearance → (face fragment, body fragment).
+
+    ``appearance`` is a mapping or attribute object carrying the canonical
+    creator keys (read via _profile_field, same duck-typing as the
+    character_like input). Empty/absent fields contribute nothing; when no
+    field contributes, BOTH fragments are "" so the caller falls through to
+    the exact looks/trait derivation (byte-identical, m119 pins).
+    """
+    if appearance is None:
+        return "", ""
+    face_parts = []
+    body_parts = []
+    for key, template in _APPEARANCE_FACE_TEMPLATES:
+        value = _profile_field(appearance, key)
+        if isinstance(value, str) and value.strip():
+            face_parts.append(template.format(value.strip()))
+    for key, template in _APPEARANCE_BODY_TEMPLATES:
+        value = _profile_field(appearance, key)
+        if isinstance(value, str) and value.strip():
+            body_parts.append(template.format(value.strip()))
+    return ", ".join(face_parts), ", ".join(body_parts)
+
+
+def validate_appearance(value) -> dict | None:
+    """020 P2: shared validation for the structured appearance input.
+
+    Used by BOTH write paths that accept an appearance dict: POST
+    /characters (CharacterIn.appearance) and POST /visual/preview
+    (PreviewIn.appearance) — one contract, no drift. Rules: known keys
+    only (APPEARANCE_FIELDS), every value a str, ≤120 chars per value
+    (checked on the stripped value — the stored/canonical form), ≤12 keys
+    total. Values are stripped and empty strings dropped (the creator
+    client only sends filled fields; provided-but-empty == absent).
+    Returns the cleaned mapping, or None for None/empty input. Raises
+    ValueError with a client-safe message (routes map it to 422).
+    """
+    if value is None:
+        return None
+    if not isinstance(value, dict):
+        raise ValueError("appearance must be an object")
+    if len(value) > len(APPEARANCE_FIELDS):
+        raise ValueError("appearance accepts at most 12 fields")
+    cleaned: dict[str, str] = {}
+    for key, val in value.items():
+        if key not in APPEARANCE_FIELDS:
+            raise ValueError(f"unknown appearance field: {key}")
+        if not isinstance(val, str):
+            raise ValueError(f"appearance field {key} must be a string")
+        text = val.strip()
+        if not text:
+            continue  # empty strings dropped
+        if len(text) > 120:
+            raise ValueError(f"appearance field {key} must be ≤120 chars")
+        cleaned[key] = text
+    return cleaned or None
+
+
+def _character_appearance(session: Session, character_id: str) -> dict | None:
+    """020 P2: stored canonical appearance for one character (pure read).
+
+    Returns the CharacterAppearance.appearance dict when the row exists and
+    carries a non-empty structured dict, else None (pre-020 characters, or
+    a row that only holds the free-text prompt — that text already rides
+    characters.looks, so the resolver needs nothing extra)."""
+    from app.db.models import CharacterAppearance
+
+    row = session.get(CharacterAppearance, character_id)
+    if row is None or not isinstance(row.appearance, dict) or not row.appearance:
+        return None
+    return row.appearance
+
 
 def _profile_field(character_like, key: str, default=None):
     """Read a resolver input from a mapping or an attribute-bearing object."""
@@ -122,7 +227,7 @@ def _profile_sex_label(sex) -> str:
     return "adult"
 
 
-def build_visual_profile(character_like) -> dict:
+def build_visual_profile(character_like, appearance=None) -> dict:
     """019 Phase 1 (T1): deterministic canonical visual profile resolver.
 
     Pure function (R1): no RNG, no DB, no I/O. ``character_like`` is a
@@ -134,16 +239,37 @@ def build_visual_profile(character_like) -> dict:
     ``name`` is likewise accepted but not part of the profile (it renders in
     the prompt separately).
 
-    Missing looks fall back to neutral age/sex-appropriate phrasing; style is
-    composed from the trait mapping. Output matches the frozen schema exactly.
+    020 P2: ``appearance`` (optional, same duck-typing — a mapping or object
+    carrying the canonical creator keys, APPEARANCE_FIELDS) is the highest
+    priority for the aspects its fields cover: appearance field >
+    trait/sex-derived value. Face keys (face/eyes/nose/lips/hair/hair_color/
+    skin/features) compose the appearance face fragment, body keys
+    (height/weight/build/chest) the body fragment (body = appearance_body or
+    the derived phrase); fragments join the same sections in the same order.
+    The free-text looks fragment is never discarded: the face fragment
+    combines the looks text FIRST (it is the primary description per the
+    creator copy — free-text and structured fields complement, not exclude
+    each other) followed by the appearance face fragment. When
+    ``appearance`` is None or carries no non-empty field, the output is
+    byte-identical to the pre-020 resolver (m119 pins). The frozen profile
+    key set below never changes.
+
+    Missing looks fall back to the neutral fixed phrase when no appearance
+    face fields contribute either; style is composed from the trait mapping.
+    Output matches the frozen schema exactly.
     """
     label = _profile_sex_label(_profile_field(character_like, "sex"))
     age = _profile_field(character_like, "age")
     age_part = f"{age}-year-old " if age is not None else ""
 
     looks_text = (_profile_field(character_like, "looks") or "").strip()
-    face = looks_text or "natural, well-groomed features"
-    body = (
+    appearance_face, appearance_body = _appearance_fragments(appearance)
+    # free text first (primary), appearance fields append — combined, not
+    # either/or; with neither present the neutral fixed phrase applies.
+    face = ", ".join(
+        part for part in (looks_text, appearance_face) if part
+    ) or "natural, well-groomed features"
+    body = appearance_body or (
         f"healthy adult {label} build" if label != "adult"
         else "healthy adult build"
     )
@@ -260,7 +386,7 @@ def build_scene_descriptor(
                 "looks": player.looks,
                 "traits": _character_traits(session, player_character_id),
                 "worn": player_part["worn"],
-            })
+            }, appearance=_character_appearance(session, player_character_id))
 
     # #86 (A4): the player's canonical portrait asset id (§70) — the same
     # query /visual/characters/{cid}/portrait serves. None → references [].
@@ -350,6 +476,9 @@ def build_portrait_descriptor(session: Session, world_id: str, character_id: str
     # 019 Phase 1 (T3): the canonical visual profile travels with the
     # descriptor (persisted on the VisualAsset scene_descriptor JSON — no
     # model/endpoint change). Built from the same committed state as above.
+    # 020 P2: stored canonical appearance (character_appearances row, written
+    # at creation) takes priority over trait derivation when present; absent
+    # row → byte-identical pre-020 profile.
     descriptor["visual_profile"] = build_visual_profile({
         "name": f"{character.first_name} {character.last_name}",
         "age": character.age,
@@ -357,7 +486,7 @@ def build_portrait_descriptor(session: Session, world_id: str, character_id: str
         "looks": character.looks,
         "traits": _character_traits(session, character_id),
         "worn": list(wearing),
-    })
+    }, appearance=_character_appearance(session, character_id))
     return descriptor
 
 
