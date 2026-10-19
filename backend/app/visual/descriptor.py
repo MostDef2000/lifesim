@@ -137,6 +137,169 @@ _APPEARANCE_BODY_TEMPLATES = (
     ("chest", "{} chest"),
 )
 
+# #224: build-time RU→EN value mapping for STRUCTURED appearance values.
+# The RU creator UI stores canonical values in Russian, but the Flux model
+# ignores Russian in prompts (probe evidence: «рыжий»/«серые» rendered
+# brown/ombré). _appearance_fragments maps KNOWN values — lookup key is
+# value.strip().lower() — to a compact EN phrase at BUILD time only:
+# - storage (character_appearances.appearance), validate_appearance and the
+#   free-text looks/appearance_prompt are NEVER translated (user's words);
+# - UNKNOWN values pass through VERBATIM (deterministic, documented);
+# - GRAMMAR RULE: an EN value must compose grammatically with its template
+#   suffix ("soft, gentle" + " face" -> "soft, gentle face";
+#   "shoulder-length" + " hair"; "athletic" + " build"; the suffix-free
+#   features slot takes whole noun phrases). Where no clean form exists the
+#   slot stays unmapped — height/weight values are numeric/neutral and pass
+#   through unchanged ("height 185" needs no mapping; adjective forms would
+#   not compose with "height {}").
+# Bounded seed set of the high-frequency creator vocabulary (#224); ё/е
+# spellings included for common words. Extending it is additive and
+# byte-pinned in tests/m224.
+_APPEARANCE_VALUE_MAP: dict[str, dict[str, str]] = {
+    "face": {
+        "мягкие черты": "soft, gentle",
+        "мягкие": "soft, gentle",
+        "выразительные черты": "expressive",
+        "выразительные": "expressive",
+        "округлое лицо": "round",
+        "округлые черты": "round",
+        "угловатые черты": "sharp, angular",
+        "резкие черты": "sharp, angular",
+        "нордические черты": "nordic",
+        "дружелюбное лицо": "friendly",
+        "узкое лицо": "narrow",
+        "широкое лицо": "broad",
+    },
+    "eyes": {
+        "серые": "grey",
+        "серый": "grey",
+        "серые глаза": "grey",
+        "карие": "brown",
+        "карие глаза": "brown",
+        "голубые": "blue",
+        "зелёные": "green",
+        "зеленые": "green",
+        "синие": "blue",
+        "чёрные": "black",
+        "черные": "black",
+        "янтарные": "amber",
+        "ореховые": "hazel",
+        "светлые": "light",
+        "тёмные": "dark",
+        "темные": "dark",
+    },
+    "nose": {
+        "прямой": "straight",
+        "небольшой": "small",
+        "аккуратный": "neat",
+        "орлиный": "aquiline",
+        "курносый": "upturned",
+        "широкий": "broad",
+        "узкий": "narrow",
+        "горбатый": "hooked",
+    },
+    "lips": {
+        "полные": "full",
+        "пухлые": "full",
+        "тонкие": "thin",
+        "узкие": "thin",
+        "мягкие": "soft",
+        "чётко очерченные": "well-defined",
+        "четко очерченные": "well-defined",
+        "бледные": "pale",
+    },
+    "hair": {
+        "до плеч": "shoulder-length",
+        "длинные": "long",
+        "короткие": "short",
+        "средней длины": "medium-length",
+        "кудрявые": "curly",
+        "волнистые": "wavy",
+        "прямые": "straight",
+        "короткая стрижка": "short-cropped",
+    },
+    "hair_color": {
+        "рыжий": "ginger red",
+        "рыжая": "ginger red",
+        "рыжие": "ginger red",
+        "русые": "dark blond",
+        "русый": "dark blond",
+        "блонд": "blond",
+        "пепельные": "ash blond",
+        "пепельный": "ash blond",
+        "медные": "copper red",
+        "каштановые": "brown",
+        "каштановый": "brown",
+        "шатен": "brown",
+        "шатенка": "brown",
+        "тёмные": "dark",
+        "тёмные волосы": "dark",
+        "темные": "dark",
+        "чёрные": "black",
+        "черные": "black",
+        "светлые": "light blond",
+        "седые": "grey",
+    },
+    "skin": {
+        "светлая": "fair",
+        "светлая кожа": "fair",
+        "бледная": "pale",
+        "бледная кожа": "pale",
+        "смуглая": "olive",
+        "тёмная": "dark",
+        "темная": "dark",
+        "загорелая": "tanned",
+        "молочно-белая": "porcelain",
+    },
+    # numeric/neutral values ("170") pass through verbatim — see grammar rule
+    "height": {
+        "выше среднего": "above average",
+        "ниже среднего": "below average",
+    },
+    "weight": {
+        "выше среднего": "above average",
+        "ниже среднего": "below average",
+    },
+    "build": {
+        "атлетичное": "athletic",
+        "атлетичный": "athletic",
+        "атлетическая": "athletic",
+        "худощавое": "slender",
+        "худощавый": "slender",
+        "стройное": "slim",
+        "стройный": "slim",
+        "мускулистое": "muscular",
+        "хрупкое": "frail",
+        "крепкое": "sturdy",
+        "плотное": "stocky",
+        "среднее": "average",
+        "полноватое": "plump",
+    },
+    "chest": {
+        "большая": "full",
+        "средняя": "medium",
+        "маленькая": "small",
+        "скромная": "modest",
+        "пышная": "full",
+    },
+    # suffix-free template ("{}"): whole noun phrases compose cleanly
+    "features": {
+        "веснушки": "freckles",
+        "ямочки": "dimples",
+        "родинка над губой": "a beauty mark above the lip",
+        "родинка на щеке": "a mole on the cheek",
+        "шрам на брови": "a scar through the eyebrow",
+    },
+}
+
+
+def _appearance_prompt_value(field: str, value: str) -> str:
+    """#224: the EN phrase for a KNOWN normalized appearance value, else
+    the stored value verbatim (byte-identical pass-through). Build-time
+    only — never applied to storage or free-text fields."""
+    normalized = value.strip().lower()
+    return _APPEARANCE_VALUE_MAP.get(field, {}).get(normalized) or value.strip()
+
 
 def _appearance_fragments(appearance) -> tuple[str, str]:
     """020 P2: structured appearance → (face fragment, body fragment).
@@ -146,6 +309,10 @@ def _appearance_fragments(appearance) -> tuple[str, str]:
     character_like input). Empty/absent fields contribute nothing; when no
     field contributes, BOTH fragments are "" so the caller falls through to
     the exact looks/trait derivation (byte-identical, m119 pins).
+
+    #224: known structured values render through the build-time RU→EN
+    value map (_appearance_prompt_value); unknown values pass through
+    verbatim — storage and free-text fields are never translated.
     """
     if appearance is None:
         return "", ""
@@ -154,11 +321,11 @@ def _appearance_fragments(appearance) -> tuple[str, str]:
     for key, template in _APPEARANCE_FACE_TEMPLATES:
         value = _profile_field(appearance, key)
         if isinstance(value, str) and value.strip():
-            face_parts.append(template.format(value.strip()))
+            face_parts.append(template.format(_appearance_prompt_value(key, value)))
     for key, template in _APPEARANCE_BODY_TEMPLATES:
         value = _profile_field(appearance, key)
         if isinstance(value, str) and value.strip():
-            body_parts.append(template.format(value.strip()))
+            body_parts.append(template.format(_appearance_prompt_value(key, value)))
     return ", ".join(face_parts), ", ".join(body_parts)
 
 
