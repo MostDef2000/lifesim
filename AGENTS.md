@@ -16,16 +16,14 @@ Repository: `MostDef2000/lifesim`
 
 ## Operating rules
 
+General delivery gates follow the global contract `~/.config/opencode/AGENTS.md` (durable source: profiles/global/** in the workspace repo ai-playground); scope admission phrase: `commit approved`.
+
 1. Resolve repository behavior and commands from current files; do not guess.
-2. Present exact behavior, paths, exclusions, risks, and verification before the first write.
-3. The exact phrase `commit approved` authorizes only that immediately preceding bounded scope.
-4. Keep one task on one fresh branch and one bounded PR unless project contracts say otherwise.
-5. Never commit secrets, `.env`, credentials, local runtime state, logs, caches, or generated output unless the repository explicitly tracks it.
-6. Run focused tests during implementation and the repository's required lint, typecheck, test, and build gates before completion.
-7. Significant changes require an independent review from a different model family.
-8. Workers never commit, push, merge, create PRs, release, deploy, or invoke other workers.
-9. LSP diagnostics are supporting evidence, not a replacement for real project commands.
-10. Stop and request a new scope when behavior or required paths materially exceed approval.
+2. Keep one task on one fresh branch and one bounded PR unless project contracts say otherwise.
+3. Never commit secrets, `.env`, credentials, local runtime state, logs, caches, or generated output unless the repository explicitly tracks it.
+4. Run focused tests during implementation and the repository's required lint, typecheck, test, and build gates before completion.
+5. Workers never commit, push, merge, create PRs, release, deploy, or invoke other workers.
+6. LSP diagnostics are supporting evidence, not a replacement for real project commands.
 
 ## Sandbox
 
