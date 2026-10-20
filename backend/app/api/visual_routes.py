@@ -17,6 +17,7 @@ locally-defined Pydantic models (same trap as app.py/ws.py in M5).
 import base64
 import collections
 import hashlib
+import inspect
 import logging
 import threading
 import time
@@ -27,6 +28,23 @@ from sqlalchemy.orm import Session, sessionmaker
 from app.config.config import Settings
 
 logger = logging.getLogger("vl1.visual")
+
+
+def _transport_generate(
+    transport: Any, prompt: str, seed: int, size: str, negative: str
+) -> bytes:
+    """#227 Phase 2b: carry the composed negative on the transport call.
+
+    The negative rides ONLY when the transport's signature declares it —
+    legacy 3-arg transports (existing test fakes mounted on the
+    flux_transport_factory seam) keep working unchanged ("keep all existing
+    call signatures backward-compatible"). In-repo transports all declare
+    the parameter, so production always sends it.
+    """
+    params = inspect.signature(transport.generate).parameters
+    if "negative" in params:
+        return transport.generate(prompt, seed, size, negative=negative)
+    return transport.generate(prompt, seed, size)
 
 
 def _deterministic_seed(*parts: Any) -> int:
@@ -175,7 +193,11 @@ def register_visual_routes(app, settings: Settings, session_factory: sessionmake
             world_id, character_id or location_id, asset_type, existing
         )
 
-        from app.visual.descriptor import _AUTO_OUTFIT_POOL, build_prompt
+        from app.visual.descriptor import (
+            _AUTO_OUTFIT_POOL,
+            build_prompt,
+            compose_negative,
+        )
 
         # W205d: seed depends on existing-asset count, so each regeneration
         # rotates the auto outfit pool; scene prompts ignore the key.
@@ -186,9 +208,17 @@ def register_visual_routes(app, settings: Settings, session_factory: sessionmake
 
         prompt = build_prompt(descriptor)
 
+        # #227 2b: the composed negative rides every generation — canonical
+        # safety floor (when the descriptor carries a visual profile) plus
+        # the composition part (universal).
         try:
-            bytes_out = transport_factory().generate(
-                prompt, seed, visual_settings.image_size
+            bytes_out = _transport_generate(
+                transport_factory(), prompt, seed,
+                visual_settings.image_size,
+                compose_negative(
+                    (descriptor.get("visual_profile") or {})
+                    .get("guardrail", {}).get("canonical_negative")
+                ),
             )
         except ValueError as exc:
             raise HTTPException(status_code=502, detail=str(exc))
@@ -440,7 +470,11 @@ def register_visual_routes(app, settings: Settings, session_factory: sessionmake
         except ValueError as exc:
             raise HTTPException(status_code=422, detail=str(exc))
 
-        from app.visual.descriptor import build_prompt, build_visual_profile
+        from app.visual.descriptor import (
+            build_prompt,
+            build_visual_profile,
+            compose_negative,
+        )
 
         # The free-text prompt plays the same role it plays at creation:
         # it also lands on characters.looks there. The resolver COMBINES
@@ -480,9 +514,16 @@ def register_visual_routes(app, settings: Settings, session_factory: sessionmake
         }
         prompt = build_prompt(descriptor)
         seed = _deterministic_seed("preview", body.sex, body.age, prompt)
+        # #227 2b: the preview path composes the same negative (canonical
+        # from the request-built profile + composition part).
         try:
-            bytes_out = transport_factory().generate(
-                prompt, seed, visual_settings.image_size
+            bytes_out = _transport_generate(
+                transport_factory(), prompt, seed,
+                visual_settings.image_size,
+                compose_negative(
+                    (descriptor.get("visual_profile") or {})
+                    .get("guardrail", {}).get("canonical_negative")
+                ),
             )
         except ValueError as exc:
             raise HTTPException(status_code=502, detail=str(exc))
