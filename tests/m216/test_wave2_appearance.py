@@ -109,10 +109,11 @@ PREVIEW_PROMPT = (
     "Portrait of the character, 27-year-old fictional adult woman character, "
     "выразительные глаза, soft, gentle face, ginger red hair color, "
     "healthy adult woman build, modest, casual everyday styling, "
-    "Chest-up portrait, entire head visible with clear margin above the hair, "
+    "Chest-up portrait, entire head well inside the frame with clear margin "
+    "above the hair, nothing below the chest visible, "
     "neutral warm-gray studio, soft frontal beauty lighting, "
     "clean background, detailed face, "
-    "wearing a fitted blouse and jeans, fully clothed"
+    "wearing a fitted button-front blouse and jeans, fully clothed"
 )
 
 # m119 fixture input + the hardcoded pre-020 profile (byte-identity
@@ -132,8 +133,11 @@ PRE020_PROFILE = {
     "style": "sociable, outgoing presence",
     "scenes": {
         "casting": (
-            "Chest-up portrait, entire head visible with clear margin above "
-            "the hair, neutral warm-gray studio, soft frontal beauty lighting"
+            # #227: mirror of _PROFILE_CASTING_PRESET (prod-probe anchors:
+            # well inside the frame + nothing below the chest visible)
+            "Chest-up portrait, entire head well inside the frame with clear "
+            "margin above the hair, nothing below the chest visible, "
+            "neutral warm-gray studio, soft frontal beauty lighting"
         ),
         "scene": "natural environment lighting, candid composition",
     },

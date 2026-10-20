@@ -61,16 +61,18 @@ AUTO_TAIL = f", {_AUTO_OUTFIT_POOL[0]}"
 # recomputed to the NEW auto bytes: guardrail phrase, face, body, style,
 # casting preset, clean background, then the #205d auto pool head (pool[0]).
 # Auto mode must reproduce these EXACT bytes (the hard requirement of the
-# work order). Byte-identity oracle is relative to the world WITH the #205b
-# framing anchor (pre-outfit bytes, post-framing): the casting section
-# carries the explicit-margin anchor "entire head visible with clear margin
-# above the hair" (#205b — "head fully in frame" alone still cropped faces at
-# guidance 3.5).
+# work order). The casting section carries the #227 anchor ("entire head
+# well inside the frame with clear margin above the hair", "nothing below
+# the chest visible"); #227 strengthened it from the #205b phrase "entire
+# head visible with clear margin above the hair" (which itself replaced
+# "head fully in frame" — alone it still cropped faces at guidance 3.5;
+# #227 prod probe: crown clipped flush, crop crept to the waist).
 OLD_WAY_AUTO_PROMPT = (
     "Portrait of Anna, 30-year-old fictional adult woman character, "
     "natural, well-groomed features, healthy adult woman build, "
     "modest, casual everyday styling, "
-    "Chest-up portrait, entire head visible with clear margin above the hair, "
+    "Chest-up portrait, entire head well inside the frame with clear margin "
+    "above the hair, nothing below the chest visible, "
     "neutral warm-gray studio, soft frontal beauty lighting, "
     "clean background, detailed face"
     + AUTO_TAIL

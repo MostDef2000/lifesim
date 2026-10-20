@@ -27,7 +27,10 @@ FIXTURE_CHARACTER = {
 
 LOOKS = FIXTURE_CHARACTER["looks"]
 CASTING_PRESET = (
-    "Chest-up portrait, entire head visible with clear margin above the hair, "
+    # #227: RU→EN of the prod-probe anchors — "well inside the frame" +
+    # nothing-below-the-chest added around the #205b margin phrase.
+    "Chest-up portrait, entire head well inside the frame with clear margin "
+    "above the hair, nothing below the chest visible, "
     "neutral warm-gray studio, soft frontal beauty lighting"
 )
 SCENE_PRESET = "natural environment lighting, candid composition"
@@ -176,13 +179,16 @@ class TestPortraitPrompt:
         assert positions == sorted(positions)
 
     def test_prompt_keeps_framing_anchor(self):
-        """W204b/#205b: the casting preset's framing anchor survives into the prompt.
+        """W204b/#205b/#227: the casting preset's framing anchors survive
+        into the prompt.
 
         Owner feedback 2026-10-16: flux at guidance 3.5 crops the head unless
         the prompt itself anchors composition — "head fully in frame" alone
-        still cropped faces at guidance 3.5 (#205b), so the anchor now names
-        the margin explicitly: "entire head visible with clear margin above
-        the hair".
+        still cropped faces at guidance 3.5 (#205b). The pinned anchor is the
+        #227 wording: "entire head well inside the frame with clear margin
+        above the hair" + "nothing below the chest visible" (prod probe:
+        crown clipped flush, crop crept to the waist), strengthened from the
+        #205b phrase "entire head visible with clear margin above the hair".
         """
         descriptor = {
             "camera": "portrait",
@@ -190,10 +196,13 @@ class TestPortraitPrompt:
             "visual_profile": build_visual_profile(FIXTURE_CHARACTER),
         }
         # #205b: explicit-margin anchor (stronger than "head fully in frame").
+        # #227: framing strengthened — head INSIDE the frame + explicit
+        # nothing-below-the-chest clause.
         assert (
-            "entire head visible with clear margin above the hair"
+            "entire head well inside the frame with clear margin above the hair"
             in build_prompt(descriptor)
         )
+        assert "nothing below the chest visible" in build_prompt(descriptor)
 
 
 class TestDescriptorIntegration:

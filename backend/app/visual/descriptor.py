@@ -29,8 +29,11 @@ _OUTFIT_MODES = ("auto", "casual", "formal", "nude")
 # clothed. Concrete garments win (proven by casual); the pool is seed-selected
 # in the portrait route for per-regeneration outfit variety. All pool items
 # are adult + "fully clothed".
+# #227 (prod probe): item 0 says "button-front" — the bare "fitted blouse"
+# rendered as a cropped tank with exposed midriff; the closure detail anchors
+# away from camisole/tank (same concrete-garment lesson as W205d).
 _AUTO_OUTFIT_POOL = (
-    "wearing a fitted blouse and jeans, fully clothed",
+    "wearing a fitted button-front blouse and jeans, fully clothed",
     "wearing a summer dress, fully clothed",
     "wearing a cozy sweater and a long skirt, fully clothed",
     "wearing a button-up shirt and trousers, fully clothed",
@@ -82,7 +85,13 @@ def _time_of_day(hour: int) -> str:
 # a negative-prompt transport contract are later phases; the canonical
 # negative stays stored on the profile until lane B moves the transport).
 _PROFILE_CASTING_PRESET = (
-    "Chest-up portrait, entire head visible with clear margin above the hair, "
+    # #227 (prod probe): crown clipped flush to the top frame and crop crept
+    # to waist/upper hip despite the chest-up brief. Three named anchors:
+    # chest-up framing, the whole head well inside the frame (the #205b
+    # margin phrase kept verbatim), and an explicit nothing-below-the-chest
+    # clause. One compact phrase — prompt bloat degrades adherence.
+    "Chest-up portrait, entire head well inside the frame with clear margin "
+    "above the hair, nothing below the chest visible, "
     "neutral warm-gray studio, soft frontal beauty lighting"
 )
 # W205b (owner feedback 2026-10-16): "head fully in frame" alone still crops
