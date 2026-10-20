@@ -7,7 +7,13 @@ and ComfyUI:
     app (VPS) --tunnel--> adapter :7860 --HTTP--> ComfyUI :8188
 
 Contract (byte-compatible with backend/app/visual/transports.py):
-    POST /generate  {"prompt", "seed", "size", "model", "lora"} -> PNG bytes
+    POST /generate  {"prompt", "seed", "size", "model", "lora", "negative"}
+    -> PNG bytes
+
+"negative" (#227 Phase 2b) is the composed app negative — APPENDED to the
+adapter's technical floor in build_graph, never a replacement. Pre-update
+adapters ignore the unknown key (data.get pattern), so old payloads keep
+byte-identical behavior.
 
 The app never speaks ComfyUI's queue API; the adapter owns the workflow
 graph, model routing (flux/pony) and the Pony booru-style prompt tag.
@@ -71,14 +77,21 @@ def build_negative(model_key: str) -> str:
 
 
 def build_graph(model_key: str, prompt: str, seed: int, width: int,
-                height: int, lora: str) -> dict:
-    """Minimal txt2img API-format graph. Node ids fixed for testability."""
+                height: int, lora: str, negative: str = "") -> dict:
+    """Minimal txt2img API-format graph. Node ids fixed for testability.
+
+    #227 2b: the app-side negative AUGMENTS the adapter floor — it is
+    appended to build_negative() and never replaces it. Payloads without
+    the field keep the exact legacy floor (byte-identical behavior).
+    """
     ckpt = resolve_model(model_key)
     # flux-dev is guidance-distilled: the guidance value lives in the
     # FluxGuidance node ("8") and KSampler cfg stays 1.0 — cfg>1 double-
     # applies guidance and makes portraits soft/oversaturated (#204).
     # Pony keeps the legacy cfg>1 sampler path unchanged.
     is_flux = ckpt == "flux1-dev-fp8.safetensors"
+    effective_negative = build_negative(model_key) + (
+        f", {negative}" if negative else "")
     graph = {
         "1": {"class_type": "CheckpointLoaderSimple",
               "inputs": {"ckpt_name": ckpt}},
@@ -86,7 +99,7 @@ def build_graph(model_key: str, prompt: str, seed: int, width: int,
               "inputs": {"text": build_positive(model_key, prompt),
                          "clip": ["1", 1]}},
         "3": {"class_type": "CLIPTextEncode",
-              "inputs": {"text": build_negative(model_key),
+              "inputs": {"text": effective_negative,
                          "clip": ["1", 1]}},
         "4": {"class_type": "EmptyLatentImage",
               "inputs": {"width": width, "height": height,
@@ -148,9 +161,10 @@ def comfy_view(filename: str, subfolder: str, folder_type: str) -> bytes:
 
 
 def generate_png(model_key: str, prompt: str, seed: int, size: str,
-                 lora: str) -> bytes:
+                 lora: str, negative: str = "") -> bytes:
     width, height = parse_size(size)
-    graph = build_graph(model_key, prompt, seed, width, height, lora)
+    graph = build_graph(model_key, prompt, seed, width, height, lora,
+                        negative)
     result = comfy_post("/prompt", {"prompt": graph, "client_id": CLIENT_ID})
     prompt_id = result["prompt_id"]
     deadline = time.monotonic() + POLL_TIMEOUT_SEC
@@ -210,6 +224,9 @@ class Handler(BaseHTTPRequestHandler):
                 int(data.get("seed", 0)),
                 str(data.get("size", "512x512")),
                 str(data.get("lora", "")),
+                # #227 2b: the composed app negative (empty for old
+                # payloads) — appended to the floor in build_graph.
+                str(data.get("negative", "")),
             )
         except (ValueError, KeyError) as exc:
             self._json_error(422, str(exc))

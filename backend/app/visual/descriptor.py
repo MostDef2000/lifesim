@@ -81,9 +81,11 @@ def _time_of_day(hour: int) -> str:
 # 019 Phase 1 (T1): canonical visual profile. The schema below is FROZEN by
 # specs/019-flux-baseline-quality (§ frozen profile schema): face/body/style,
 # scenes.casting/scenes.scene, guardrail.phrase/canonical_negative and
-# lora.available=False — no extra keys in Phase 1 (LoRA, full-body preset and
-# a negative-prompt transport contract are later phases; the canonical
-# negative stays stored on the profile until lane B moves the transport).
+# lora.available=False — no extra keys in Phase 1 (LoRA and the full-body
+# preset are later phases). Per the amended spec (Phase 2b, #227) the
+# negative-prompt transport contract is IN scope: compose_negative() below
+# carries the canonical negative from the profile to the transport; the
+# profile schema itself is unchanged.
 _PROFILE_CASTING_PRESET = (
     # #227 (prod probe): crown clipped flush to the top frame and crop crept
     # to waist/upper hip despite the chest-up brief. Three named anchors:
@@ -103,6 +105,27 @@ _PROFILE_CANONICAL_NEGATIVE = (
     "young girl, young boy, real person, real people, celebrity, politician, "
     "photograph of a real human"
 )
+# #227 Phase 2b (prod probes): prompt-side framing phrases cannot suppress
+# the Flux waist-crop prior (0/3 this round, 0/4 in the preset round); the
+# canvas bump is blocked (fp8 VRAM ceiling at 512, spec 019 excludes >512).
+# This composition negative targets the observed midriff defect and rides
+# every generation as the second part of the composed negative.
+_COMPOSITION_NEGATIVE = "bare midriff, exposed stomach, navel"
+
+
+def compose_negative(canonical_negative: str | None) -> str:
+    """#227 Phase 2b: the negative-prompt string for a generation.
+
+    Joins the canonical safety negative (from the visual profile guardrail;
+    may be None or empty — descriptors without a player profile have no
+    canonical part) with the composition constant. Deterministic order:
+    canonical first, composition second; empty parts are dropped and no
+    double commas are produced. The string rides every generation via the
+    transport and is APPENDED to (never replaces) the adapter's technical
+    negative floor (deploy/comfy_adapter.py build_negative).
+    """
+    parts = [(canonical_negative or "").strip(), _COMPOSITION_NEGATIVE]
+    return ", ".join(part for part in parts if part)
 _PROFILE_DEFAULT_STYLE = "modest, casual everyday styling"
 # Trait values are 0-100 (committed CharacterTrait rows); the upper third
 # counts as high. Values below the threshold (and absent keys) contribute no

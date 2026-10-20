@@ -1,8 +1,12 @@
 """M6 T4 (SPEC §66/§15): Flux transports.
 
-Protocol: generate(prompt, seed, size) -> PNG bytes.
+Protocol: generate(prompt, seed, size, negative="") -> PNG bytes.
 - StubFluxTransport: deterministic CI-safe placeholder (no network).
 - HttpFluxTransport: POST {base_url}/generate against the external Flux server (§15).
+
+#227 Phase 2b: the trailing optional ``negative`` carries the composed
+negative (descriptor.compose_negative) — the adapter appends it to its
+technical floor; old payloads/adapters ignore the field (backward-compatible).
 """
 from __future__ import annotations
 
@@ -16,7 +20,13 @@ from app.config.config import VisualConfig
 
 
 class FluxTransport(Protocol):
-    def generate(self, prompt: str, seed: int, size: str) -> bytes:
+    """#227 2b: implementations must declare a named ``negative: str = ""``
+    parameter to receive the composed negative; legacy 3-arg transports are
+    dispatched without it (see _transport_generate in visual_routes.py)."""
+
+    def generate(
+        self, prompt: str, seed: int, size: str, negative: str = ""
+    ) -> bytes:
         ...
 
 
@@ -54,9 +64,16 @@ def _render_placeholder_png(prompt: str, seed: int, size: str) -> bytes:
 
 
 class StubFluxTransport:
-    """CI-safe visualizer stand-in: pure function, no network, deterministic."""
+    """CI-safe visualizer stand-in: pure function, no network, deterministic.
 
-    def generate(self, prompt: str, seed: int, size: str) -> bytes:
+    #227 2b: accepts the trailing negative (fixed protocol shape) and
+    ignores it — the placeholder PNG stays a pure function of
+    (prompt, seed, size), so existing determinism pins are untouched.
+    """
+
+    def generate(
+        self, prompt: str, seed: int, size: str, negative: str = ""
+    ) -> bytes:
         return _render_placeholder_png(prompt, seed, size)
 
 
@@ -66,16 +83,21 @@ class HttpFluxTransport:
     def __init__(self, config: VisualConfig):
         self._config = config
 
-    def generate(self, prompt: str, seed: int, size: str) -> bytes:
+    def generate(
+        self, prompt: str, seed: int, size: str, negative: str = ""
+    ) -> bytes:
         import urllib.error
         import urllib.request
 
+        # #227 2b: fixed schema — "negative" is ALWAYS included (empty when
+        # not composed); adapters that predate the field ignore it.
         payload = json.dumps({
             "prompt": prompt,
             "seed": seed,
             "size": size,
             "model": self._config.model,
             "lora": self._config.lora,
+            "negative": negative,
         }).encode()
         request = urllib.request.Request(
             f"{self._config.base_url.rstrip('/')}/generate",

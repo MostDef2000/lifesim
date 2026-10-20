@@ -30,8 +30,15 @@ Excluded:
   ~93.5% with base flux — KB 1489-1491; FLUX LoRA training on this stack is
   recorded non-viable — KB 1611-1616).
 - `CharacterVisualProfile` table (Phase 2, together with #118 editing).
-- Negative-prompt transport contract change (Phase 2b, lane B — adapter +
-  transport must move together).
+- Negative-prompt transport contract — LANDED as Phase 2b (#227), delivered
+  split: lane A (app + repo adapter copy, backward-compatible — pre-update
+  host adapters ignore the unknown JSON key via the data.get pattern) is in
+  production; lane B (host adapter activation) is a separate sysadmin step,
+  handoff pending. Normative source: `compose_negative` in
+  `backend/app/visual/descriptor.py` — canonical safety negative first,
+  composition second ("bare midriff, exposed stomach, navel"), appended to
+  (never replaces) the adapter technical floor; payload key "negative"
+  always present, empty-able.
 - Any network dependency on 3d.mostdef.ru from prod; any A1111/Forge
   compat layer; any new auth surface; sizes above 512x512.
 
