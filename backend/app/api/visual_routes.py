@@ -128,22 +128,37 @@ def register_visual_routes(app, settings: Settings, session_factory: sessionmake
         parameter is NOT named ``canonical``: the scene-reference loop below
         already binds that local name to a VisualAsset row.
         """
-        from app.db.models import VisualAsset, WorldClock
+        from app.db.models import Character, VisualAsset, WorldClock
         from app.events.events import EventType, log_event
 
         world_id = settings.world.world_id
         clock = session.get(WorldClock, world_id)
         game_ts = int(clock.game_timestamp) if clock else 0
 
-        # §70: canonical references of the scene's characters
+        # §70: canonical references of the scene's characters. #219: privacy
+        # line — scene assets carry character_id NULL, so the R1 ownership
+        # guard (#193) cannot run on their payload; the loop itself includes
+        # ONLY NPC characters (user_id IS NULL) and the descriptor's player
+        # part (the requesting player's own character). Foreign players'
+        # canonical portraits are never used as generation references for
+        # others' scenes, and their asset ids never ride foreign-readable
+        # scene payloads. A missing Character row is fail-closed (no
+        # reference).
         reference_ids: list[int] = []
         if asset_type == "scene":
+            player_id = (descriptor.get("player") or {}).get("id")
             for char in descriptor.get("characters", []):
+                char_id = char["id"]
+                row = session.get(Character, char_id)
+                if row is None or (
+                    row.user_id is not None and char_id != player_id
+                ):
+                    continue
                 canonical = (
                     session.query(VisualAsset)
                     .filter_by(
                         world_id=world_id, asset_type="portrait",
-                        character_id=char["id"], canonical=True,
+                        character_id=char_id, canonical=True,
                     )
                     .first()
                 )
