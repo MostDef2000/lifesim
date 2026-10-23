@@ -1,7 +1,9 @@
 """M6 (SPEC §105/66-70): visual API routes.
 
 Registered from create_app; every route is gated by settings.visual.enabled (503).
-Visual layer is read-only over world state (П1-аналог): writes only visual_assets + files.
+Visual layer is read-only over world state (П1-аналог): writes only
+visual_assets + visual_references + files (references under
+references_dir).
 #191 exceptions to the gate on GET /visual/characters/{cid}/portrait (both because the
 #191 character guard precedes the gate on the canonical-miss path):
 - an NPC (user_id is None) with visual.enabled=false answers 404 (no transport call);
@@ -18,9 +20,11 @@ import base64
 import collections
 import hashlib
 import inspect
+import io
 import logging
 import threading
 import time
+import uuid
 from typing import Any
 
 from sqlalchemy.orm import Session, sessionmaker
@@ -103,7 +107,7 @@ def _evict_npc_portrait_negative(now: float) -> None:
 
 
 def register_visual_routes(app, settings: Settings, session_factory: sessionmaker) -> None:
-    from fastapi import Depends, HTTPException, Response
+    from fastapi import Depends, File, HTTPException, Response, UploadFile
     from fastapi.responses import JSONResponse
     from pydantic import BaseModel
 
@@ -764,3 +768,177 @@ def register_visual_routes(app, settings: Settings, session_factory: sessionmake
                 raise _not_found() from None
             _npc_portrait_negative.pop(key, None)  # success clears the entry
             return payload
+
+    # ---------- 020 P3: visual reference upload (stage 1) ----------
+
+    # 020 P3: user-uploaded visual references — storage + owner CRUD only,
+    # behind the same visual.enabled 503 gate as the rest of /visual.
+    from app.visual.refstore import VisualReferenceStore
+
+    refstore = VisualReferenceStore(visual_settings)
+    _REFERENCE_MAGICS = (
+        (b"\x89PNG\r\n\x1a\n", "image/png"),
+        (b"\xff\xd8\xff", "image/jpeg"),
+    )
+    # 020 P3: decompression-bomb guard — 4K guidance is ~8 MP; hard-fail
+    # before decode. PIL's global MAX_IMAGE_PIXELS stays untouched.
+    _REFERENCE_MAX_PIXELS = 24_000_000
+
+    def _reference_mime(data: bytes) -> str | None:
+        """Server derives the mime from magic bytes — client-supplied
+        content type and filename are never trusted."""
+        for magic, mime in _REFERENCE_MAGICS:
+            if data.startswith(magic):
+                return mime
+        return None
+
+    def _reference_decodable(data: bytes) -> bool:
+        """Full decode check: verify() catches structural garbage, then a
+        reopen confirms the image actually loads (garbage with a valid
+        magic must be rejected). Oversized canvases hard-fail before
+        decode (decompression-bomb guard, _REFERENCE_MAX_PIXELS)."""
+        from PIL import Image
+
+        try:
+            with Image.open(io.BytesIO(data)) as img:
+                img.verify()
+            with Image.open(io.BytesIO(data)) as img:
+                if img.width * img.height > _REFERENCE_MAX_PIXELS:
+                    return False  # never decode an oversized canvas
+                img.load()
+        except Exception:
+            return False
+        return True
+
+    def _reference_payload(ref) -> dict:
+        created = ref.created_at
+        if hasattr(created, "isoformat"):
+            created_str = created.isoformat()
+        else:
+            created_str = str(created)
+        return {
+            "id": ref.id,
+            "mime": ref.mime,
+            "size_bytes": ref.size_bytes,
+            "created_at": created_str,
+        }
+
+    def _owned_reference_or_404(session: Session, request_user, ref_id: int):
+        """Owner-scoped fetch: foreign or missing ids answer the SAME 404
+        (no-disclosure, #193 R1 convention)."""
+        from app.db.models import VisualReference
+
+        ref = session.get(VisualReference, ref_id)
+        if ref is None or ref.user_id != request_user.id:
+            raise HTTPException(status_code=404, detail="reference not found")
+        return ref
+
+    @app.post("/visual/references")
+    def upload_reference(
+        file: UploadFile = File(...),
+        request_user=Depends(current_user),
+        session: Session = Depends(db),
+    ):
+        """020 P3 stage 1: upload one reference image (original bytes only).
+
+        Validation order (contract): auth (the current_user dependency —
+        401) → visual gate (503) → size cap (chunked read) → magic bytes →
+        Pillow full decode → per-user quota. On success: row + file land in
+        one commit (the _generate_asset flush-then-save discipline: the id
+        is needed before the file is written)."""
+        gate()
+        from app.db.models import VisualReference
+
+        cap = visual_settings.reference_max_bytes
+        # Chunked read with a hard cap — the single size gate: the body is
+        # spooled then capped, so oversized uploads are cut off before any
+        # storage/decode work.
+        chunks: list[bytes] = []
+        total = 0
+        while True:
+            chunk = file.file.read(1024 * 1024)
+            if not chunk:
+                break
+            total += len(chunk)
+            if total > cap:
+                raise HTTPException(status_code=422, detail="reference too large")
+            chunks.append(chunk)
+        data = b"".join(chunks)
+        mime = _reference_mime(data)
+        if mime is None:
+            raise HTTPException(
+                status_code=422, detail="unsupported reference format")
+        if not _reference_decodable(data):
+            raise HTTPException(
+                status_code=422, detail="unsupported reference format")
+        count = (
+            session.query(VisualReference)
+            .filter_by(user_id=request_user.id)
+            .count()
+        )
+        if count >= visual_settings.max_references_per_user:
+            raise HTTPException(
+                status_code=422, detail="reference quota exceeded")
+        # Unique placeholder avoids the empty-string unique collision when
+        # two concurrent uploads flush before the real path is known.
+        ref = VisualReference(
+            user_id=request_user.id, mime=mime, size_bytes=len(data),
+            storage_path=f"pending-{uuid.uuid4().hex}",
+        )
+        session.add(ref)
+        session.flush()
+        try:
+            ref.storage_path = refstore.save(ref.id, mime, data)
+            session.commit()
+        except BaseException:
+            # Best-effort orphan cleanup: on the placeholder path remove()
+            # is a no-op via missing_ok.
+            refstore.remove(ref.storage_path)
+            raise
+        session.refresh(ref)  # server_default created_at is set by the DB
+        return JSONResponse(status_code=201, content=_reference_payload(ref))
+
+    @app.get("/visual/references")
+    def list_references(
+        request_user=Depends(current_user),
+        session: Session = Depends(db),
+    ):
+        """Own references only, newest first."""
+        gate()
+        from app.db.models import VisualReference
+
+        refs = (
+            session.query(VisualReference)
+            .filter_by(user_id=request_user.id)
+            .order_by(VisualReference.id.desc())
+            .all()
+        )
+        return {"items": [_reference_payload(ref) for ref in refs]}
+
+    @app.get("/visual/references/{ref_id}/file")
+    def get_reference_file(
+        ref_id: int,
+        request_user=Depends(current_user),
+        session: Session = Depends(db),
+    ):
+        gate()
+        ref = _owned_reference_or_404(session, request_user, ref_id)
+        try:
+            data = refstore.read(ref.storage_path)
+        except (OSError, ValueError):
+            raise HTTPException(status_code=404, detail="reference file missing")
+        return Response(content=data, media_type=ref.mime)
+
+    @app.delete("/visual/references/{ref_id}")
+    def delete_reference(
+        ref_id: int,
+        request_user=Depends(current_user),
+        session: Session = Depends(db),
+    ):
+        """Owner-managed delete (no TTL): file + row in one flow."""
+        gate()
+        ref = _owned_reference_or_404(session, request_user, ref_id)
+        refstore.remove(ref.storage_path)
+        session.delete(ref)
+        session.commit()
+        return Response(status_code=204)

@@ -39,7 +39,8 @@ def test_bootstrap_tables(tmp_path):
     assert "character_desires" in tables, "desire table must exist after #90"
     assert "partnerships" in tables, "partnership table must exist after #182"
     # 020 P2: character_appearances (plan.md:26) — 44 -> 45, deliberate.
-    assert len(tables) == 45, f"Expected 45 tables, found {len(tables)}: {tables}"
+    # 020 P3: visual_references — 45 -> 46, deliberate.
+    assert len(tables) == 46, f"Expected 46 tables, found {len(tables)}: {tables}"
 
     # Check basic rows
     cursor.execute("SELECT id, seed FROM worlds")
