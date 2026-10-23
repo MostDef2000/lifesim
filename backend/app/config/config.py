@@ -294,6 +294,13 @@ class VisualConfig(BaseModel):
     # limiter scales with worker count (N workers ⇒ N×preview_rpm) — same
     # known limitation as the admin middleware.
     preview_rpm: int = Field(5, ge=1)
+    # 020 P3: user-uploaded visual references (stage 1: storage + CRUD).
+    # Original bytes only — stored unconverted; consumption (img2img /
+    # IP-adapter) is a separate later stage. Hard cap per file
+    # (reference_max_bytes) and per user (max_references_per_user).
+    references_dir: str = "data/visual_references"
+    reference_max_bytes: int = 5 * 1024 * 1024
+    max_references_per_user: int = 5
 
 class ExternalServiceSpec(BaseModel):
     """M7 (SPEC §38): one service at an external location."""

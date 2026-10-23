@@ -5,6 +5,7 @@ from sqlalchemy import (
     Boolean,
     CheckConstraint,
     Column,
+    DateTime,
     Float,
     ForeignKey,
     Index,
@@ -14,6 +15,7 @@ from sqlalchemy import (
     UniqueConstraint,
     create_engine,
     event,
+    func,
 )
 from sqlalchemy.orm import Session, declarative_base
 
@@ -609,6 +611,20 @@ class VisualAsset(Base):
     lora = Column(String, nullable=True)
     canonical = Column(Boolean, nullable=False, default=False)  # §69
     created_at = Column(String, nullable=False)
+
+
+class VisualReference(Base):
+    """020 P3: user-uploaded visual reference. Guidance only — never a
+    simulation fact, never fed to the LLM. Original bytes are stored
+    unconverted via VisualReferenceStore (app/visual/refstore.py)."""
+    __tablename__ = "visual_references"
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    mime = Column(String, nullable=False)  # image/png|image/jpeg (magic-derived)
+    size_bytes = Column(Integer, nullable=False)
+    storage_path = Column(String, nullable=False, unique=True)  # relative, traversal-safe
+    created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+
 
 class ExternalLocation(Base):
     """M7 (SPEC §38): external world entity — conditionally simulated, no physics."""

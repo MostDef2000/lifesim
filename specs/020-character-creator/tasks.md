@@ -27,8 +27,8 @@
 
 ## Волна 3 — P3 (reference upload)
 
-- [ ] Мини-спек storage/retention/privacy (решение владельца).
-- [ ] Реализация после отдельного approval.
+- [x] Мини-спек storage/retention/privacy (решение владельца).
+- [x] Реализация после отдельного approval.
 
 ## Вне скоупа (тикет #118)
 

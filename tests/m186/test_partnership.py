@@ -182,7 +182,8 @@ def test_schema_version_and_tables(world):
     assert version == "0.15.0"
     tables = set(sqla_inspect(engine).get_table_names())
     # 020 P2: character_appearances (plan.md:26) — 44 -> 45, deliberate.
-    assert len(tables) == 45, f"Expected 45 tables, found {len(tables)}"
+    # 020 P3: visual_references — 45 -> 46, deliberate.
+    assert len(tables) == 46, f"Expected 46 tables, found {len(tables)}"
     assert "partnerships" in tables
 
 
