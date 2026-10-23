@@ -365,9 +365,14 @@ def register_visual_routes(app, settings: Settings, session_factory: sessionmake
         # #86 (A4): the requesting player's character enriches the descriptor
         # (appearance/outfit + canonical reference). Read-only lookup; a user
         # without a character still gets a scene, just without a player part.
+        # #230: only a LIVING character enriches — a dead legacy row (lower
+        # id, predating the one-character-per-user limit) must not be picked;
+        # a user with only dead characters takes the same no-player path
+        # (aliveness precedent in this file: _owned_character_for_portrait).
         player = (
             session.query(Character)
             .filter_by(world_id=settings.world.world_id, user_id=request_user.id)
+            .filter(Character.alive.is_(True))
             .order_by(Character.id)
             .first()
         )
