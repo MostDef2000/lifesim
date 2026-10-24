@@ -547,14 +547,32 @@ async function generatePortrait(container, force) {
           { method: "POST", body: { canonical: false } });
       } catch (e) { /* best effort */ }
     }
-    const r = await api(`/visual/portraits/${S.character.id}`, { method: "POST" });
+    // 020 P3 stage 2: the optional reference/style/nude ride the POST body
+    // ONLY when set — an untouched control set keeps the historical no-body
+    // POST (byte-identical request; the server's canonical-reuse fast-path
+    // still applies to plain requests).
+    const refSel = container.querySelector(".portrait-ref-select");
+    const styleSel = container.querySelector(".portrait-style-select");
+    const nudeToggle = container.querySelector(".portrait-nude-toggle");
+    const body = {};
+    if (refSel && refSel.value) body.reference_id = Number(refSel.value);
+    if (styleSel && styleSel.value) body.style = styleSel.value;
+    if (nudeToggle && nudeToggle.checked) body.nude = true;
+    const r = await api(`/visual/portraits/${S.character.id}`,
+      Object.keys(body).length ? { method: "POST", body } : { method: "POST" });
     // Pin the new asset canonical: persists across reloads and feeds §70 scene refs.
-    try {
-      await api(`/visual/assets/${r.asset.id}/canonical`,
-        { method: "POST", body: { canonical: true } });
-      S.canonicalPortraitId = r.asset.id;
-      S.visualDisabled = false;
-    } catch (e) { /* best effort */ }
+    // 020 P3 stage 2: nude renders skip the auto-pin — the fresh asset displays
+    // once, but the previous canonical stays pinned; making a nude render
+    // canonical must be a deliberate act. Plain/styled/reference renders keep
+    // the historical auto-pin.
+    if (!body.nude) {
+      try {
+        await api(`/visual/assets/${r.asset.id}/canonical`,
+          { method: "POST", body: { canonical: true } });
+        S.canonicalPortraitId = r.asset.id;
+        S.visualDisabled = false;
+      } catch (e) { /* best effort */ }
+    }
     const blob = await fetchPortraitBlob(`/visual/assets/${r.asset.id}/file`);
     const url = URL.createObjectURL(blob);
     const img = el("img", { class: "portrait-img", src: url, alt: "Портрет" });
@@ -567,11 +585,91 @@ async function generatePortrait(container, force) {
   }
 }
 
+/* 020 P3 stage 2: owner reference list → picker options. The payload per
+   item is {id, mime, size_bytes, created_at} (visual_routes.py) — there is
+   no filename, so the label is built from id + KB size. The current selection
+   survives a reference-list refresh when still present; a full re-render of
+   the portrait block rebuilds the controls with defaults instead. */
+async function refreshReferenceOptions(refSel) {
+  const data = await api("/visual/references");
+  const items = (data && data.items) || [];
+  const prev = refSel.value;
+  refSel.replaceChildren(
+    el("option", { value: "" }, "—"),
+    ...items.map((r) => el("option", { value: String(r.id) },
+      `#${r.id} · ${Math.max(1, Math.round(r.size_bytes / 1024))} КБ`)));
+  if ([...refSel.options].some((o) => o.value === prev)) refSel.value = prev;
+}
+
+/* 020 P3 stage 2: multipart upload — unlike api() the body is FormData (the
+   browser sets the multipart boundary header; a JSON content-type here would
+   corrupt it). Cookie auth as in api(); a 401 re-routes like every other
+   expired-session hit, and any non-2xx throws {status, detail} so callers
+   surface the server text (422 "reference too large" / "unsupported reference
+   format" / "reference quota exceeded") — note the shape carries no attached
+   response body (api() keeps it as .data for the ambiguous-422 case; nothing
+   here needs it). */
+async function uploadReference(file) {
+  const fd = new FormData();
+  fd.append("file", file);
+  const res = await fetch("/visual/references", {
+    method: "POST", credentials: "same-origin", body: fd });
+  if (res.status === 401) {
+    S.user = null;
+    route();
+    throw new Error("unauthorized");
+  }
+  let data = null;
+  try { data = await res.json(); } catch (e) { data = null; }
+  if (!res.ok) {
+    const detail = data && data.detail ? data.detail : `HTTP ${res.status}`;
+    throw Object.assign(new Error(String(detail)),
+      { status: res.status, detail });
+  }
+  return data;
+}
+
 function portraitBlock() {
   // Synchronous box (a real DOM node, not a Promise) so renderWorld can embed it
   // directly; the canonical portrait loads asynchronously and fills in when ready.
   const status = el("div", { class: "portrait-status muted" });
   const box = el("div", { class: "panel portrait" }, el("h2", {}, "Портрет"), status);
+  // 020 P3 stage 2: compact reference-consumption row. All controls default
+  // to the no-op (picker "—", style "—", nude OFF) — plain generation stays
+  // the historical no-body POST. The picker lists the user's uploaded
+  // references (GET /visual/references); the upload button posts the file
+  // and refreshes the picker on success. Scenes keep API-only consumption
+  // this wave — no scene-side controls here.
+  const refSel = el("select", { class: "portrait-ref-select",
+    "aria-label": "Референс" }, el("option", { value: "" }, "—"));
+  const styleSel = el("select", { class: "portrait-style-select",
+    "aria-label": "Стиль" },
+    el("option", { value: "" }, "—"),
+    el("option", { value: "oil" }, "Масло"),
+    el("option", { value: "watercolor" }, "Акварель"));
+  const nudeToggle = el("input", { type: "checkbox", class: "portrait-nude-toggle" });
+  const refFile = el("input", { type: "file", accept: "image/png,image/jpeg",
+    class: "portrait-ref-file", hidden: "hidden" });
+  const refUploadBtn = el("button", { type: "button", class: "portrait-ref-upload",
+    onclick: () => refFile.click() }, "Загрузить референс");
+  refFile.addEventListener("change", async () => {
+    const file = refFile.files && refFile.files[0];
+    refFile.value = "";  // reset so re-picking the same file re-fires change
+    if (!file) return;
+    refUploadBtn.disabled = true;
+    try {
+      await uploadReference(file);
+      toast("Референс загружен");
+      await refreshReferenceOptions(refSel);
+    } catch (e) { toast(e.message, true); }
+    finally { refUploadBtn.disabled = false; }
+  });
+  box.append(el("div", { class: "portrait-ref-controls" },
+    el("label", { class: "portrait-ref-field" }, "Референс", refSel),
+    el("label", { class: "portrait-ref-field" }, "Стиль", styleSel),
+    el("label", { class: "portrait-ref-field portrait-ref-nude" }, nudeToggle,
+      el("span", {}, "Ню (художественный)")),
+    refUploadBtn, refFile));
   (async () => {
     let hasCanonical = false;
     if (!S.visualDisabled) {
@@ -588,6 +686,11 @@ function portraitBlock() {
         else status.textContent = "Портрет ещё не готов";  // #175: 404/net — honest non-error note
         /* no portrait yet — keep button */
       }
+      // 020 P3 stage 2: fill the reference picker (owner list). Best-effort:
+      // a failed list (503 gate / transient net) leaves the empty "—" picker;
+      // upload-time errors surface on the upload button instead.
+      try { await refreshReferenceOptions(refSel); }
+      catch (e) { /* picker stays at "—" */ }
     }
     box.append(el("button", {
       onclick: () => generatePortrait(box, hasCanonical),
