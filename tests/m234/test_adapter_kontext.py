@@ -39,6 +39,10 @@ and the /upload/image upload-flow pins. Every OTHER pin in this file is
 unchanged: legacy graph byte-identity, kontext graph shape (UNETLoader
 unet_name, VAE ae, FluxGuidance 3.5, explicit denoise, SaveImage, no
 EmptyLatentImage), pony+reference 400, malformed b64 400.
+TIGHTENING (2026-10-24, verified against upstream ComfyUI master server.py,
+store_image_upload): `overwrite` is read from the multipart FORM DATA
+(post.get("overwrite")) — the /upload/image pin now REQUIRES overwrite=true
+as a multipart form field; a query-string-only overwrite FAILS the pin.
 
 Import/test pattern follows tests/m19/test_comfy_adapter.py (the stdlib
 adapter module is imported straight from deploy/; the ComfyUI side is a
@@ -174,9 +178,9 @@ def _multipart_filename(upload: dict):
 
 
 def _overwrites(upload: dict) -> bool:
-    """overwrite=true may ride the query string or a multipart form field."""
-    if "overwrite=true" in upload["path"].lower():
-        return True
+    """overwrite=true must be a multipart FORM FIELD in the body — that is
+    where upstream ComfyUI master (server.py, store_image_upload) reads it
+    (post.get("overwrite")); a query-string-only overwrite does NOT count."""
     return bool(re.search(
         rb'name="overwrite"(?:\r\n[^\r\n]+)*\r\n\r\ntrue\r\n',
         upload["body"], re.IGNORECASE))
@@ -297,8 +301,10 @@ class TestKontextGraph:
         assert REF_PNG in upload["body"], (
             "the multipart body must carry the EXACT reference bytes")
         assert _overwrites(upload), (
-            f"the upload must set overwrite=true (query or form field); "
-            f"got path={upload['path']!r}")
+            f"the upload must carry overwrite=true as a multipart FORM "
+            f"FIELD (upstream store_image_upload reads post.get("
+            f"'overwrite') from the form, not the query); got "
+            f"path={upload['path']!r}")
         load_images = [node for node in nodes
                        if node["class_type"] == "LoadImage"]
         assert load_images, (

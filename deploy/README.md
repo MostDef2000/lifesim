@@ -367,7 +367,10 @@ HMAC-подписи (VL1_SECRET), а не в памяти; мир возобно
   reference_b64?}` → PNG. `reference_b64` (020 P3 stage 2) — опциональный
   base64 референса: отсутствует/пустой → прежний txt2img-граф (без
   изменений); непустой + `flux` → kontext img2img; `pony` + референс →
-  400 (kontext только для flux); битый base64 → 400.
+  400 (kontext только для flux); битый base64 → 400. Ретеншн: каждый
+  запрос с референсом льёт свежую копию файла в input-каталог контейнера
+  ComfyUI (valery-comfyui-1); файлы остаются после джоб (в т.ч. упавших)
+  и чистятся вручную, периодически (см. mini-spec 020 P3).
   Модельный роутинг: `flux` → flux1-dev-fp8.safetensors,
   `pony` → ponyDiffusionV6XL.safetensors; pony получает booru-теги
   (score_9/8/7) в адаптере. LoRA safe-list: только

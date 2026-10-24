@@ -172,7 +172,9 @@ def _upload_reference(reference_raw: bytes) -> str:
     """020 P3 stage 2 (revised contract): ingest the reference the NATIVE
     ComfyUI way — POST the decoded bytes to ComfyUI's POST /upload/image as
     a hand-rolled stdlib multipart body (file field "image", random unique
-    filename by magic bytes, overwrite=true on the query string) and return
+    filename by magic bytes, overwrite=true as a multipart form field —
+    upstream server.py store_image_upload reads post.get("overwrite") from
+    the form, not the query) and return
     the stored file NAME the server reports. Native class LoadImage takes a
     FILE NAME from ComfyUI's input directory (upstream VALIDATE_INPUTS
     checks existence) and does NOT decode data URIs.
@@ -187,6 +189,10 @@ def _upload_reference(reference_raw: bytes) -> str:
     boundary = f"----lifesim{uuid.uuid4().hex}"
     body = (
         f"--{boundary}\r\n"
+        f'Content-Disposition: form-data; name="overwrite"\r\n'
+        f"\r\n"
+        f"true\r\n"
+        f"--{boundary}\r\n"
         f'Content-Disposition: form-data; name="image"; '
         f'filename="{filename}"\r\n'
         f"Content-Type: image/{'jpeg' if ext == 'jpg' else 'png'}\r\n"
@@ -194,7 +200,7 @@ def _upload_reference(reference_raw: bytes) -> str:
     ).encode("ascii") + reference_raw + f"\r\n--{boundary}--\r\n".encode(
         "ascii")
     request = urllib.request.Request(
-        f"{COMFY_URL}/upload/image?{urllib.parse.urlencode({'overwrite': 'true'})}",
+        f"{COMFY_URL}/upload/image",
         data=body,
         headers={"Content-Type":
                  f"multipart/form-data; boundary={boundary}"},

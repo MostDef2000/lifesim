@@ -13,7 +13,7 @@ spec/plan/tasks wave).
 
 | Decision | Value |
 |---|---|
-| Consumption path | Both `POST /visual/portraits/{cid}` and `POST /visual/scenes` accept an optional `reference_id` → base64 of the stored file rides the transport call as `reference_b64`; the adapter builds the FLUX.1 Kontext Dev graph (UNETLoader + DualCLIPLoader, reference as a LoadImage base64 data-URI, no EmptyLatentImage — the reference latent seeds the sample) |
+| Consumption path | Both `POST /visual/portraits/{cid}` and `POST /visual/scenes` accept an optional `reference_id` → base64 of the stored file rides the transport call as `reference_b64`; the adapter builds the FLUX.1 Kontext Dev graph (UNETLoader + DualCLIPLoader, no EmptyLatentImage — the reference latent seeds the sample). Reference ingestion is ComfyUI-native: decoded bytes are POSTed to `/upload/image` (multipart, field "image", random unique filename, `overwrite=true` as a multipart form field) and LoadImage receives the returned file name |
 | Reference gate | Owner-scoped: missing AND foreign `reference_id` answer the SAME stage-1 404 (no existence leak, #193 convention), resolved BEFORE any generation — a rejected reference never reaches the transport |
 | Style presets (portraits) | Server-side enum only: `style: "" (default) \| "oil" \| "watercolor"`, anything else → 422 before generation; the preset constant (OIL_PORTRAIT / WATERCOLOR_PORTRAIT) PREFIXES the positive prompt |
 | Scene style | No user-facing scene style parameter this wave — a server-side STORYBOOK_SCENE suffix is appended to EVERY scene positive prompt |
@@ -60,3 +60,10 @@ spec/plan/tasks wave).
         run is the real headroom test;
   - [ ] steps-20 latency measured on the kontext path; KSampler steps may
         tune down after the probe (one-line adapter constant).
+
+  Worker-side reference retention: every reference request uploads a fresh
+  copy into the ComfyUI container's input directory (valery-comfyui-1,
+  mounted input dir); files persist after job completion (including failed
+  jobs) — they are server-side artifacts not covered by source-reference
+  deletion. Cleanup is a periodic operator action on the box (input files
+  are small, ≤5MiB each); disk monitoring covers the ComfyUI data volume.
