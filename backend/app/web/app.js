@@ -540,13 +540,6 @@ async function generatePortrait(container, force) {
   const status = container.querySelector(".portrait-status");
   if (status) status.textContent = "Генерация…";
   try {
-    // Force-regenerate: unpin the current canonical so a fresh asset is created.
-    if (force && S.canonicalPortraitId) {
-      try {
-        await api(`/visual/assets/${S.canonicalPortraitId}/canonical`,
-          { method: "POST", body: { canonical: false } });
-      } catch (e) { /* best effort */ }
-    }
     // 020 P3 stage 2: the optional reference/style/nude ride the POST body
     // ONLY when set — an untouched control set keeps the historical no-body
     // POST (byte-identical request; the server's canonical-reuse fast-path
@@ -558,6 +551,18 @@ async function generatePortrait(container, force) {
     if (refSel && refSel.value) body.reference_id = Number(refSel.value);
     if (styleSel && styleSel.value) body.style = styleSel.value;
     if (nudeToggle && nudeToggle.checked) body.nude = true;
+    // Force-regenerate: unpin the current canonical so a fresh asset is created.
+    // 020 P3 stage 2: the nude toggle is read BEFORE any demotion — nude
+    // renders skip the auto-pin below, so demoting here would leave the
+    // canonical empty with nothing to re-pin; a nude render must not touch
+    // the existing canonical at all. Non-nude keeps the historical
+    // demote-then-regenerate-then-repin semantics byte-identical.
+    if (force && !body.nude && S.canonicalPortraitId) {
+      try {
+        await api(`/visual/assets/${S.canonicalPortraitId}/canonical`,
+          { method: "POST", body: { canonical: false } });
+      } catch (e) { /* best effort */ }
+    }
     const r = await api(`/visual/portraits/${S.character.id}`,
       Object.keys(body).length ? { method: "POST", body } : { method: "POST" });
     // Pin the new asset canonical: persists across reloads and feeds §70 scene refs.
