@@ -2005,6 +2005,28 @@ button.danger:hover { background: #93301f; }
   .creator-shell .creator-hero { padding: 16px; }
 }
 
+/* 020 P3 stage 2: reference consumption row in the portrait block —
+   compact picker + style + nude toggle + upload, tokens only (same
+   no-new-literals discipline as .people-shell/.desire-shell blocks). */
+.portrait-ref-controls {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  margin: 6px 0;
+}
+.portrait-ref-field { flex: 1 1 120px; margin: 0; }
+.portrait-ref-field select { width: 100%; }
+.portrait-ref-nude {
+  flex: 0 0 auto;
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  color: var(--dim);
+}
+.portrait-ref-nude input { width: auto; }
+.portrait-ref-file { display: none; }
+
 /* #175: connection banner — persistent offline signal driven by consecutive
    pollEvents failures (WS close is routine on navigation, never drives it).
    Warm-warn family on the dark panel bg; fixed top-center, below nothing —

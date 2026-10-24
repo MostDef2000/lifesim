@@ -7,6 +7,14 @@ Protocol: generate(prompt, seed, size, negative="") -> PNG bytes.
 #227 Phase 2b: the trailing optional ``negative`` carries the composed
 negative (descriptor.compose_negative) — the adapter appends it to its
 technical floor; old payloads/adapters ignore the field (backward-compatible).
+
+020 P3 stage 2: the trailing keyword-only ``reference_b64`` carries a
+user-uploaded reference image (base64 of the original file bytes) for
+kontext-style generation. None/empty -> the JSON payload is byte-identical
+to the legacy one (the key is ABSENT, not empty — old adapters see exactly
+the pre-stage-2 body); non-empty -> the adapter builds a flux-kontext graph
+from it. The stub ignores the field (renderer stays a pure function of
+prompt+seed+size).
 """
 from __future__ import annotations
 
@@ -22,10 +30,15 @@ from app.config.config import VisualConfig
 class FluxTransport(Protocol):
     """#227 2b: implementations must declare a named ``negative: str = ""``
     parameter to receive the composed negative; legacy 3-arg transports are
-    dispatched without it (see _transport_generate in visual_routes.py)."""
+    dispatched without it (see _transport_generate in visual_routes.py).
+
+    020 P3 stage 2: implementations that accept references declare the
+    keyword-only ``reference_b64`` (default None) — dispatched only when
+    declared, same compat discipline."""
 
     def generate(
-        self, prompt: str, seed: int, size: str, negative: str = ""
+        self, prompt: str, seed: int, size: str, negative: str = "",
+        *, reference_b64: str | None = None,
     ) -> bytes:
         ...
 
@@ -69,10 +82,15 @@ class StubFluxTransport:
     #227 2b: accepts the trailing negative (fixed protocol shape) and
     ignores it — the placeholder PNG stays a pure function of
     (prompt, seed, size), so existing determinism pins are untouched.
+
+    020 P3 stage 2: likewise accepts (and ignores) the keyword-only
+    reference_b64 so the stub remains a FluxTransport — no reference path
+    exists for the stub renderer.
     """
 
     def generate(
-        self, prompt: str, seed: int, size: str, negative: str = ""
+        self, prompt: str, seed: int, size: str, negative: str = "",
+        *, reference_b64: str | None = None,
     ) -> bytes:
         return _render_placeholder_png(prompt, seed, size)
 
@@ -84,24 +102,30 @@ class HttpFluxTransport:
         self._config = config
 
     def generate(
-        self, prompt: str, seed: int, size: str, negative: str = ""
+        self, prompt: str, seed: int, size: str, negative: str = "",
+        *, reference_b64: str | None = None,
     ) -> bytes:
         import urllib.error
         import urllib.request
 
         # #227 2b: fixed schema — "negative" is ALWAYS included (empty when
         # not composed); adapters that predate the field ignore it.
-        payload = json.dumps({
+        # 020 P3 stage 2: "reference_b64" rides ONLY when set — None/empty
+        # keeps the payload byte-identical to the legacy 6-key body (the
+        # key is absent, never empty).
+        payload: dict = {
             "prompt": prompt,
             "seed": seed,
             "size": size,
             "model": self._config.model,
             "lora": self._config.lora,
             "negative": negative,
-        }).encode()
+        }
+        if reference_b64:
+            payload["reference_b64"] = reference_b64
         request = urllib.request.Request(
             f"{self._config.base_url.rstrip('/')}/generate",
-            data=payload,
+            data=json.dumps(payload).encode(),
             headers={"Content-Type": "application/json"},
         )
         try:

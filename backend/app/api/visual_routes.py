@@ -35,20 +35,26 @@ logger = logging.getLogger("vl1.visual")
 
 
 def _transport_generate(
-    transport: Any, prompt: str, seed: int, size: str, negative: str
+    transport: Any, prompt: str, seed: int, size: str, negative: str,
+    reference_b64: str | None = None,
 ) -> bytes:
     """#227 Phase 2b: carry the composed negative on the transport call.
+    020 P3 stage 2: same compat discipline for the keyword-only
+    ``reference_b64`` (uploaded-reference generation) — each trailing field
+    rides ONLY when the transport's signature declares it.
 
-    The negative rides ONLY when the transport's signature declares it —
-    legacy 3-arg transports (existing test fakes mounted on the
-    flux_transport_factory seam) keep working unchanged ("keep all existing
-    call signatures backward-compatible"). In-repo transports all declare
-    the parameter, so production always sends it.
+    Legacy transports keep working unchanged:
+    - exact 3-arg fakes get no keyword at all;
+    - negative-only fakes (m227 capture/legacy seam) get only ``negative``;
+    - reference-aware transports (HttpFluxTransport, m234 fake) get both.
     """
     params = inspect.signature(transport.generate).parameters
+    kwargs: dict[str, Any] = {}
     if "negative" in params:
-        return transport.generate(prompt, seed, size, negative=negative)
-    return transport.generate(prompt, seed, size)
+        kwargs["negative"] = negative
+    if "reference_b64" in params:
+        kwargs["reference_b64"] = reference_b64
+    return transport.generate(prompt, seed, size, **kwargs)
 
 
 def _deterministic_seed(*parts: Any) -> int:
@@ -140,6 +146,9 @@ def register_visual_routes(app, settings: Settings, session_factory: sessionmake
         object_id: int | None,
         actor_id: str | None,
         is_canonical: bool = False,
+        style: str = "",
+        nude: bool = False,
+        reference_b64: str | None = None,
     ) -> tuple[dict, bytes]:
         """§66 pipeline: descriptor -> prompt -> Flux -> image -> asset registration.
 
@@ -149,6 +158,22 @@ def register_visual_routes(app, settings: Settings, session_factory: sessionmake
         byte-identical (they promote via POST /assets/{id}/canonical). The
         parameter is NOT named ``canonical``: the scene-reference loop below
         already binds that local name to a VisualAsset row.
+
+        020 P3 stage 2: style/nude (portraits) and reference_b64 (both
+        types) affect the positive prompt and the transport call:
+        - style presets PREFIX the TRANSPORT prompt (OIL/WATERCOLOR) —
+          render params: the STORED asset prompt stays the raw
+          build_prompt bytes (m205 TestSceneRouteGuard pin);
+        - nude=True sets the descriptor nude_framing hook (dedicated
+          fragment path — no clothing phrase may leak into the positive);
+          nude IS content: it stays in the stored prompt;
+        - scenes carry the server-side STORYBOOK_SCENE suffix on the
+          TRANSPORT prompt only (composed here, NOT in build_prompt —
+          m6 pins build_prompt scene bytes directly, m205 pins the raw
+          stored bytes);
+        - reference_b64 rides the transport call when non-empty (the
+          adapter builds a flux-kontext graph from it). Defaults keep every
+          other call site byte-identical.
         """
         from app.db.models import Character, VisualAsset, WorldClock
         from app.events.events import EventType, log_event
@@ -202,6 +227,11 @@ def register_visual_routes(app, settings: Settings, session_factory: sessionmake
             build_prompt,
             compose_negative,
         )
+        from app.visual.style_presets import (
+            OIL_PORTRAIT,
+            STORYBOOK_SCENE,
+            WATERCOLOR_PORTRAIT,
+        )
 
         # W205d: seed depends on existing-asset count, so each regeneration
         # rotates the auto outfit pool; scene prompts ignore the key.
@@ -209,20 +239,51 @@ def register_visual_routes(app, settings: Settings, session_factory: sessionmake
             descriptor["outfit_auto_variant"] = _AUTO_OUTFIT_POOL[
                 seed % len(_AUTO_OUTFIT_POOL)
             ]
+            if nude:
+                # 020 P3 stage 2: the nude flag takes the dedicated
+                # descriptor fragment path (NUDE_FRAMING replaces every
+                # clothing/outerwear fragment inside build_prompt).
+                descriptor["nude_framing"] = True
 
         prompt = build_prompt(descriptor)
+        # 020 P3 stage 2 (render params): style presets and the storybook
+        # suffix are RENDER parameters — they compose onto the prompt at
+        # the TRANSPORT CALL SITE ONLY. The asset row / response keeps the
+        # RAW build_prompt bytes (m205 TestSceneRouteGuard pins
+        # scene["prompt"] == build_prompt(descriptor) byte-exact; m234
+        # reads its assertions from the transport sink). The nude framing,
+        # by contrast, IS content and stays inside build_prompt above.
+        transport_prompt = prompt
+        if asset_type == "portrait" and style:
+            transport_prompt = (
+                f"{OIL_PORTRAIT if style == 'oil' else WATERCOLOR_PORTRAIT}, "
+                f"{prompt}"
+            )
+        elif asset_type == "scene":
+            transport_prompt = f"{prompt}, {STORYBOOK_SCENE}"
 
         # #227 2b: the composed negative rides every generation — canonical
         # safety floor (when the descriptor carries a visual profile) plus
-        # the composition part (universal).
+        # the composition part (universal). 020 P3 stage 2: the uploaded
+        # reference (base64) rides too when the request carried one.
+        canonical_negative = (
+            (descriptor.get("visual_profile") or {})
+            .get("guardrail", {}).get("canonical_negative")
+        )
+        # 020 P3 stage 2 (review): a nude render fights its own anti-crop
+        # composition negative ("bare midriff, exposed stomach, navel"
+        # contradicts the NUDE_FRAMING positive) — nude keeps the canonical
+        # guardrail floor ONLY; non-nude bytes are unchanged.
+        negative = (
+            (canonical_negative or "").strip()
+            if nude else compose_negative(canonical_negative)
+        )
         try:
             bytes_out = _transport_generate(
-                transport_factory(), prompt, seed,
+                transport_factory(), transport_prompt, seed,
                 visual_settings.image_size,
-                compose_negative(
-                    (descriptor.get("visual_profile") or {})
-                    .get("guardrail", {}).get("canonical_negative")
-                ),
+                negative,
+                reference_b64=reference_b64,
             )
         except ValueError as exc:
             raise HTTPException(status_code=502, detail=str(exc))
@@ -318,28 +379,82 @@ def register_visual_routes(app, settings: Settings, session_factory: sessionmake
     class SceneIn(BaseModel):
         location_id: int
         event_id: int | None = None
+        # 020 P3 stage 2: optional uploaded-reference consumption — same
+        # 404 semantics as portraits (_owned_reference_or_404 shape).
+        reference_id: int | None = None
+
+    class PortraitIn(BaseModel):
+        # 020 P3 stage 2: OPTIONAL portrait POST body (the historical
+        # no-body POSTs — m6/m193/m205/m230 — keep working; the route
+        # accepts PortraitIn | None = None and defaults everything).
+        # - reference_id: uploaded reference to consume (404 when missing
+        #   or foreign, before any generation);
+        # - style: "" (default, no preset) | "oil" | "watercolor" —
+        #   server-side preset PREFIX on the positive prompt; anything
+        #   else is a 422 before generation (validated in the route);
+        # - nude: replaces every clothing/outerwear fragment with the
+        #   NUDE_FRAMING constant (descriptor nude_framing hook).
+        reference_id: int | None = None
+        style: str = ""
+        nude: bool = False
+
+    # 020 P3 stage 2: style presets accepted on portraits (422 otherwise).
+    _PORTRAIT_STYLES = ("", "oil", "watercolor")
 
     @app.post("/visual/portraits/{cid}")
     def create_portrait(
         cid: str,
+        body: PortraitIn | None = None,
         request_user=Depends(current_user),
         session: Session = Depends(db),
     ):
         gate()
+        # 020 P3 stage 2: the body itself stays OPTIONAL (historical
+        # no-body POSTs) — missing body == all defaults.
+        body = body or PortraitIn()
+        if body.style not in _PORTRAIT_STYLES:
+            raise HTTPException(
+                status_code=422,
+                detail="style must be one of: '', 'oil', 'watercolor'")
         from app.db.models import VisualAsset
         from app.visual.descriptor import build_portrait_descriptor
 
         # ownership + aliveness guard (404/422/403)
         _owned_character_for_portrait(session, request_user, cid)
-        # §70 reuse: existing canonical portrait -> return it, no generation
-        canonical = (
-            session.query(VisualAsset)
-            .filter_by(
-                world_id=settings.world.world_id, asset_type="portrait",
-                character_id=cid, canonical=True,
-            )
-            .first()
+        # П4 18+ gate (020 P3 stage 2): nude rendering requires an
+        # age-confirmed OWNER — identical semantics to PATCH
+        # /characters/{cid}/outfit (app.py), where the requester is also
+        # the owner, so the account flag is checked directly. The portrait
+        # route is owner-scoped (403 above), so an NPC can never be pushed
+        # into nude rendering through this path.
+        if body.nude and not request_user.age_confirmed:
+            raise HTTPException(
+                status_code=422,
+                detail="nude requires an age-confirmed account")
+        # 020 P3 stage 2: reference consumption — owner check (missing AND
+        # foreign ids answer the SAME stage-1 404) happens BEFORE any
+        # generation; the transport is never called for a rejected ref.
+        reference_b64 = None
+        if body.reference_id is not None:
+            reference_b64 = _reference_b64_or_404(
+                session, request_user, body.reference_id)
+        # §70 reuse: existing canonical portrait -> return it, no generation.
+        # 020 P3 stage 2: a customized request (reference/style/nude) would
+        # render DIFFERENT output than the stored canonical — it always
+        # generates; the reuse fast-path stays for plain requests only.
+        customized = (
+            body.reference_id is not None or body.style or body.nude
         )
+        canonical = None
+        if not customized:
+            canonical = (
+                session.query(VisualAsset)
+                .filter_by(
+                    world_id=settings.world.world_id, asset_type="portrait",
+                    character_id=cid, canonical=True,
+                )
+                .first()
+            )
         if canonical is not None:
             return JSONResponse(status_code=200, content={
                 "asset": _asset_payload(canonical), "reused": True,
@@ -353,6 +468,9 @@ def register_visual_routes(app, settings: Settings, session_factory: sessionmake
             location_id=None,
             object_id=None,
             actor_id=cid,
+            style=body.style,
+            nude=body.nude,
+            reference_b64=reference_b64,
         )
         return JSONResponse(status_code=201, content={"asset": payload, "reused": False})
 
@@ -387,6 +505,13 @@ def register_visual_routes(app, settings: Settings, session_factory: sessionmake
             )
         except LookupError as exc:
             raise HTTPException(status_code=404, detail=str(exc))
+        # 020 P3 stage 2: scenes CONSUME the uploaded reference like
+        # portraits — same owner check, same stage-1 404 shape, resolved
+        # BEFORE any generation (rejected refs never reach the transport).
+        reference_b64 = None
+        if body.reference_id is not None:
+            reference_b64 = _reference_b64_or_404(
+                session, request_user, body.reference_id)
         payload, _ = _generate_asset(
             session,
             asset_type="scene",
@@ -395,6 +520,7 @@ def register_visual_routes(app, settings: Settings, session_factory: sessionmake
             location_id=body.location_id,
             object_id=None,
             actor_id=None,
+            reference_b64=reference_b64,
         )
         return JSONResponse(status_code=201, content={"asset": payload, "reused": False})
 
@@ -832,6 +958,18 @@ def register_visual_routes(app, settings: Settings, session_factory: sessionmake
         if ref is None or ref.user_id != request_user.id:
             raise HTTPException(status_code=404, detail="reference not found")
         return ref
+
+    def _reference_b64_or_404(session: Session, request_user, ref_id: int) -> str:
+        """020 P3 stage 2: resolve an owned reference to base64 of its
+        stored bytes for generation consumption (portraits AND scenes).
+        Same 404 semantics as the stage-1 file endpoint (uniform body);
+        a vanished file answers the same 404 the file endpoint gives."""
+        ref = _owned_reference_or_404(session, request_user, ref_id)
+        try:
+            data = refstore.read(ref.storage_path)
+        except (OSError, ValueError):
+            raise HTTPException(status_code=404, detail="reference file missing")
+        return base64.b64encode(data).decode("ascii")
 
     @app.post("/visual/references")
     def upload_reference(
