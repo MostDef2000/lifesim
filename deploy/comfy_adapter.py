@@ -15,10 +15,20 @@ adapter's technical floor in build_graph, never a replacement. Pre-update
 adapters ignore the unknown key (data.get pattern), so old payloads keep
 byte-identical behavior.
 
+"reference_b64" (020 P3 stage 2) is an OPTIONAL base64 of a reference
+image. ABSENT or empty -> the legacy txt2img graph, byte-identical to
+build_graph (node ids "1".."8"). Non-empty + flux model -> a FLUX.1
+Kontext Dev img2img graph (build_kontext_graph, the ComfyUI-native API
+workflow: docs.comfy.org/tutorials/flux/flux-1-kontext-dev). Non-empty +
+any other model -> HTTP 400 (kontext is flux-only; pony img2img is out of
+scope). Malformed base64 -> HTTP 400.
+
 The app never speaks ComfyUI's queue API; the adapter owns the workflow
 graph, model routing (flux/pony) and the Pony booru-style prompt tag.
 Kept dependency-free (stdlib) so it runs anywhere on the worker.
 """
+import base64
+import binascii
 import json
 import os
 import time
@@ -45,6 +55,22 @@ KNOWN_LORAS = {"flux1-uncensored.safetensors"}
 NEGATIVE = "lowres, bad anatomy, bad hands, watermark, blurry"
 PONY_POSITIVE_PREFIX = "score_9, score_8, score_7, "
 PONY_NEGATIVE_PREFIX = "score_6, score_5, score_4, "
+
+# 020 P3 stage 2: FLUX.1 Kontext Dev (img2img off an uploaded reference).
+# The kontext checkpoint is a diffusion_models checkpoint — it loads through
+# UNETLoader, never CheckpointLoaderSimple. Text uses the native flux pair
+# (t5xxl scaled + clip_l) through DualCLIPLoader; the VAE is ae.
+KONTEXT_UNET = "flux1-dev-kontext_fp8_scaled.safetensors"
+KONTEXT_CLIP_T5 = "t5xxl_fp8_e4m3fn_scaled.safetensors"
+KONTEXT_CLIP_L = "clip_l.safetensors"
+KONTEXT_VAE = "ae.safetensors"
+FLUX_CHECKPOINT = "flux1-dev-fp8.safetensors"
+
+
+class BadReference(ValueError):
+    """reference_b64 problem -> HTTP 400 (kontext is flux-only; malformed
+    base64). Subclasses ValueError so legacy except-clauses keep matching;
+    the Handler answers it BEFORE the generic 422 branch."""
 
 
 def resolve_model(name: str) -> str:
@@ -137,6 +163,84 @@ def build_graph(model_key: str, prompt: str, seed: int, width: int,
     return graph
 
 
+def _reference_data_uri(raw: bytes) -> str:
+    """Base64 data URI for LoadImage (ComfyUI API format decodes it)."""
+    mime = "image/jpeg" if raw.startswith(b"\xff\xd8\xff") else "image/png"
+    return f"data:{mime};base64,{base64.b64encode(raw).decode('ascii')}"
+
+
+def build_kontext_graph(prompt: str, seed: int, lora: str,
+                        negative: str = "", reference_raw: bytes = b"") -> dict:
+    """FLUX.1 Kontext Dev img2img graph (020 P3 stage 2) — the ComfyUI-native
+    API workflow shape (docs.comfy.org/tutorials/flux/flux-1-kontext-dev):
+
+    - the diffusion-model checkpoint loads through UNETLoader (kontext ships
+      as diffusion_models; CheckpointLoaderSimple would fail);
+    - text encodes through DualCLIPLoader (t5xxl + clip_l, type flux);
+    - the reference rides LoadImage as a base64 data URI, is normalized by
+      FluxKontextImageScale and VAE-encoded; the encoded reference latent
+      feeds BOTH ReferenceLatent (conditioning) and KSampler latent_image —
+      there is NO EmptyLatentImage (the reference seeds the sample);
+    - FluxGuidance 3.5 (guidance-distilled flux path, same convention as the
+      txt2img graph) and an EXPLICIT denoise on the sampler.
+
+    Node ids fixed for testability. Only called when reference_b64 is
+    non-empty and the model resolved to flux (generate_png enforces both).
+    The composed app negative keeps the #227 augment semantics (floor +
+    app negative, never a replacement).
+    """
+    effective_negative = build_negative("flux") + (
+        f", {negative}" if negative else "")
+    graph = {
+        "1": {"class_type": "UNETLoader",
+              "inputs": {"unet_name": KONTEXT_UNET,
+                         "weight_dtype": "default"}},
+        "2": {"class_type": "DualCLIPLoader",
+              "inputs": {"clip_name": KONTEXT_CLIP_T5,
+                         "clip_name2": KONTEXT_CLIP_L,
+                         "type": "flux"}},
+        "3": {"class_type": "VAELoader",
+              "inputs": {"vae_name": KONTEXT_VAE}},
+        "4": {"class_type": "LoadImage",
+              "inputs": {"image": _reference_data_uri(reference_raw)}},
+        "5": {"class_type": "FluxKontextImageScale",
+              "inputs": {"image": ["4", 0]}},
+        "6": {"class_type": "VAEEncode",
+              "inputs": {"pixels": ["5", 0], "vae": ["3", 0]}},
+        "7": {"class_type": "CLIPTextEncode",
+              "inputs": {"text": prompt, "clip": ["2", 0]}},
+        "8": {"class_type": "CLIPTextEncode",
+              "inputs": {"text": effective_negative, "clip": ["2", 0]}},
+        "9": {"class_type": "FluxGuidance",
+              "inputs": {"guidance": 3.5, "conditioning": ["7", 0]}},
+        "10": {"class_type": "ReferenceLatent",
+               "inputs": {"conditioning": ["9", 0], "latent": ["6", 0]}},
+        "11": {"class_type": "KSampler",
+               "inputs": {"seed": seed, "steps": 20, "cfg": 1.0,
+                          "sampler_name": "euler", "scheduler": "simple",
+                          "denoise": 1.0, "model": ["1", 0],
+                          "positive": ["10", 0], "negative": ["8", 0],
+                          "latent_image": ["6", 0]}},
+        "12": {"class_type": "VAEDecode",
+               "inputs": {"samples": ["11", 0], "vae": ["3", 0]}},
+        "13": {"class_type": "SaveImage",
+               "inputs": {"filename_prefix": "lifesim",
+                          "images": ["12", 0]}},
+    }
+    model_out, clip_out = ["1", 0], ["2", 0]
+    if lora and lora.strip().lower() in KNOWN_LORAS:
+        graph["0"] = {"class_type": "LoraLoader",
+                      "inputs": {"lora_name": lora.strip(),
+                                 "strength_model": 1.0,
+                                 "strength_clip": 1.0,
+                                 "model": model_out, "clip": clip_out}}
+        model_out, clip_out = ["0", 0], ["0", 1]
+    graph["11"]["inputs"]["model"] = model_out
+    graph["7"]["inputs"]["clip"] = clip_out
+    graph["8"]["inputs"]["clip"] = clip_out
+    return graph
+
+
 def comfy_post(path: str, payload: dict) -> dict:
     request = urllib.request.Request(
         f"{COMFY_URL}{path}", data=json.dumps(payload).encode(),
@@ -160,11 +264,36 @@ def comfy_view(filename: str, subfolder: str, folder_type: str) -> bytes:
         return response.read()
 
 
+def _reference_graph_or_raise(model_key: str, prompt: str, seed: int,
+                              lora: str, negative: str,
+                              reference_b64: str) -> dict:
+    """020 P3 stage 2: validate a reference request and build the kontext
+    graph. Raises BadReference (-> HTTP 400) when the model is not flux
+    (kontext is flux-only; NO pony img2img path) or the base64 is
+    malformed. Unknown models keep the plain ValueError -> 422."""
+    ckpt = resolve_model(model_key)
+    if ckpt != FLUX_CHECKPOINT:
+        raise BadReference(
+            f"reference_b64 requires model=flux, got {model_key!r}")
+    try:
+        reference_raw = base64.b64decode(reference_b64, validate=True)
+    except (binascii.Error, ValueError) as exc:
+        raise BadReference(f"malformed reference_b64: {exc}") from exc
+    if not reference_raw:
+        raise BadReference("reference_b64 decodes to empty bytes")
+    return build_kontext_graph(prompt, seed, lora, negative, reference_raw)
+
+
 def generate_png(model_key: str, prompt: str, seed: int, size: str,
-                 lora: str, negative: str = "") -> bytes:
+                 lora: str, negative: str = "",
+                 reference_b64: str = "") -> bytes:
     width, height = parse_size(size)
-    graph = build_graph(model_key, prompt, seed, width, height, lora,
-                        negative)
+    if reference_b64:
+        graph = _reference_graph_or_raise(
+            model_key, prompt, seed, lora, negative, reference_b64)
+    else:
+        graph = build_graph(model_key, prompt, seed, width, height, lora,
+                            negative)
     result = comfy_post("/prompt", {"prompt": graph, "client_id": CLIENT_ID})
     prompt_id = result["prompt_id"]
     deadline = time.monotonic() + POLL_TIMEOUT_SEC
@@ -218,6 +347,15 @@ class Handler(BaseHTTPRequestHandler):
         try:
             length = int(self.headers.get("Content-Length", "0"))
             data = json.loads(self.rfile.read(length) or b"{}")
+            # 020 P3 stage 2: reference_b64 rides ONLY when the payload
+            # carries a non-empty value — absent/empty keep the exact
+            # legacy positional call shape (older generate_png shims and
+            # the #227 test spy take 6 args and no reference kwarg).
+            # Absent and empty are treated identically (legacy graph).
+            kwargs = {}
+            reference_b64 = str(data.get("reference_b64", "") or "")
+            if reference_b64:
+                kwargs["reference_b64"] = reference_b64
             png = generate_png(
                 str(data.get("model", "")),
                 str(data.get("prompt", "")),
@@ -227,7 +365,13 @@ class Handler(BaseHTTPRequestHandler):
                 # #227 2b: the composed app negative (empty for old
                 # payloads) — appended to the floor in build_graph.
                 str(data.get("negative", "")),
+                **kwargs,
             )
+        except BadReference as exc:
+            # 020 P3 stage 2: kontext is flux-only / malformed reference ->
+            # 400 BEFORE anything reaches ComfyUI.
+            self._json_error(400, str(exc))
+            return
         except (ValueError, KeyError) as exc:
             self._json_error(422, str(exc))
             return

@@ -17,6 +17,7 @@ from app.db.models import (
     WorldEvent,
     WorldObject,
 )
+from app.visual.style_presets import NUDE_FRAMING
 
 # #205 (020 §Outfit / nudity control): per-character outfit modes. "auto"
 # (the default, and the reading for NULL/unknown values on legacy rows)
@@ -705,23 +706,34 @@ def build_prompt(descriptor: dict, visual_config_weather: str = "clear") -> str:
             f"{profile['scenes']['casting']}, clean background, detailed face"
         )
         # 018 (§28): wearing fragment only when worn items exist.
-        # #205 (020 §Outfit / nudity control): the per-character outfit mode
-        # adds an explicit fragment ONLY when nothing is worn — worn
-        # WorldObjects take precedence in EVERY mode including nude (an
-        # explicitly worn item means the character is dressed; decided per
-        # 020, documented here). "auto" (and legacy descriptors without the
-        # outfit_mode key) share one fragment: since #205d it is a
-        # concrete-garment pool item — pool[0] unless the descriptor carries
-        # a seed-selected outfit_auto_variant (previously nothing,
-        # byte-identical to pre-#205).
-        # The nude fragment only ever reaches this point for an
-        # age-confirmed owner: _effective_outfit_mode collapses every other
-        # case to "auto" (guardrail phrase / canonical_negative above are
-        # untouched by this field, #119 invariant).
+        # 020 P3 stage 2: the API-level nude flag rides the descriptor as
+        # ``nude_framing`` (set by the route layer) and takes a DEDICATED
+        # fragment path: NUDE_FRAMING replaces EVERY clothing/outerwear
+        # fragment (worn list AND the outfit-mode chain — the outfit_mode
+        # "nude" branch emits "wearing nothing", which the stage-2 contract
+        # bans from a nude positive). The key is absent on every other
+        # path, so the chain below is byte-identical to pre-stage-2.
         wearing = descriptor.get("wearing") or []
-        if wearing:
+        if descriptor.get("nude_framing"):
+            base += f", {NUDE_FRAMING}"
+        elif wearing:
+            # #205 (020 §Outfit / nudity control): worn WorldObjects take
+            # precedence in EVERY outfit mode (an explicitly worn item means
+            # the character is dressed) — the nude_framing flag above is the
+            # one deliberate exception (API-level per-request choice, it
+            # replaces rather than competes with outfit fragments).
             base += f", wearing: {wearing}"
         else:
+            # #205: the per-character outfit mode adds an explicit fragment
+            # only when nothing is worn. "auto" (and legacy descriptors
+            # without the outfit_mode key) share one fragment: since #205d
+            # a concrete-garment pool item — pool[0] unless the descriptor
+            # carries a seed-selected outfit_auto_variant (previously
+            # nothing, byte-identical to pre-#205). The outfit_mode "nude"
+            # fragment only ever reaches this point for an age-confirmed
+            # owner: _effective_outfit_mode collapses every other case to
+            # "auto" (guardrail phrase / canonical_negative above are
+            # untouched, #119 invariant).
             mode = descriptor.get("outfit_mode") or "auto"
             if mode == "casual":
                 # #205b (owner feedback 2026-10-16): "casual everyday clothes"
