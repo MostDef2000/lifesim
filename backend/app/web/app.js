@@ -433,8 +433,11 @@ function viewCreateCharacter() {
   const previewMode = el("select", {},
     el("option", { value: "portrait" }, "Портрет"),
     el("option", { value: "full_body_clothed" }, "В полный рост (повседневная одежда)"),
-    el("option", { value: "full_body_outfit" }, "В полный рост (выбранная одежда)"),
-    el("option", { value: "base_body" }, "Проверка фигуры (18+)"));
+    el("option", { value: "full_body_outfit" }, "В полный рост (выбранная одежда)"));
+  // 023 round 3 (#120): the base_body option is removed from this
+  // selector — the mode is server-side DISABLED (always 422).
+  // Re-adding the option requires the server-side reject to be lifted
+  // first (the descriptor plumbing for it is kept pinned in tests/m236).
   const previewStatus = el("p", { class: "muted creator-note", hidden: true });
   const previewErr = el("p", { class: "err-text" });
   const previewImg = el("img", {

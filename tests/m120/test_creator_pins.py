@@ -420,3 +420,26 @@ def test_w2_preview_panel_regenerate_pins():
     assert view.count("if (previewBusy) return;") == 1
     # regen starts disabled (nothing to regenerate yet)
     assert view.count('disabled: true }, "Обновить");') == 1
+
+
+# ---------- 13. W2 preview mode selector (023r3 disable) ----------
+
+def test_w2_preview_mode_selector_pins():
+    """023 round 3 (#120): base_body is server-side DISABLED (always 422)
+    — the creator selector must not offer it. Exactly three options stay:
+    portrait + the two full-body modes; no «Проверка фигуры» label
+    anywhere in the creator view. The disable note above the selector
+    documents why (a naive re-add trips this pin)."""
+    js = _read(APP_JS)
+    view = _creator_view(js)
+    # the disabled option is gone — value AND label
+    assert view.count('el("option", { value: "base_body" }') == 0
+    assert "Проверка фигуры" not in view
+    # exactly the three live modes remain, in order (scoped to the
+    # preview selector — the view holds other selects: sex, outfit)
+    sel = _slice(js, 'const previewMode = el("select", {},',
+                 "// 023 round 3 (#120)", "preview mode selector")
+    assert re.findall(r'el\("option", \{ value: "(\w+)" \}', sel) == \
+        ["portrait", "full_body_clothed", "full_body_outfit"]
+    # the server-disable note anchors the removal
+    assert "server-side DISABLED (always 422)" in view

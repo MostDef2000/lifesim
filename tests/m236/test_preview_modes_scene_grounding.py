@@ -13,10 +13,12 @@ style_presets.py):
   and the prompt ends with FULL_BODY_FRAMING.
 - mode="full_body_outfit" -> the draft's outfit_mode rides unchanged
   (auto/casual/formal as chosen) + the same full-body framing suffix.
-- mode="base_body" -> a neutral proportion-study framing REPLACES the whole
-  clothing chain: no "wearing" fragment, no nude fragment, no outfit chain
-  — regardless of outfit_mode (18+ gated by the endpoint's existing
-  18-99 age rule; underage -> 422 before any transport call).
+- mode="base_body" -> DISABLED at the route since 023 round 3 (#120 policy
+  gate: the uncensored LoRA's beauty-portrait attractor beats positive
+  clinical wording at 512×512): known-but-rejected -> 422 with the exact
+  disabled detail, no transport call. The descriptor-level composition
+  plumbing (BASE_BODY_FRAMING/CASTING replacing the clothing chain and
+  the chest-up preset) stays pinned at build_prompt level for re-enable.
 - unknown mode -> 422, no transport call.
 - reference_id on preview: the SAME owner-checked stage-1 resolution the
   portrait/scene routes use (missing or foreign -> 404, no transport); an
@@ -81,6 +83,7 @@ from app.social.clothing import toggle_wear  # noqa: E402
 from app.visual.descriptor import (  # noqa: E402
     build_prompt,
     build_scene_descriptor,
+    build_visual_profile,
 )
 from app.visual.transports import StubFluxTransport  # noqa: E402
 from app.world.seed_world import seed_world  # noqa: E402
@@ -288,23 +291,36 @@ class TestPreviewModes:
         assert "wearing a fitted button-front blouse and jeans" in r2.json()["prompt"]
         assert r2.json()["prompt"].endswith(f", {FULL_BODY_FRAMING}")
 
-    def test_base_body_replaces_clothing_chain_neutrally(self, tmp_path):
-        """New behavior (RED on base): base_body swaps the whole clothing
-        chain for the clinical reference framing — no wearing fragment, no
-        nude fragment, regardless of outfit_mode. 023 round 2 (#120 live
-        renders): the chest-up casting preset must be replaced by the
-        clinical reference-casting register (a chest-up crop + "nothing
-        below the chest visible" rendered a chest-up nude beauty-portrait)."""
-        from app.visual.style_presets import BASE_BODY_CASTING, BASE_BODY_FRAMING
+    def test_base_body_descriptor_composition_plumbing(self):
+        """023r3: base_body is DISABLED at the route (policy gate, #120),
+        but the descriptor-level composition plumbing stays pinned for the
+        future re-enable: a descriptor carrying preview_mode="base_body"
+        swaps the clothing chain for the clinical reference framing AND
+        replaces the chest-up casting preset with the clinical
+        reference-casting register (023r2), no wearing/nude fragments."""
+        from app.visual.descriptor import build_prompt
+        from app.visual.style_presets import (
+            BASE_BODY_CASTING,
+            BASE_BODY_FRAMING,
+        )
 
-        _, app, _, _ = _env(tmp_path)
-        client = _login(app, "w236basebody")
-        r = client.post("/visual/preview", json={
-            **PREVIEW_BODY, "outfit_mode": "nude", "mode": "base_body"})
-        assert r.status_code == 200, r.text
-        prompt = r.json()["prompt"]
+        descriptor = {
+            "location": None,
+            "characters": [{"id": None, "name": "the character",
+                            "sex": "F", "age": 27}],
+            "objects": [],
+            "weather": "clear",
+            "time": None,
+            "camera": "portrait",
+            "event": None,
+            "references": [],
+            "outfit_mode": "nude",
+            "visual_profile": build_visual_profile({
+                "age": 27, "sex": "F", "looks": None, "traits": {}}),
+            "preview_mode": "base_body",
+        }
+        prompt = build_prompt(descriptor)
         assert BASE_BODY_FRAMING in prompt
-        # 023r2: clinical reference-casting register replaces the preset
         assert BASE_BODY_CASTING in prompt
         assert "Chest-up portrait" not in prompt
         assert "nothing below the chest visible" not in prompt
@@ -313,6 +329,28 @@ class TestPreviewModes:
         assert "nude" not in prompt
         assert "unclothed" not in prompt
         assert ", fully clothed" not in prompt
+
+    def test_base_body_mode_disabled_422_exact_detail(self, tmp_path):
+        """023r3 (#120 policy gate): the adult base_body route request is
+        KNOWN-but-REJECTED — 422 with the exact disabled detail, before
+        any transport call (the mode never reaches descriptor dispatch)."""
+        calls = []
+
+        class Counting:
+            def generate(self, prompt, seed, size):
+                calls.append(1)
+                return StubFluxTransport().generate(prompt, seed, size)
+
+        _, app, _, _ = _env(tmp_path, transport=lambda: Counting())
+        client = _login(app, "w236basebodyoff")
+        r = client.post("/visual/preview", json={
+            **PREVIEW_BODY, "outfit_mode": "nude", "mode": "base_body"})
+        assert r.status_code == 422, r.text
+        assert r.json()["detail"] == (
+            "base_body preview is temporarily disabled: neutral "
+            "non-sexual presentation not reliably achievable at "
+            "current settings (issue #120)")
+        assert not calls
 
     def test_portrait_mode_keeps_shared_casting_preset(self, tmp_path):
         """023r2 guard (green on base): the explicit portrait mode — and
@@ -336,9 +374,10 @@ class TestPreviewModes:
             assert BASE_BODY_CASTING not in prompt
 
     def test_base_body_underage_422_no_transport(self, tmp_path):
-        """Invariant guard (green on base): the endpoint's 18-99 age gate
-        IS the base_body 18+ gate — a 16-year-old request 422s before any
-        transport call, in any mode."""
+        """Invariant guard (green on base): a 16-year-old request 422s
+        before any transport call. 023r3: base_body is route-disabled for
+        adults too (422 in mode validation); the 18-99 age gate still
+        fires FIRST for underage bodies (age check precedes mode check)."""
         calls = []
 
         class Counting:
@@ -445,8 +484,9 @@ class TestFailureSemantics:
         settings, app, _, engine = _env(tmp_path)
         client = _login(app, "w236nowrite")
         before = _write_counts(settings, engine)
-        for mode in ("portrait", "full_body_clothed",
-                     "full_body_outfit", "base_body"):
+        # 023r3: base_body is route-disabled (422) — the no-write sweep
+        # covers full_body_outfit as its non-portrait representative
+        for mode in ("portrait", "full_body_clothed", "full_body_outfit"):
             r = client.post("/visual/preview", json={
                 **PREVIEW_BODY, "mode": mode})
             assert r.status_code == 200, (mode, r.text)
