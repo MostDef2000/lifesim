@@ -587,8 +587,9 @@ def register_visual_routes(app, settings: Settings, session_factory: sessionmake
         is the only side effect.
 
         Pipeline (the same #119/#191 path as a portrait): gate → per-user
-        rate limit (VRAM 12GB, KB 1611) → validation (incl. the W2 mode
-        enum; the 18-99 age rule is also the base_body 18+ gate) →
+        rate limit (VRAM 12GB, KB 1611) → validation (age 18-99 first —
+        for base_body bodies it is the error surfaced; then the W2 mode
+        enum, which rejects base_body as disabled per #120) →
         build_visual_profile with appearance priority → build_prompt
         portrait branch (outfit mode rides the descriptor; W2 modes map
         onto the additive preview_mode key) → transport → base64 in the
@@ -609,11 +610,21 @@ def register_visual_routes(app, settings: Settings, session_factory: sessionmake
         # byte-identical legacy preview; the two full-body modes append
         # FULL_BODY_FRAMING after the outfit chain (full_body_clothed
         # FORCES the casual garments — a nude outfit_mode must not leak
-        # into a "clothed" preview); base_body replaces the whole clothing
-        # chain with the neutral proportion-study framing. 18+ for
-        # base_body IS the endpoint's existing 18-99 age gate above —
-        # underage requests 422 before any mode dispatch.
+        # into a "clothed" preview). 023 round 3 (#120 policy gate, second
+        # consecutive live-render failure): base_body is KNOWN-but-REJECTED
+        # — the uncensored LoRA's beauty-portrait attractor beats positive
+        # clinical wording at 512×512, and the mode rendered model-like
+        # sexualized nudes. The 422 fires HERE, before the 18+ age gate
+        # path below could ever apply to it; the descriptor/casting
+        # plumbing (BASE_BODY_FRAMING/BASE_BODY_CASTING, the build_prompt
+        # preview_mode branch) stays intact for a future re-enable.
         mode = body.mode or "portrait"
+        if mode == "base_body":
+            raise HTTPException(
+                status_code=422,
+                detail=("base_body preview is temporarily disabled: neutral "
+                        "non-sexual presentation not reliably achievable at "
+                        "current settings (issue #120)"))
         if mode not in ("portrait", "full_body_clothed", "full_body_outfit",
                         "base_body"):
             raise HTTPException(
