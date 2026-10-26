@@ -423,6 +423,65 @@ function viewCreateCharacter() {
     el("option", { value: "formal" }, "formal — строгая одежда"),
     el("option", { value: "nude" }, "nude — без одежды (18+)"));
 
+  /* W2: creator preview panel — POST /visual/preview with the CURRENT
+     form state. In-place updates ONLY: the handler never re-renders the
+     form (no route(), no replaceChildren over the inputs) — on ANY
+     outcome the typed values stay put; failures land in the panel's own
+     error line and the buttons come back per the previewOk flag (retry
+     re-reads the form). No reference picker here: the creator screen
+     predates reference uploads (the profile portrait flow owns those). */
+  const previewMode = el("select", {},
+    el("option", { value: "portrait" }, "Портрет"),
+    el("option", { value: "full_body_clothed" }, "В полный рост (повседневная одежда)"),
+    el("option", { value: "full_body_outfit" }, "В полный рост (выбранная одежда)"),
+    el("option", { value: "base_body" }, "Проверка фигуры (18+)"));
+  const previewStatus = el("p", { class: "muted creator-note", hidden: true });
+  const previewErr = el("p", { class: "err-text" });
+  const previewImg = el("img", {
+    class: "preview-image", alt: "Предпросмотр персонажа", hidden: true });
+  let previewBusy = false;
+  let previewOk = false;  // a preview has succeeded this session (regen lives)
+
+  async function runPreview() {
+    if (previewBusy) return;  // no double-submit while in flight
+    previewBusy = true;
+    previewBtn.disabled = true;
+    previewRegenBtn.disabled = true;
+    previewErr.textContent = "";
+    previewStatus.hidden = false;
+    previewStatus.textContent = "Генерация…";
+    try {
+      const appearance = creatorAppearancePayload();
+      const r = await api("/visual/preview", { method: "POST", body: {
+        sex: sex.value, age: Number(age.value),
+        appearance_prompt: looks.value.trim() || undefined,
+        appearance: Object.keys(appearance).length ? appearance : undefined,
+        outfit_mode: outfit.value, mode: previewMode.value,
+      } });
+      previewImg.src = `data:image/png;base64,${r.image_base64}`;
+      previewImg.hidden = false;
+      previewStatus.hidden = true;
+      previewOk = true;
+    } catch (e) {
+      // the form is untouched: the panel owns the failure surface;
+      // previewOk is deliberately NOT reset — the shown image stays the
+      // last good one, so «Обновить» keeps working after a failed retry
+      previewStatus.hidden = true;
+      previewErr.textContent =
+        `Предпросмотр не удался: ${e.message}. Попробуйте ещё раз.`;
+    } finally {
+      previewBusy = false;
+      previewBtn.disabled = false;
+      // regenerate is available iff a preview exists (set on success,
+      // never cleared on failure) — a failure must not strand it disabled
+      previewRegenBtn.disabled = !previewOk;
+    }
+  }
+  const previewBtn = el("button", { type: "button", class: "primary",
+    onclick: runPreview }, "Создать предпросмотр");
+  const previewRegenBtn = el("button", { type: "button",
+    onclick: runPreview, disabled: true }, "Обновить");
+
   // Tag cloud: a click toggles the ingredient AND rebuilds the draft (the
   // documented explicit-assembly path). Selection styling is restored on
   // re-render from CREATOR_DRAFT.tags.
@@ -505,12 +564,19 @@ function viewCreateCharacter() {
         appearanceGrid,
         el("label", {}, "Внешность"), looks,
         el("p", { class: "muted creator-note" },
-          "Свободное описание — основное; отдельные поля подсказывают детали. Превью внешности появится позже.")),
+          "Свободное описание — основное; отдельные поля подсказывают детали. Живой предпросмотр — в панели «Предпросмотр» ниже.")),
       el("section", { class: "panel" },
         el("h2", {}, "Одежда"),
         el("label", {}, "Одежда"), outfit,
         el("p", { class: "muted creator-note" },
           "Как персонаж одевается по умолчанию: auto — как сегодня, остальные режимы добавляют одежду в портрет. nude — только для 18+. Изменить можно позже в профиле.")),
+      el("section", { class: "panel creator-preview" },
+        el("h2", {}, "Предпросмотр"),
+        el("p", { class: "muted creator-note" },
+          "Как персонаж будет выглядеть. Собирается по текущим полям формы — правки в саму форму не вносятся и не сбрасываются."),
+        el("label", {}, "Ракурс"), previewMode,
+        el("div", { class: "creator-actions" }, previewBtn, previewRegenBtn),
+        previewStatus, previewImg, previewErr),
       el("section", { class: "panel" },
         el("h2", {}, "Биография"),
         el("p", { class: "muted creator-note" },

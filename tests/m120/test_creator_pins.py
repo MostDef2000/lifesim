@@ -164,8 +164,11 @@ def test_p1_persistence_contract_pins():
             '          appearance_prompt: looks.value.trim() || undefined } });')
     assert js.count(post) == 1
     assert js.count('api("/characters", { method: "POST"') == 1
-    # the free text rides BOTH keys (looks unchanged + appearance_prompt)
-    assert js.count("looks.value.trim() || undefined") == 2
+    # the free text rides BOTH keys (looks unchanged + appearance_prompt).
+    # W2: a third site is the creator preview POST — it rides the same
+    # appearance_prompt expression; the confirm-POST block above stays
+    # pinned at exactly one occurrence.
+    assert js.count("looks.value.trim() || undefined") == 3
     assert js.count("biography.value.trim() || undefined") == 1
     # The POST body key set is EXACTLY name/sex/age/looks/biography/
     # appearance/appearance_prompt. NOTE: the ternary "appearance : undefined"
@@ -183,7 +186,9 @@ def test_p1_persistence_contract_pins():
     # builder sends filled fields only, mapped to the canonical snake_case
     # storage keys (hairColor→hair_color, extra→features).
     assert js.count("function creatorAppearancePayload() {") == 1
-    assert js.count("const appearance = creatorAppearancePayload();") == 1
+    # W2: the preview panel calls the same builder for its own POST —
+    # two call sites total, the confirm-path one stays unique below.
+    assert js.count("const appearance = creatorAppearancePayload();") == 2
     assert js.count('const rename = { hairColor: "hair_color", extra: "features" };') == 1
     assert js.count('const v = (CREATOR_DRAFT.appearance[key] || "").trim();') == 1
     assert js.count("if (v) out[rename[key] || key] = v;") == 1
@@ -196,8 +201,11 @@ def test_outfit_contract_pins():
     py = _read(APP_PY)
     # Backend enum of record (#205): the server accepts exactly these four.
     assert py.count('if body.outfit_mode not in ("auto", "casual", "formal", "nude"):') == 1
-    sel = _slice(js, 'const outfit = el("select", {},', "// Tag cloud",
-                 "creator outfit select")
+    # W2: the slice ends at the preview-panel comment — the preview panel
+    # (its own select with its own labels) was inserted between the outfit
+    # select and the tag cloud; this pin scopes the OUTFIT select only.
+    sel = _slice(js, 'const outfit = el("select", {},',
+                 "/* W2: creator preview panel", "creator outfit select")
     # Option VALUES match the backend enum, auto FIRST — the browser
     # default selection is the first option, so auto is the default.
     assert re.findall(r'el\("option", \{ value: "(\w+)" \}', sel) == \
@@ -380,3 +388,35 @@ def test_creator_draft_reset_pins():
     confirm_i = js.index("consumed draft must not leak")
     creator_block_i = js.index("/* ---------- character creation (020")
     assert login_i < creator_block_i < confirm_i < logout_i < delete_i
+
+
+# ---------- 12. W2 preview panel: regenerate availability ----------
+
+def test_w2_preview_panel_regenerate_pins():
+    """W2 (validator fix): «Обновить» must survive a FAILED retry. The
+    finally block restores the regenerate button conditioned on the
+    previewOk flag — set on first success, deliberately NEVER reset on
+    failure (the shown image stays the last good one, so a failed
+    regenerate must not strand the button disabled forever). Success path
+    alone is NOT enough: the restore lives in finally, not in try."""
+    js = _read(APP_JS)
+    view = _creator_view(js)
+    # the success flag: declared once, set ONLY on success, never cleared
+    assert view.count("let previewOk = false;") == 1
+    assert view.count("previewOk = true;") == 1
+    ok_i = view.index("previewOk = true;")
+    catch_i = view.index("} catch (e) {")
+    assert ok_i < catch_i, "previewOk must be set inside try (success only)"
+    assert "previewOk is deliberately NOT reset" in view
+    # the restore is conditioned on the flag and lives in finally —
+    # after the primary button's unconditional restore
+    assert view.count("previewRegenBtn.disabled = !previewOk;") == 1
+    finally_i = view.index("} finally {")
+    primary_i = view.index("previewBtn.disabled = false;", finally_i)
+    regen_i = view.index("previewRegenBtn.disabled = !previewOk;")
+    assert primary_i < regen_i, "regen restore must follow the primary one"
+    assert finally_i < regen_i
+    # the double-submit guard semantics are unchanged
+    assert view.count("if (previewBusy) return;") == 1
+    # regen starts disabled (nothing to regenerate yet)
+    assert view.count('disabled: true }, "Обновить");') == 1

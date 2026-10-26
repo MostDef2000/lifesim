@@ -562,26 +562,36 @@ def register_visual_routes(app, settings: Settings, session_factory: sessionmake
         appearance: dict | None = None
         appearance_prompt: str | None = None
         outfit_mode: str = "auto"
+        # W2: optional preview mode + uploaded-reference consumption.
+        # mode omitted (or explicit "portrait") keeps the byte-identical
+        # legacy preview; reference_id rides the SAME owner-checked stage-1
+        # resolution the portrait/scene routes use. Reads only — the
+        # preview stays write-free.
+        mode: str | None = None
+        reference_id: int | None = None
 
     @app.post("/visual/preview")
     def preview_visual(
         body: PreviewIn,
         request_user=Depends(current_user),
+        session: Session = Depends(db),
     ):
         """020 P2: ephemeral preview of the canonical image for the creator
         form — BEFORE any character exists (there is nothing to own).
 
         STRICT no-write invariant: no VisualAsset row, no WorldEvent, no
-        file, and NO session dependency at all — this handler cannot commit
-        anything by construction (deliberately NOT reusing _generate_asset,
-        which commits). The transport call is the only side effect.
+        file — the handler never commits (deliberately NOT reusing
+        _generate_asset, which commits). W2: a READ-ONLY session dependency
+        was added for reference_id resolution (session.get/query reads
+        only; the zero-write proof lives in tests/m236). The transport call
+        is the only side effect.
 
         Pipeline (the same #119/#191 path as a portrait): gate → per-user
-        rate limit (VRAM 12GB, KB 1611) → validation → build_visual_profile
-        with appearance priority → build_prompt portrait branch (outfit
-        mode rides the descriptor; with nothing worn the EXISTING
-        casual/formal/nude/auto-pool fragments fire after the m119
-        endswith-anchor — no new fragment code) → transport → base64 in the
+        rate limit (VRAM 12GB, KB 1611) → validation (incl. the W2 mode
+        enum; the 18-99 age rule is also the base_body 18+ gate) →
+        build_visual_profile with appearance priority → build_prompt
+        portrait branch (outfit mode rides the descriptor; W2 modes map
+        onto the additive preview_mode key) → transport → base64 in the
         response. Response key set is exactly {"prompt", "seed",
         "image_base64"}."""
         gate()
@@ -595,6 +605,22 @@ def register_visual_routes(app, settings: Settings, session_factory: sessionmake
             raise HTTPException(
                 status_code=422,
                 detail="outfit_mode must be auto|casual|formal|nude")
+        # W2: preview modes. Omitted (or explicit "portrait") keeps the
+        # byte-identical legacy preview; the two full-body modes append
+        # FULL_BODY_FRAMING after the outfit chain (full_body_clothed
+        # FORCES the casual garments — a nude outfit_mode must not leak
+        # into a "clothed" preview); base_body replaces the whole clothing
+        # chain with the neutral proportion-study framing. 18+ for
+        # base_body IS the endpoint's existing 18-99 age gate above —
+        # underage requests 422 before any mode dispatch.
+        mode = body.mode or "portrait"
+        if mode not in ("portrait", "full_body_clothed", "full_body_outfit",
+                        "base_body"):
+            raise HTTPException(
+                status_code=422,
+                detail=("mode must be "
+                        "portrait|full_body_clothed|full_body_outfit|"
+                        "base_body"))
         appearance_prompt = (body.appearance_prompt or "").strip()
         if len(appearance_prompt) > 500:
             raise HTTPException(status_code=422, detail="appearance_prompt ≤500")
@@ -604,6 +630,15 @@ def register_visual_routes(app, settings: Settings, session_factory: sessionmake
             appearance = validate_appearance(body.appearance)
         except ValueError as exc:
             raise HTTPException(status_code=422, detail=str(exc))
+
+        # W2: consume an uploaded reference like portraits/scenes do —
+        # same owner check, same stage-1 404 shape, resolved BEFORE any
+        # generation (rejected refs never reach the transport). Read-only
+        # session use; the preview stays write-free.
+        reference_b64 = None
+        if body.reference_id is not None:
+            reference_b64 = _reference_b64_or_404(
+                session, request_user, body.reference_id)
 
         from app.visual.descriptor import (
             build_prompt,
@@ -647,6 +682,13 @@ def register_visual_routes(app, settings: Settings, session_factory: sessionmake
             "outfit_mode": body.outfit_mode,
             "visual_profile": profile,
         }
+        # W2: per-mode descriptor mapping — "portrait" (and omitted mode)
+        # adds NO key at all, so those bytes stay pre-W2 identical.
+        if mode == "full_body_clothed":
+            descriptor["preview_mode"] = mode
+            descriptor["outfit_mode"] = "casual"  # safety override
+        elif mode in ("full_body_outfit", "base_body"):
+            descriptor["preview_mode"] = mode
         prompt = build_prompt(descriptor)
         seed = _deterministic_seed("preview", body.sex, body.age, prompt)
         # #227 2b: the preview path composes the same negative (canonical
@@ -659,6 +701,7 @@ def register_visual_routes(app, settings: Settings, session_factory: sessionmake
                     (descriptor.get("visual_profile") or {})
                     .get("guardrail", {}).get("canonical_negative")
                 ),
+                reference_b64=reference_b64,
             )
         except ValueError as exc:
             raise HTTPException(status_code=502, detail=str(exc))
