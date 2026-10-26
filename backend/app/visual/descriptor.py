@@ -17,7 +17,13 @@ from app.db.models import (
     WorldEvent,
     WorldObject,
 )
-from app.visual.style_presets import BASE_BODY_FRAMING, FULL_BODY_FRAMING, NUDE_FRAMING
+from app.visual.style_presets import (
+    BASE_BODY_CASTING,
+    BASE_BODY_FRAMING,
+    FULL_BODY_CASTING,
+    FULL_BODY_FRAMING,
+    NUDE_FRAMING,
+)
 
 # #205 (020 §Outfit / nudity control): per-character outfit modes. "auto"
 # (the default, and the reading for NULL/unknown values on legacy rows)
@@ -724,10 +730,23 @@ def build_prompt(descriptor: dict, visual_config_weather: str = "clear") -> str:
         # fixtures, pre-019 rows) synthesize one from the identity facts so
         # the builder stays total and deterministic.
         profile = descriptor.get("visual_profile") or build_visual_profile(char)
+        # 023 round 2 (#120 live renders): the shared casting preset says
+        # "Chest-up portrait … nothing below the chest visible" — inside a
+        # preview_mode descriptor it OVERRIDES the full-body/base-body
+        # framing suffixes (chest-up nude beauty-portrait / hip crops).
+        # The swap fires ONLY in the preview_mode branch — portrait and
+        # legacy paths keep the shared preset byte-identical (m216/m119).
+        preview_mode = descriptor.get("preview_mode")
+        if preview_mode in ("full_body_clothed", "full_body_outfit"):
+            casting = FULL_BODY_CASTING
+        elif preview_mode == "base_body":
+            casting = BASE_BODY_CASTING
+        else:
+            casting = profile["scenes"]["casting"]
         base = (
             f"Portrait of {char['name']}, {profile['guardrail']['phrase']}, "
             f"{profile['face']}, {profile['body']}, {profile['style']}, "
-            f"{profile['scenes']['casting']}, clean background, detailed face"
+            f"{casting}, clean background, detailed face"
         )
         # 018 (§28): wearing fragment only when worn items exist.
         # 020 P3 stage 2: the API-level nude flag rides the descriptor as
@@ -744,8 +763,8 @@ def build_prompt(descriptor: dict, visual_config_weather: str = "clear") -> str:
         # stays byte-identical to pre-W2). "base_body" takes the dedicated
         # NUDE_FRAMING path: the neutral proportion-study framing REPLACES
         # every clothing/outerwear fragment (worn list AND outfit chain);
-        # wording carries no garment or nudity vocabulary.
-        preview_mode = descriptor.get("preview_mode")
+        # wording carries no garment or nudity vocabulary. (preview_mode is
+        # read once above, at the casting swap — the same key drives both.)
         if descriptor.get("nude_framing"):
             base += f", {NUDE_FRAMING}"
         elif preview_mode == "base_body":

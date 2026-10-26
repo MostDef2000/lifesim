@@ -51,3 +51,19 @@ BASE_BODY_FRAMING = (
     "relaxed neutral standing posture, arms relaxed at sides, "
     "even diffused studio lighting"
 )
+# 023 round 2 (#120 live renders): the shared portrait casting preset
+# ("Chest-up portrait … nothing below the chest visible … soft frontal
+# beauty lighting") is composed into EVERY portrait-builder prompt and
+# OVERRIDES the framing suffixes above — full_body/base_body previews
+# rendered chest-up crops regardless of the framing text. These two
+# casting registers REPLACE the preset ONLY inside the preview_mode
+# branch (descriptor.build_prompt); portrait and legacy paths keep the
+# shared preset byte-identical (m216/m119 pins).
+FULL_BODY_CASTING = (
+    "full body character casting photograph, entire figure head to toe "
+    "in frame, neutral lighting"
+)
+BASE_BODY_CASTING = (
+    "clinical anatomical reference casting, relaxed neutral posture, "
+    "entire figure visible, even diffused lighting"
+)
