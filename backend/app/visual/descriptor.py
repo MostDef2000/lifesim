@@ -17,7 +17,7 @@ from app.db.models import (
     WorldEvent,
     WorldObject,
 )
-from app.visual.style_presets import NUDE_FRAMING
+from app.visual.style_presets import BASE_BODY_FRAMING, FULL_BODY_FRAMING, NUDE_FRAMING
 
 # #205 (020 §Outfit / nudity control): per-character outfit modes. "auto"
 # (the default, and the reading for NULL/unknown values on legacy rows)
@@ -605,6 +605,24 @@ def build_scene_descriptor(
         if canonical is not None:
             references = [canonical.id]
 
+    # W2 scene grounding: other characters' worn outfits ride their entries
+    # (same committed-state source as the player part / portrait path —
+    # wearing_phrases over worn wearable WorldObjects). Only when a player
+    # part exists (the #86 A4 pattern: player_character_id=None keeps the
+    # pre-A4 shape); the key is added ONLY when something is worn, and the
+    # player's own entry stays without it — the player's outfit serializes
+    # once, from the player part.
+    npc_worn: dict[str, list[str]] = {}
+    if player_character_id is not None:
+        from app.social.clothing import wearing_phrases
+
+        for c in characters:
+            if c.id == player_character_id:
+                continue
+            worn = wearing_phrases(session, world_id, c.id)
+            if worn:
+                npc_worn[c.id] = worn
+
     # 010 (§71, R6): weather from the world's current day row; without a row
     # the descriptor stays byte-identical to the pre-weather pin ('clear').
     weather_str = "clear"
@@ -623,12 +641,18 @@ def build_scene_descriptor(
 
             weather_str = describe_weather(wrow)
 
+    scene_characters = [
+        {"id": c.id, "name": f"{c.first_name} {c.last_name}", "sex": c.sex, "age": c.age}
+        for c in characters
+    ]
+    # W2 scene grounding: attach the (non-empty, phrase-form) worn lists.
+    for entry in scene_characters:
+        if entry["id"] in npc_worn:
+            entry["worn"] = npc_worn[entry["id"]]
+
     scene_descriptor = {
         "location": {"id": location.id, "name": location.name, "type": location.type},
-        "characters": [
-            {"id": c.id, "name": f"{c.first_name} {c.last_name}", "sex": c.sex, "age": c.age}
-            for c in characters
-        ],
+        "characters": scene_characters,
         "objects": [{"id": o.id, "type": o.object_type} for o in objects],
         "weather": weather_str,
         "time": {"day": game_ts // 1440, "hour": (game_ts % 1440) // 60,
@@ -714,8 +738,18 @@ def build_prompt(descriptor: dict, visual_config_weather: str = "clear") -> str:
         # bans from a nude positive). The key is absent on every other
         # path, so the chain below is byte-identical to pre-stage-2.
         wearing = descriptor.get("wearing") or []
+        # W2 preview: the route carries the requested preview mode as an
+        # ADDITIVE ``preview_mode`` key (absent on every legacy path —
+        # hand-made descriptors, portraits, scenes — so the chain below
+        # stays byte-identical to pre-W2). "base_body" takes the dedicated
+        # NUDE_FRAMING path: the neutral proportion-study framing REPLACES
+        # every clothing/outerwear fragment (worn list AND outfit chain);
+        # wording carries no garment or nudity vocabulary.
+        preview_mode = descriptor.get("preview_mode")
         if descriptor.get("nude_framing"):
             base += f", {NUDE_FRAMING}"
+        elif preview_mode == "base_body":
+            base += f", {BASE_BODY_FRAMING}"
         elif wearing:
             # #205 (020 §Outfit / nudity control): worn WorldObjects take
             # precedence in EVERY outfit mode (an explicitly worn item means
@@ -757,6 +791,11 @@ def build_prompt(descriptor: dict, visual_config_weather: str = "clear") -> str:
                 # callers deterministic).
                 variant = descriptor.get("outfit_auto_variant")
                 base += f", {variant if variant in _AUTO_OUTFIT_POOL else _AUTO_OUTFIT_POOL[0]}"
+        # W2 preview full-body modes: the framing rides AFTER the outfit
+        # chain (portrait + base_body never see this suffix — preview_mode
+        # is absent/None there, so the returned bytes stay pre-W2).
+        if preview_mode in ("full_body_clothed", "full_body_outfit"):
+            base += f", {FULL_BODY_FRAMING}"
         return base
     loc = descriptor["location"]
     parts = [
@@ -764,6 +803,19 @@ def build_prompt(descriptor: dict, visual_config_weather: str = "clear") -> str:
         f"characters: {[c['name'] for c in descriptor['characters']]}",
         f"objects: {[o['type'] for o in descriptor['objects']]}",
     ]
+    # W2 scene grounding: committed worn outfits ride the prompt so the
+    # render shows what people actually wear (the same committed state the
+    # portrait path serializes). The protagonist's fragment joins the raw
+    # player-part object names (pre-A4 pinned shape); NPC entries carry
+    # phrase-form worn lists ("wearing_phrases"). Fragments fire ONLY when
+    # something is worn — scenes without worn items keep byte-identical
+    # prompts (m119/m154 pins).
+    player = descriptor.get("player")
+    if player and player.get("worn"):
+        parts.append(f"the protagonist wears: {', '.join(player['worn'])}")
+    for c in descriptor["characters"]:
+        if c.get("worn"):
+            parts.append(f"{c['name']} wears: {', '.join(c['worn'])}")
     # 019 Phase 1 (T2): the scene view gains the profile styling and the
     # scene-lighting preset ahead of the environment/time composition, when
     # the descriptor carries a profile (requesting player present).

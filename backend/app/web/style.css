@@ -1974,6 +1974,18 @@ button.danger:hover { background: #93301f; }
 .creator-shell .creator-field { display: grid; gap: 2px; }
 .creator-shell .creator-note { margin: 8px 0 0; font-size: 12px; }
 
+/* W2: creator preview panel — the generated image sits inline in the
+   panel; buttons/status/error reuse the existing creator patterns. */
+.creator-shell .preview-image {
+  display: block;
+  max-width: 100%;
+  margin-top: 8px;
+  border: 1px solid var(--w-line);
+  border-radius: 10px;
+  background: var(--w-panel-deep);
+}
+.creator-shell .creator-preview .err-text { margin: 8px 0 0; }
+
 /* biography tag cloud: grouped neutral ingredient chips */
 .creator-shell .creator-tags { display: grid; gap: 8px; margin: 8px 0; }
 .creator-shell .creator-tag-row { display: flex; flex-wrap: wrap; gap: 6px; }
