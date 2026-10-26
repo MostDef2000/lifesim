@@ -64,7 +64,8 @@ def test_locations_endpoint(world):
     assert island["x"] is None
 
     settlement = next(item for item in locs if item["type"] == "settlement")
-    assert settlement["x"] == 57.6
+    # real OSM render (issue #95): coords.json locations.settlement, snapshot sha256 776cacbd
+    assert settlement["x"] == 50.69
     assert "y" in settlement
     assert "parent_id" in settlement
     assert "occupants_count" in settlement
@@ -98,17 +99,18 @@ def test_house_coord_determinism(tmp_path):
     assert coords1 == coords2
     assert all(x is not None and y is not None for x, y in coords1)
     # Pin the sparse RNG-free town grid: first the config-defined "home",
-    # then 24 generated houses in row-major seed order from origin (42.0, 6.6).
+    # then 24 generated houses in row-major seed order from origin (35.09, 42.2).
     # 8x4 grid (3.9%/4.6% steps): 7 POI cells + 1 pier-clearance cell skipped.
+    # real OSM render (issue #95): home/origin from coords.json, snapshot sha256 776cacbd
     expected = [
-        (45.9, 15.8),
-        (42.0, 6.6), (45.9, 6.6), (49.8, 6.6), (53.7, 6.6),
-        (57.6, 6.6), (65.4, 6.6), (69.3, 6.6),
-        (42.0, 11.2), (45.9, 11.2), (49.8, 11.2), (53.7, 11.2),
-        (61.5, 11.2), (65.4, 11.2), (69.3, 11.2),
-        (42.0, 15.8), (49.8, 15.8), (65.4, 15.8), (69.3, 15.8),
-        (42.0, 20.4), (45.9, 20.4), (53.7, 20.4), (57.6, 20.4),
-        (65.4, 20.4), (69.3, 20.4),
+        (38.99, 51.4),
+        (35.09, 42.2), (38.99, 42.2), (42.89, 42.2), (46.79, 42.2),
+        (50.69, 42.2), (58.49, 42.2), (62.39, 42.2),
+        (35.09, 46.8), (38.99, 46.8), (42.89, 46.8), (46.79, 46.8),
+        (54.59, 46.8), (58.49, 46.8), (62.39, 46.8),
+        (35.09, 51.4), (42.89, 51.4), (58.49, 51.4), (62.39, 51.4),
+        (35.09, 56.0), (38.99, 56.0), (46.79, 56.0), (50.69, 56.0),
+        (58.49, 56.0), (62.39, 56.0),
     ]
     flat = [v for pair in coords1 for v in pair]
     expected_flat = [v for pair in expected for v in pair]
