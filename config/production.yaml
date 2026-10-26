@@ -178,16 +178,16 @@ generation:
 locations:
   # coords must mirror default.yaml: load_config reads ONLY this file (no merge)
   coords:
-    settlement: { x: 57.6, y: 11.2 }
-    shop:       { x: 61.5, y: 20.4 }
-    workshop:   { x: 49.8, y: 20.4 }
-    kitchen:    { x: 53.7, y: 15.8 }
-    storage:    { x: 61.5, y: 15.8 }
-    well:       { x: 57.6, y: 15.8 }
-    pier:       { x: 62.0, y: 5.0 }
-    home:       { x: 45.9, y: 15.8 }
+    settlement: { x: 50.69, y: 46.8 }
+    shop:       { x: 54.59, y: 56.0 }
+    workshop:   { x: 42.89, y: 56.0 }
+    kitchen:    { x: 46.79, y: 51.4 }
+    storage:    { x: 54.59, y: 51.4 }
+    well:       { x: 50.69, y: 51.4 }
+    pier:       { x: 44.98, y: 89.33 }
+    home:       { x: 38.99, y: 51.4 }
     houses:
-      origin: { x: 42.0, y: 6.6 }
+      origin: { x: 35.09, y: 42.2 }
   houses_count: 24
   locations:
     island: { name: "Reineke Island", type: "island", parent: null, capacity: 1000 }

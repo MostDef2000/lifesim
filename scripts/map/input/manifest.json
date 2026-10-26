@@ -1,0 +1,15 @@
+{
+  "input": "reineke-island.osm",
+  "sha256": "776cacbd716ae5e9fc0b0ddb336f9f1e869de2b5c0ecab908f48ef4dc5980f0b",
+  "osm_relation": 1933752,
+  "fetched_from": {
+    "service": "overpass-api.de/api/interpreter",
+    "query": "[out:xml][timeout:50];(relation(1933752);way(r);node(w););out body;"
+  },
+  "osm_data_timestamp": "2026-10-25T12:01:18Z",
+  "license": "ODbL - (c) OpenStreetMap contributors",
+  "license_links": {
+    "odbl_1_0": "https://opendatacommons.org/licenses/odbl/1-0/",
+    "osm_copyright": "https://www.openstreetmap.org/copyright"
+  }
+}

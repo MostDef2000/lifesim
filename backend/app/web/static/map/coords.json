@@ -1,0 +1,94 @@
+{
+  "image": "base.png",
+  "size": [
+    1600,
+    900
+  ],
+  "locations": {
+    "settlement": {
+      "x": 50.69,
+      "y": 46.8
+    },
+    "shop": {
+      "x": 54.59,
+      "y": 56.0
+    },
+    "workshop": {
+      "x": 42.89,
+      "y": 56.0
+    },
+    "kitchen": {
+      "x": 46.79,
+      "y": 51.4
+    },
+    "storage": {
+      "x": 54.59,
+      "y": 51.4
+    },
+    "well": {
+      "x": 50.69,
+      "y": 51.4
+    },
+    "pier": {
+      "x": 44.98,
+      "y": 89.33
+    },
+    "home": {
+      "x": 38.99,
+      "y": 51.4
+    },
+    "houses.origin": {
+      "x": 35.09,
+      "y": 42.2
+    }
+  },
+  "osm": {
+    "bbox": [
+      42.897407,
+      131.7086812,
+      42.924143,
+      131.7470386
+    ],
+    "snapshot_sha256": "776cacbd716ae5e9fc0b0ddb336f9f1e869de2b5c0ecab908f48ef4dc5980f0b",
+    "fetched_from": "overpass-api.de/api/interpreter",
+    "fetched_at": "2026-10-25T12:01:18Z"
+  },
+  "image_space": {
+    "settlement": {
+      "x": 50.47,
+      "y": 46.8
+    },
+    "shop": {
+      "x": 53.11,
+      "y": 56.0
+    },
+    "workshop": {
+      "x": 45.18,
+      "y": 56.0
+    },
+    "kitchen": {
+      "x": 47.83,
+      "y": 51.4
+    },
+    "storage": {
+      "x": 53.11,
+      "y": 51.4
+    },
+    "well": {
+      "x": 50.47,
+      "y": 51.4
+    },
+    "pier": {
+      "x": 46.6,
+      "y": 89.33
+    },
+    "home": {
+      "x": 42.54,
+      "y": 51.4
+    },
+    "houses.origin": {
+      "x": 39.9,
+      "y": 42.2
+    }
+  }
+}
