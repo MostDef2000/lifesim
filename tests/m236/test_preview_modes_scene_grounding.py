@@ -239,8 +239,11 @@ class TestPreviewModes:
     def test_full_body_clothed_forces_casual_and_framing(self, tmp_path):
         """New behavior (RED on base): full_body_clothed renders the casual
         garments even when outfit_mode=nude was sent, and appends the
-        full-body framing after the outfit chain."""
-        from app.visual.style_presets import FULL_BODY_FRAMING
+        full-body framing after the outfit chain. 023 round 2 (#120 live
+        renders): the shared chest-up casting preset must be REPLACED by
+        the full-body casting register inside preview modes — the preset's
+        "nothing below the chest visible" overrode the framing suffixes."""
+        from app.visual.style_presets import FULL_BODY_CASTING, FULL_BODY_FRAMING
 
         _, app, _, _ = _env(tmp_path)
         client = _login(app, "w236fbc")
@@ -252,14 +255,20 @@ class TestPreviewModes:
         assert prompt.endswith(f", {FULL_BODY_FRAMING}")
         assert "wearing casual clothes: a plain t-shirt and jeans" in prompt
         assert "fully clothed" in prompt
+        # 023r2: full-body casting register REPLACES the chest-up preset
+        assert FULL_BODY_CASTING in prompt
+        assert "Chest-up portrait" not in prompt
+        assert "nothing below the chest visible" not in prompt
         # the safety override: no nude fragment leaks into a "clothed" mode
         assert ", nude" not in prompt
         assert "completely unclothed" not in prompt
 
     def test_full_body_outfit_keeps_draft_outfit_mode(self, tmp_path):
         """New behavior (RED on base): full_body_outfit uses the outfit
-        chosen in the creator's Одежда control (formal here) + framing."""
-        from app.visual.style_presets import FULL_BODY_FRAMING
+        chosen in the creator's Одежда control (formal here) + framing.
+        023r2: the full-body casting register applies to BOTH full-body
+        modes (single swap point)."""
+        from app.visual.style_presets import FULL_BODY_CASTING, FULL_BODY_FRAMING
 
         _, app, _, _ = _env(tmp_path)
         client = _login(app, "w236fbo")
@@ -269,6 +278,8 @@ class TestPreviewModes:
         assert r.status_code == 200, r.text
         prompt = r.json()["prompt"]
         assert prompt.endswith(f", {FULL_BODY_FRAMING}")
+        assert FULL_BODY_CASTING in prompt
+        assert "Chest-up portrait" not in prompt
         assert ", wearing formal attire" in prompt
         # auto (omitted outfit_mode) also composes: pool head + framing
         r2 = client.post("/visual/preview", json={
@@ -279,9 +290,12 @@ class TestPreviewModes:
 
     def test_base_body_replaces_clothing_chain_neutrally(self, tmp_path):
         """New behavior (RED on base): base_body swaps the whole clothing
-        chain for the neutral proportion-study framing — no wearing
-        fragment, no nude fragment, regardless of outfit_mode."""
-        from app.visual.style_presets import BASE_BODY_FRAMING
+        chain for the clinical reference framing — no wearing fragment, no
+        nude fragment, regardless of outfit_mode. 023 round 2 (#120 live
+        renders): the chest-up casting preset must be replaced by the
+        clinical reference-casting register (a chest-up crop + "nothing
+        below the chest visible" rendered a chest-up nude beauty-portrait)."""
+        from app.visual.style_presets import BASE_BODY_CASTING, BASE_BODY_FRAMING
 
         _, app, _, _ = _env(tmp_path)
         client = _login(app, "w236basebody")
@@ -290,11 +304,36 @@ class TestPreviewModes:
         assert r.status_code == 200, r.text
         prompt = r.json()["prompt"]
         assert BASE_BODY_FRAMING in prompt
+        # 023r2: clinical reference-casting register replaces the preset
+        assert BASE_BODY_CASTING in prompt
+        assert "Chest-up portrait" not in prompt
+        assert "nothing below the chest visible" not in prompt
         # neutral: no clothing chain, no nudity wording at all
         assert "wearing" not in prompt
         assert "nude" not in prompt
         assert "unclothed" not in prompt
         assert ", fully clothed" not in prompt
+
+    def test_portrait_mode_keeps_shared_casting_preset(self, tmp_path):
+        """023r2 guard (green on base): the explicit portrait mode — and
+        the omitted-mode legacy form — keep the SHARED chest-up casting
+        preset byte-for-byte; the 023r2 casting swap must never touch
+        portrait/legacy paths."""
+        _, app, _, _ = _env(tmp_path)
+        client = _login(app, "w236portraitcasting")
+        for body in (PREVIEW_BODY, {**PREVIEW_BODY, "mode": "portrait"}):
+            r = client.post("/visual/preview", json=body)
+            assert r.status_code == 200, r.text
+            prompt = r.json()["prompt"]
+            assert "Chest-up portrait, entire head well inside the frame" in prompt
+            assert "nothing below the chest visible" in prompt
+            # and none of the preview-only casting registers leak in
+            from app.visual.style_presets import (
+                BASE_BODY_CASTING,
+                FULL_BODY_CASTING,
+            )
+            assert FULL_BODY_CASTING not in prompt
+            assert BASE_BODY_CASTING not in prompt
 
     def test_base_body_underage_422_no_transport(self, tmp_path):
         """Invariant guard (green on base): the endpoint's 18-99 age gate
