@@ -1124,6 +1124,36 @@ function needBar(label, value) {
 
 const MAP_LOW_MARKER_BUDGET = 120;
 
+/* #57 first-queue ambient effects. Percentage coords (0-100 of the 1600x900
+   map space) come from the visual zone analysis of 2026-10-27: individual
+   trees are NOT resolvable in the base image, so tree zones are tentative
+   soft overlays kept very subtle; smoke sources have weak visual
+   confirmation and are gated by flags.smoke — flip it off if they look
+   wrong in practice. Surf segments and bird corridors sit over open water,
+   clear of the pier marker (~46,91) and the bottom attribution. */
+const MAP_AMBIENT = {
+  flags: { smoke: true },
+  trees: [ // {x,y,w,h} sway zones, T1-T3
+    { x: 35, y: 18, w: 30, h: 22 }, // T1 north interior
+    { x: 27, y: 25, w: 15, h: 18 }, // T2 northwest interior
+    { x: 56, y: 58, w: 14, h: 15 }, // T3 southeast interior
+  ],
+  surf: [ // {x1,y1,x2,y2} coastline endpoints (water side), S1-S4
+    { x1: 30, y1: 14, x2: 69, y2: 13 }, // S1 north
+    { x1: 29, y1: 26, x2: 29, y2: 68 }, // S2 west
+    { x1: 70, y1: 22, x2: 73, y2: 66 }, // S3 east
+    { x1: 31, y1: 73, x2: 67, y2: 72 }, // S4 south
+  ],
+  smoke: [ // chimney sources, weak confirmation — flag-gated
+    { x: 46.79, y: 51.4 }, // kitchen
+    { x: 42.89, y: 56.0 }, // workshop
+  ],
+  birds: [ // {x1,y1,x2,y2} corridors over open water, B1-B2
+    { x1: 12, y1: 9, x2: 86, y2: 8 }, // B1 north, band y 4-12%
+    { x1: 15, y1: 86, x2: 83, y2: 85 }, // B2 south, band y 84-88%
+  ],
+};
+
 function mapTimePhase(gameTimestamp) {
   const minute = ((gameTimestamp || 0) % 1440 + 1440) % 1440;
   if (minute < 360 || minute >= 1200) return "night";
@@ -1218,6 +1248,60 @@ function markTouchedAnchor(ev) {
   ev.currentTarget.classList.add("touched");
 }
 
+/* #57 ambient layer: sits above the base image and below tint/lights,
+   markers and weather (z-index 0 + DOM slot right after .map-base), never
+   interactive. Gating mirrors rain/fog: nothing at quality low-mobile or
+   when reduced motion is on. Per-effect LOD: surf on the coast is visible
+   at every zoom, trees+smoke only at region/local, birds only at
+   island/region (they fly high). Returns null when fully gated. */
+function buildMapAmbient(ctx) {
+  if (ctx.quality === "low-mobile" || ctx.reduced) return null;
+  const ambient = el("div", { class: "map-ambient", "aria-hidden": "true" });
+  for (const seg of MAP_AMBIENT.surf) {
+    ambient.append(el("span", { class: "map-ambient-surf", style: mapSurfBandStyle(seg) }));
+  }
+  if (ctx.lod !== "island") {
+    MAP_AMBIENT.trees.forEach((zone, i) => ambient.append(el("span", {
+      class: "map-ambient-tree",
+      style: `left:${zone.x}%; top:${zone.y}%; width:${zone.w}%; height:${zone.h}%;`
+        + ` animation-duration:${11 + i}s; animation-delay:${-3 * i}s;`,
+    })));
+    if (MAP_AMBIENT.flags.smoke) {
+      MAP_AMBIENT.smoke.forEach((src, i) => ambient.append(el("span", {
+        class: "map-ambient-smoke",
+        style: `left:${src.x - 1}%; top:${src.y - 1.4}%;`
+          + ` animation-duration:${9 + 2 * i}s; animation-delay:${-4 * i - 2}s;`,
+      })));
+    }
+  }
+  if (ctx.lod !== "local") {
+    MAP_AMBIENT.birds.forEach((corridor, i) => ambient.append(el("span", {
+      class: "map-ambient-bird",
+      style: mapBirdCorridorStyle(corridor, i),
+    })));
+  }
+  return ambient;
+}
+
+/* #57: derive a surf band box from coastline endpoints — oriented along the
+   segment, centered on the line, ~13px thick on the 1600x900 stage. */
+function mapSurfBandStyle(seg) {
+  const horizontal = Math.abs(seg.x2 - seg.x1) >= Math.abs(seg.y2 - seg.y1);
+  return horizontal
+    ? `left:${Math.min(seg.x1, seg.x2)}%; top:${(seg.y1 + seg.y2) / 2 - 0.75}%;`
+      + ` width:${Math.abs(seg.x2 - seg.x1)}%; height:1.5%;`
+    : `left:${(seg.x1 + seg.x2) / 2 - 0.425}%; top:${Math.min(seg.y1, seg.y2)}%;`
+      + ` width:0.85%; height:${Math.abs(seg.y2 - seg.y1)}%;`;
+}
+
+/* #57: bird corridor element spans the flight line; the CSS animation
+   translates it by 100% of its own width — exactly one corridor length. */
+function mapBirdCorridorStyle(corridor, i) {
+  return `left:${Math.min(corridor.x1, corridor.x2)}%; top:${(corridor.y1 + corridor.y2) / 2}%;`
+    + ` width:${Math.abs(corridor.x2 - corridor.x1)}%;`
+    + ` animation-duration:${28 + 8 * i}s; animation-delay:${-(9 + 12 * i)}s;`;
+}
+
 function buildLivingMap(locs) {
   S.mapLocations = locs;
   const ch = S.character;
@@ -1282,6 +1366,7 @@ function buildLivingMap(locs) {
   },
     el("div", { class: "map-stage" },
       el("img", { class: "map-base", src: "/static/static/map/world-island.jpg", alt: "" }),
+      buildMapAmbient({ lod: S.mapLod, quality: S.mapQuality, reduced: !!S.mapReducedMotion }),
       el("div", { class: "map-time-tint", "aria-hidden": "true" }),
       el("div", { class: "map-night-lights", "aria-hidden": "true" },
         ...nightLightLocs.map(loc => el("span", {
