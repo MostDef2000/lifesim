@@ -126,7 +126,7 @@ def test_carry_forward_pins():
     assert js.count('input.value = "";') == 2
     assert js.count('"Не удалось отправить — проверьте связь и повторите"') == 1
     assert js.count('"LLM недоступен, отвечает fallback"') == 1
-    assert js.count("fetchPortraitBlob") == 5
+    assert js.count("fetchPortraitBlob") == 6  # +1 (#65 appearance portrait)
     assert js.count("/visual/characters/${npcSel.value}/portrait") == 1
     assert js.count("api(`/characters/${npcSel.value}/roles`)") == 1
     assert js.count("/characters/${S.character.id}/relationships") == 1

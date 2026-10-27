@@ -136,7 +136,8 @@ def test_shop_endpoint_use_pins():
     # refreshShop.
     assert js.count('api("/market/offers?status=active")') == 3
     assert js.count('api("/market/offers", {') == 2  # invSellRow + shop create
-    assert js.count("`/characters/${S.character.id}/inventory`)") == 3
+    # +1 (#65): viewAppearance joins the authoritative inventory reads.
+    assert js.count("`/characters/${S.character.id}/inventory`)") == 4
     # Mutations go through the existing endpoints only; buy/cancel are
     # template-literal paths (each exactly once).
     assert js.count("body: { object_id: Number(sel.value), price: p },") == 1
@@ -154,7 +155,8 @@ def test_shop_endpoint_use_pins():
 def test_shop_inventory_link_pins():
     js = _read(APP_JS)
     # Inventory KEEPS its sell rows and links over to #/shop (no removal).
-    assert js.count('href: "#/shop"') == 1
+    # +1 (#65): the appearance wardrobe empty state links to Рынок too.
+    assert js.count('href: "#/shop"') == 2
     assert js.count('href: "#/inventory"') == 1  # shop sell-panel empty state
     assert js.count('"inv-sell"') == 1  # inventory sell affordance untouched
     assert js.count("function invSellRow(") == 1

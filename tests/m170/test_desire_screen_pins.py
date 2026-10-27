@@ -153,7 +153,8 @@ def test_desire_deep_link_and_wiring_pins():
     # which is the single re-render factor for all screen compositions.
     assert js.count("focusField();") == 1
     # Link-over entries: Дела empty state, Дела standing link, profile hook.
-    assert js.count('href: "#/desire"') == 3
+    # +1 (#65): the appearance prompt zone adds a link-over entry.
+    assert js.count('href: "#/desire"') == 4
     # The standing Дела link renders only when a desire exists (ternary).
     assert js.count("tasks-desire-link") == 1
     # Opportunity cards reuse the existing map focus mechanism — no new
