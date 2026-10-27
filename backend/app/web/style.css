@@ -868,6 +868,86 @@ body.landing-mode #app {
   to { transform: translateX(1.5%); opacity: 1; }
 }
 
+/* ---------- #57 ambient effects (tree sway, surf, smoke, birds) ----------
+   Built by buildMapAmbient() only when quality != low-mobile and reduced
+   motion is off; z-index 0 keeps the layer above the base image but under
+   tint/lights (1-2), markers (4) and weather (5). Every effect's base
+   state is its invisible/rest look, so animation:none (reduced motion)
+   leaves nothing odd on screen. */
+.map-ambient {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  overflow: hidden;
+  pointer-events: none;
+}
+.map-ambient-tree {
+  position: absolute;
+  background:
+    radial-gradient(ellipse 62% 58% at 42% 46%, rgba(24, 58, 34, .25), transparent 72%),
+    radial-gradient(ellipse 44% 38% at 64% 62%, rgba(16, 44, 28, .20), transparent 74%),
+    radial-gradient(ellipse 52% 42% at 56% 32%, rgba(126, 164, 116, .14), transparent 78%);
+  opacity: .58;
+  animation: map-ambient-sway 12s ease-in-out infinite alternate;
+  will-change: transform;
+}
+@keyframes map-ambient-sway {
+  from { transform: translate3d(-.35%, .1%, 0) scale(1); }
+  to { transform: translate3d(.35%, -.1%, 0) scale(1.021); }
+}
+.map-ambient-surf {
+  position: absolute;
+  border-radius: 50%;
+  background: linear-gradient(90deg, transparent, rgba(233, 243, 246, .42) 24%, rgba(246, 251, 252, .62) 50%, rgba(233, 243, 246, .42) 76%, transparent);
+  opacity: 0;
+  animation: map-ambient-surf 8s ease-in-out infinite;
+  will-change: opacity, transform;
+}
+@keyframes map-ambient-surf {
+  0%, 100% { opacity: 0; transform: translate3d(0, 0, 0); }
+  42% { opacity: 1; transform: translate3d(2px, 1.5px, 0); }
+  68% { opacity: .6; transform: translate3d(3px, .5px, 0); }
+}
+.map-ambient-smoke {
+  position: absolute;
+  width: 2%;
+  height: 2.8%;
+  background: radial-gradient(ellipse at 50% 62%, rgba(224, 229, 227, .45), rgba(224, 229, 227, .18) 55%, transparent 76%);
+  opacity: 0;
+  animation: map-ambient-smoke 10s ease-in-out infinite;
+  will-change: opacity, transform;
+}
+@keyframes map-ambient-smoke {
+  0% { opacity: 0; transform: translate3d(0, 18%, 0) scale(.92); }
+  16% { opacity: .75; }
+  62% { opacity: .42; transform: translate3d(5%, -58%, 0) scale(1.12); }
+  100% { opacity: 0; transform: translate3d(9%, -128%, 0) scale(1.3); }
+}
+.map-ambient-bird {
+  position: absolute;
+  height: 1%;
+  opacity: 0;
+  animation: map-ambient-bird 30s linear infinite;
+  will-change: opacity, transform;
+}
+.map-ambient-bird::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 9px;
+  height: 5px;
+  border-top: 2px solid rgba(26, 36, 42, .55);
+  border-radius: 55% 55% 0 0 / 100% 100% 0 0;
+}
+@keyframes map-ambient-bird {
+  0% { opacity: 0; transform: translate3d(0, 0, 0); }
+  5% { opacity: .75; }
+  30% { transform: translate3d(46%, -7px, 0); }
+  50% { opacity: .75; transform: translate3d(88%, 0, 0); }
+  56%, 100% { opacity: 0; transform: translate3d(100%, 0, 0); }
+}
+
 .map-dynamic-marker {
   position: absolute;
   z-index: 4;
@@ -941,7 +1021,9 @@ body.landing-mode #app {
 
 .map-card.reduced-motion .map-stage,
 .map-card.reduced-motion .map-rain,
-.map-card.reduced-motion .map-fog {
+.map-card.reduced-motion .map-fog,
+.map-card.reduced-motion .map-ambient,
+.map-card.reduced-motion .map-ambient * {
   animation: none !important;
   transition: none !important;
 }
@@ -956,9 +1038,18 @@ body.landing-mode #app {
 @media (prefers-reduced-motion: reduce) {
   .map-stage,
   .map-rain,
-  .map-fog {
+  .map-fog,
+  .map-ambient,
+  .map-ambient * {
     animation: none !important;
     transition: none !important;
+  }
+  /* #57: with OS-level reduce on but the JS gate off (in-app toggle
+     unchecked), animations freeze mid-flight — surf/smoke/birds vanish
+     into their opacity-0 rest states, so tree zones (rest opacity .58)
+     must vanish too instead of lingering as frozen overlays. */
+  .map-ambient-tree {
+    opacity: 0 !important;
   }
 }
 
