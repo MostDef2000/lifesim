@@ -2130,6 +2130,128 @@ button.danger:hover { background: #93301f; }
 .portrait-ref-nude input { width: auto; }
 .portrait-ref-file { display: none; }
 
+/* ---------- #65: «Образ и одежда» (#/appearance) — inserted BEFORE the #175
+   conn-banner tail block (the m175 append-only tail pin keeps the banner
+   the last rule). Warm family screen like
+   .desire-shell/.shop-shell, with the creator-shell precedent for the
+   token set: NO --w-line definition here — the pinned token count stays 4
+   and the :root fallback (#172) carries the identical value, so
+   var(--w-line) resolves to the same color inside .appearance-shell.
+   Zones top-to-bottom: head → hero (portrait + status stack) → outfit
+   prompt → try-on (wardrobe + preview); both 2-col zones collapse to a
+   single column at the 900px breakpoint (knobs at 640px). */
+.appearance-shell {
+  --w-bg: #0a1016;
+  --w-panel: rgba(23, 33, 42, 0.72);
+  --w-panel-deep: rgba(12, 19, 25, 0.6);
+  --w-text: #dde5ec;
+  --w-dim: #8fa1b1;
+  --w-accent: #e2b45a;
+  --w-warm: rgba(226, 180, 90, 0.15);
+  --w-warm-line: rgba(226, 180, 90, 0.4);
+  --w-warm-ink: #1d1506;
+  grid-template-columns: 1fr;
+  gap: 12px;
+  align-content: start;
+}
+.appearance-shell .panel {
+  background: var(--w-panel);
+  border-color: var(--w-line);
+}
+.appearance-shell .muted { color: var(--w-dim); }
+.appearance-shell button.primary {
+  background: var(--w-accent);
+  color: var(--w-warm-ink);
+}
+.appearance-shell button.primary:hover { border-color: var(--w-warm-ink); }
+.appear-head h2 { margin: 0 0 4px 0; }
+.appear-note { font-size: 12px; }
+
+/* zone 2: large canonical portrait on the left, status panels stacked
+   on the right; the portrait keeps the generator's square aspect. */
+.appear-hero {
+  display: grid;
+  grid-template-columns: minmax(0, 1.1fr) minmax(0, 1fr);
+  gap: 12px;
+  align-items: start;
+}
+.appear-side { display: grid; gap: 12px; align-content: start; }
+.appear-portrait .portrait-img { width: 100%; max-width: 420px; }
+.appear-worn-list { display: grid; gap: 2px; margin-bottom: 6px; }
+.appear-worn-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 4px 0;
+  border-bottom: 1px solid var(--w-line);
+}
+
+/* zone 3: outfit prompt — chips fill the field only (never submit). */
+.appear-field { display: grid; gap: 2px; }
+.appear-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: baseline;
+  margin-top: 8px;
+}
+.appear-chip {
+  padding: 3px 10px;
+  border: 1px solid var(--w-line);
+  border-radius: 999px;
+  background: var(--w-panel-deep);
+  color: var(--w-dim);
+  font-size: 12px;
+}
+.appear-chip:hover { color: var(--w-accent); border-color: var(--w-accent); }
+.appear-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 14px;
+  align-items: center;
+  margin-top: 8px;
+}
+
+/* zone 4: wardrobe grid + try-on preview column. */
+.appear-tryon {
+  display: grid;
+  grid-template-columns: 1.1fr 1fr;
+  gap: 12px;
+  align-items: start;
+}
+.appear-wardrobe { display: grid; gap: 6px; margin-bottom: 6px; }
+.appear-wear-item {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 12px;
+  align-items: center;
+  padding: 6px 8px;
+  border: 1px solid var(--w-line);
+  border-radius: 10px;
+}
+.appear-item-name { font-weight: 600; color: var(--w-text); }
+.appear-preview-img {
+  display: block;
+  max-width: 100%;
+  border: 1px solid var(--w-line);
+  border-radius: 10px;
+  background: var(--w-panel-deep);
+}
+.appear-knobs {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+  margin-top: 10px;
+}
+.appear-tryout { display: grid; gap: 6px; margin-top: 10px; }
+.appear-tryout .appear-apply { justify-self: start; }
+@media (max-width: 900px) {
+  .appear-hero, .appear-tryon { grid-template-columns: 1fr; }
+}
+@media (max-width: 640px) {
+  .appear-knobs { grid-template-columns: 1fr; }
+}
+
 /* #175: connection banner — persistent offline signal driven by consecutive
    pollEvents failures (WS close is routine on navigation, never drives it).
    Warm-warn family on the dark panel bg; fixed top-center, below nothing —

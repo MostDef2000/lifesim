@@ -124,7 +124,7 @@ const routes = {
   "#/login": viewAuth, "#/create": viewCreateCharacter, "#/world": viewWorld, "#/chat": viewChat,
   "#/people": viewPeople,
   "#/inventory": viewInventory, "#/shop": viewShop, "#/tasks": viewTasks, "#/desire": viewDesire,
-  "#/profile": viewProfile, "#/admin": viewAdmin, "#/external": viewExternal,
+  "#/profile": viewProfile, "#/appearance": viewAppearance, "#/admin": viewAdmin, "#/external": viewExternal,
 };
 
 async function route() {
@@ -244,6 +244,7 @@ function viewAuth() {
       S.authProbed = false;
       S.character = null;
       creatorResetDraft();  // W118-RV1 F1: fresh login must not inherit the previous session's draft
+      appearanceResetDraft();  // #65: same isolation for the outfit prompt draft
       gotoWorld();  // #161: single dispatch — no direct route() next to the hash assignment
     } catch (e) { err.textContent = e.message; }
     finally {
@@ -1015,7 +1016,7 @@ function weatherLabel() {
 function topbar(active) {
   const tabs = [["#/world", "Мир"], ["#/chat", "Чат"], ["#/people", "Люди"],
     ["#/inventory", "Инвентарь"], ["#/shop", "Рынок"], ["#/tasks", "Дела"],
-    ["#/desire", "Цель"], ["#/profile", "Профиль"]];
+    ["#/desire", "Цель"], ["#/profile", "Профиль"], ["#/appearance", "Образ"]];
   if (["admin", "developer", "moderator"].includes(S.user.role)) {
     tabs.push(["#/admin", "Админ"]);
   }
@@ -2413,7 +2414,12 @@ async function viewInventory() {
 async function wearToggle(objectId) {
   try {
     await api("/wear", { method: "POST", body: { object_id: objectId } });
-    viewInventory();  // refresh state after the authoritative action
+    // #65: re-render the ACTIVE screen after the authoritative toggle —
+    // from #/appearance stay there (the typed draft survives via
+    // APPEARANCE_DRAFT); every other origin is the inventory (historical
+    // behavior). The screen refetches everything — /wear is authoritative.
+    if (location.hash === "#/appearance") viewAppearance();
+    else viewInventory();
   } catch (e) { toast(e.message, true); }  // errors keep the screen state
 }
 
@@ -2499,8 +2505,310 @@ function renderInventory(items, listed) {
       el("p", { class: "muted" },
         "Использование предметов выполняется игровыми действиями (EAT/DRINK)."),
       el("p", { class: "muted" },
+        el("a", { href: "#/appearance" }, "Образ и одежда →"),
+        " — что надето, режим одежды и предпросмотр желаемого образа"),
+      el("p", { class: "muted" },
         el("a", { href: "#/shop" }, "Рынок"),
         " — витрина покупки и продажи между персонажами")));
+}
+
+
+/* ---------- #65: «Образ и одежда» (#/appearance) ---------- */
+
+/* #65: the appearance screen's client-only draft — the outfit prompt and
+   the three PREVIEW-ONLY knobs (hair/hair_color/build feed POST
+   /visual/preview's appearance dict, never the character, never the
+   creator draft). Survives the screen's wear-toggle re-render so the
+   typed text is not wiped (same discipline as S.chatDraft); lazy fields
+   keep the byte-pinned S initializer tail untouched. */
+const APPEARANCE_DRAFT = { prompt: "", hair: "", hair_color: "", build: "" };
+
+/* #65 (validator round 2, W118-RV1 F1 precedent): the draft is per-session
+   private input — reset it on every auth transition (login, logout,
+   account deletion) so the next user of the same browser never sees the
+   previous user's outfit prompt or preview knobs prefilled. */
+function appearanceResetDraft() {
+  APPEARANCE_DRAFT.prompt = "";
+  APPEARANCE_DRAFT.hair = "";
+  APPEARANCE_DRAFT.hair_color = "";
+  APPEARANCE_DRAFT.build = "";
+}
+
+/* #65: chip suggestions for the outfit prompt — a click FILLS the textarea
+   and focuses it, nothing is sent (desireChipRow pattern). Own class: the
+   .sugg chip shape is byte-pinned == 1 on the desire screen. */
+const APPEARANCE_OUTFIT_CHIPS = [
+  ["Повседневный", "повседневный стиль"],
+  ["Спорт", "спортивный стиль"],
+  ["Зимний", "зимний образ"],
+  ["Элегантный", "элегантный образ"],
+  ["Праздничный", "праздничный образ"],
+];
+
+async function viewAppearance() {
+  location.hash = "#/appearance";
+  const loading = el("div", { class: "muted" }, "Загрузка…");
+  app.replaceChildren(topbar("#/appearance"), loading);
+  try {
+    // Cold-load safety + stale-state guard: the by-user bootstrap omits
+    // sex/age/outfit_mode, so every entry re-reads the authoritative
+    // character (the profile selector may have changed the mode; the
+    // /visual/preview contract requires sex+age) plus the inventory.
+    const me = await api(`/characters/${S.character.id}`);
+    S.character = { ...S.character, ...me };
+    const inv = await api(`/characters/${S.character.id}/inventory`);
+    renderAppearance(Array.isArray(inv) ? inv : (inv && inv.items) || []);
+  } catch (e) {
+    // #93: transient failure — explicit retry instead of a dead «Загрузка…».
+    loadRetryNode(loading, () => viewAppearance());
+    toast(e.message, true);
+  }
+}
+
+function renderAppearance(items) {
+  // Wearables per the client type list (INV_WEARABLE_TYPES — the same
+  // filter the inventory detail wears; the server's SLOT_MAP is the
+  // authoritative twin). The inventory payload carries no name field:
+  // object_type IS the honest label, exactly like the inventory rows.
+  const wearableItems = items.filter((it) =>
+    INV_WEARABLE_TYPES.includes(it.object_type));
+
+  /* --- try-on zone refs (shared with the prompt zone below) --- */
+  const previewStatus = el("p", { class: "muted appear-note", role: "status" },
+    "Предпросмотра ещё нет — опишите образ и нажмите «Сгенерировать предпросмотр».");
+  const previewErr = el("p", { class: "err-text" });
+  const previewImg = el("img", { class: "appear-preview-img",
+    alt: "Предпросмотр образа", hidden: true });
+  const previewCaption = el("p", { class: "muted appear-note", hidden: true },
+    "Предпросмотр — не сохранён; персонаж и гардероб не изменены");
+
+  // Preview-only appearance knob: a text input writing APPEARANCE_DRAFT —
+  // the character record and the creator draft are never touched.
+  function knob(label, key, ph) {
+    const input = el("input", { type: "text", maxlength: "120",
+      placeholder: ph, "aria-label": `${label} — только для предпросмотра` });
+    input.value = APPEARANCE_DRAFT[key] || "";
+    input.addEventListener("input", () => { APPEARANCE_DRAFT[key] = input.value; });
+    return el("label", { class: "appear-field" }, label, input);
+  }
+
+  /* --- outfit-mode selectors: two affordances, ONE PATCH site --- */
+  function outfitSelect() {
+    const sel = el("select", { "aria-label": "Режим одежды" },
+      el("option", { value: "auto" }, "auto — как сейчас"),
+      el("option", { value: "casual" }, "casual — повседневная одежда"),
+      el("option", { value: "formal" }, "formal — строгая одежда"),
+      el("option", { value: "nude" }, "nude — без одежды (18+)"));
+    sel.value = S.character.outfit_mode || "auto";
+    return sel;
+  }
+  const outfitSelCurrent = outfitSelect();
+  const outfitSelTry = outfitSelect();
+  // The screen's single PATCH /outfit site (the profile panel keeps its
+  // own). Only the presentation MODE persists — never the preview image,
+  // never the garments. A refusal (e.g. nude without 18+ confirmation)
+  // re-syncs both selectors from the authoritative stored mode.
+  async function applyOutfitMode(mode) {
+    try {
+      const r = await api(`/characters/${S.character.id}/outfit`, {
+        method: "PATCH", body: { outfit_mode: mode } });
+      S.character.outfit_mode = (r && r.outfit_mode) || mode;
+      toast("Режим одежды обновлён — сохранён только режим, не вещи");
+    } catch (e) { toast(e.message, true); }
+    outfitSelCurrent.value = S.character.outfit_mode || "auto";
+    outfitSelTry.value = S.character.outfit_mode || "auto";
+  }
+  outfitSelCurrent.addEventListener("change",
+    () => applyOutfitMode(outfitSelCurrent.value));
+
+  /* --- prompt zone (zone 3): free text ≤500 + chips + generate --- */
+  const promptField = el("textarea", {
+    id: "appear-outfit-prompt", rows: "3", maxlength: "500",
+    placeholder: "Опишите образ, который хотите (например: „красное платье для свидания“, „повседневный стиль“)",
+  });
+  promptField.value = APPEARANCE_DRAFT.prompt || "";
+  promptField.addEventListener("input",
+    () => { APPEARANCE_DRAFT.prompt = promptField.value; });
+
+  const chipsRow = el("div", { class: "appear-chips" },
+    ...APPEARANCE_OUTFIT_CHIPS.map(([label, text]) => el("button", {
+      type: "button", class: "appear-chip",
+      onclick: () => {
+        // draft AND field: programmatic assignment fires no input event —
+        // without the explicit write a wear-toggle re-render would drop
+        // the chip-selected text.
+        APPEARANCE_DRAFT.prompt = text;
+        promptField.value = text;
+        promptField.focus();
+      },
+    }, label)),
+    el("span", { class: "muted appear-note" },
+      "Примеры только заполняют поле — опишите образ своими словами"));
+
+  // The screen's single /visual/preview site: full-body outfit variant of
+  // POST /visual/preview — UNSAVED, nothing persists, the canonical
+  // portrait is never replaced. sex/age come from the authoritative
+  // character read; the appearance subset rides only the preview knobs.
+  let previewBusy = false;
+  const previewGo = el("button", { id: "appear-preview-go",
+    class: "primary", type: "button" }, "Сгенерировать предпросмотр");
+  async function runPreview() {
+    if (previewBusy) return;  // no double-submit while in flight
+    previewBusy = true;
+    previewGo.disabled = true;
+    previewErr.textContent = "";
+    previewStatus.hidden = false;
+    previewStatus.textContent = "Генерация…";
+    try {
+      const appearance = {};
+      if (APPEARANCE_DRAFT.hair.trim()) appearance.hair = APPEARANCE_DRAFT.hair.trim();
+      if (APPEARANCE_DRAFT.hair_color.trim()) {
+        appearance.hair_color = APPEARANCE_DRAFT.hair_color.trim();
+      }
+      if (APPEARANCE_DRAFT.build.trim()) appearance.build = APPEARANCE_DRAFT.build.trim();
+      const r = await api("/visual/preview", { method: "POST", body: {
+        sex: S.character.sex, age: Number(S.character.age),
+        appearance_prompt: promptField.value.trim() || undefined,
+        appearance: Object.keys(appearance).length ? appearance : undefined,
+        outfit_mode: outfitSelTry.value, mode: "full_body_outfit",
+      } });
+      previewImg.src = `data:image/png;base64,${r.image_base64}`;
+      previewImg.hidden = false;
+      previewCaption.hidden = false;
+      previewStatus.hidden = true;
+    } catch (e) {
+      // the draft stays on screen; the shown image (if any) stays too
+      previewStatus.hidden = true;
+      previewErr.textContent =
+        `Предпросмотр не удался: ${e.message}. Попробуйте ещё раз.`;
+    } finally {
+      previewBusy = false;
+      previewGo.disabled = false;
+    }
+  }
+  previewGo.onclick = runPreview;
+
+  /* --- zone 2 LEFT: canonical portrait (read-only visual) --- */
+  const portraitStatus = el("div", { class: "muted portrait-status" }, "Портрет…");
+  const portraitBox = el("div", { class: "panel portrait appear-portrait" },
+    el("h2", {}, "Портрет"), portraitStatus);
+  (async () => {
+    try {
+      const asset = await api(`/visual/characters/${S.character.id}/portrait`);
+      const blob = await fetchPortraitBlob(`/visual/assets/${asset.id}/file`);
+      portraitStatus.replaceChildren(
+        el("img", { class: "portrait-img appear-portrait-img",
+          src: URL.createObjectURL(blob), alt: "Портрет" }));
+    } catch (e) {
+      // graceful empty/error fallback — honest note, no dead image frame
+      portraitStatus.textContent = S.visualDisabled
+        ? "Визуал временно недоступен" : "Портрет ещё не сгенерирован";
+    }
+  })();
+
+  /* --- wardrobe cards (zone 4 LEFT) --- */
+  function wearBtn(it) {
+    const btn = el("button", { type: "button", class: "appear-wear-btn" },
+      it.worn ? "Снять" : "Надеть");
+    btn.onclick = async (ev) => {
+      ev.currentTarget.disabled = true;  // toggle: no double-fire while pending
+      try {
+        await wearToggle(it.id);  // shared single /wear site; re-renders
+      } finally {
+        // success: the re-render replaced this node (no-op); failure:
+        // wearToggle kept the screen, so re-arm the button.
+        if (btn.isConnected) btn.disabled = false;
+      }
+    };
+    return btn;
+  }
+
+  const wardrobeBox = el("div", { class: "appear-wardrobe" });
+  function drawWardrobe() {
+    wardrobeBox.replaceChildren(...(wearableItems.length
+      ? wearableItems.map((it) => el("div", { class: "appear-wear-item" },
+          el("span", { class: "appear-item-name" }, it.quantity > 1
+            ? `${it.object_type} ×${it.quantity}` : it.object_type),
+          it.worn === true ? el("span", { class: "badge worn" }, "надето") : null,
+          el("span", { class: "muted" }, `состояние: ${it.condition ?? "—"}%`),
+          wearBtn(it)))
+      : [el("div", { class: "muted" }, "Гардероб пуст — загляните на ",
+          el("a", { href: "#/shop" }, "Рынок"))]));
+  }
+
+  /* --- currently-worn list («Текущий образ», zone 2) --- */
+  const wornBox = el("div", { class: "appear-worn-list" });
+  function drawWorn() {
+    const worn = items.filter((it) => it.worn === true);
+    wornBox.replaceChildren(...(worn.length
+      ? worn.map((it) => el("div", { class: "appear-worn-row" },
+          el("span", {}, it.object_type),
+          el("span", { class: "muted" }, `слот: ${it.slot || "—"}`)))
+      : [el("div", { class: "muted" }, "Ничего не надето")]));
+  }
+  drawWorn();
+  drawWardrobe();
+
+  app.replaceChildren(topbar("#/appearance"),
+    el("div", { class: "grid appearance-shell" },
+      // Zone 1: title + one-line subtitle.
+      el("div", { class: "panel appear-head" },
+        el("h2", {}, "Образ и одежда"),
+        el("p", { class: "muted appear-note" },
+          "Как персонаж выглядит и что на нём надето — плюс предпросмотр желаемого образа.")),
+      // Zone 2: portrait LEFT, stacked status panels RIGHT.
+      el("div", { class: "appear-hero" },
+        portraitBox,
+        el("div", { class: "appear-side" },
+          el("div", { class: "panel" },
+            el("h2", {}, "Текущий образ"),
+            wornBox,
+            el("p", { class: "muted appear-note" },
+              "Надевать и снимать вещи — в Гардеробе ниже.")),
+          el("div", { class: "panel" },
+            el("h2", {}, "Режим одежды"),
+            outfitSelCurrent,
+            el("p", { class: "muted appear-note" },
+              "Режим задаёт подачу образа на портрете, а не конкретные вещи; выбор применяется сразу.")),
+          el("div", { class: "panel" },
+            el("h2", {}, "Сохранённые образы"),
+            el("p", { class: "muted appear-note" },
+              "Сохранённые образы пока недоступны")))),
+      // Zone 3: outfit prompt — chips fill the field, the button previews.
+      el("div", { class: "panel appear-prompt" },
+        el("h2", {}, "Желаемый образ"),
+        el("label", { class: "appear-field" },
+          "Описание образа (до 500 символов)", promptField),
+        chipsRow,
+        el("div", { class: "appear-actions" },
+          previewGo,
+          el("span", { class: "muted" },
+            "Не хватает вещи? ",
+            el("a", { href: "#/desire" }, "Описать желание →")))),
+      // Zone 4: wardrobe + try-on.
+      el("div", { class: "appear-tryon" },
+        el("div", { class: "panel" },
+          el("h2", {}, "Гардероб"),
+          wardrobeBox,
+          el("p", { class: "muted appear-note" },
+            "Кнопка на карточке надевает или снимает вещь — предметы не создаются и не пропадают.")),
+        el("div", { class: "panel" },
+          el("h2", {}, "Примерка"),
+          previewStatus, previewErr, previewImg, previewCaption,
+          el("div", { class: "appear-knobs" },
+            knob("Причёска", "hair", "напр.: короткая стрижка"),
+            knob("Цвет волос", "hair_color", "напр.: тёмно-русый"),
+            knob("Телосложение", "build", "напр.: спортивное")),
+          el("p", { class: "muted appear-note" },
+            "Эти поля влияют только на предпросмотр — персонаж не изменяется."),
+          el("div", { class: "appear-tryout" },
+            el("label", { class: "appear-field" },
+              "Режим одежды для предпросмотра", outfitSelTry),
+            el("button", { type: "button", class: "appear-apply",
+              onclick: () => applyOutfitMode(outfitSelTry.value) },
+              "Применить режим одежды"),
+            el("p", { class: "muted appear-note" },
+              "Сохраняется только режим одежды — не картинка и не предметы."))))));
 }
 
 
@@ -3485,6 +3793,7 @@ function renderProfile(modeSel) {
           S.user = null; S.character = null;
           S.authProbed = false;
           creatorResetDraft();  // W118-RV1 F1: logout clears the creator draft
+          appearanceResetDraft();  // #65: logout clears the outfit prompt draft
           location.hash = "#/login";
           route();
         } }, "Выйти")),
@@ -3499,6 +3808,7 @@ function renderProfile(modeSel) {
             await api("/auth/account/delete", { method: "POST", body: { confirm: S.confirmDelete || "" } });
             S.user = null; S.character = null;
             creatorResetDraft();  // W118-RV1 F1: deletion clears the creator draft
+            appearanceResetDraft();  // #65: deletion clears the outfit prompt draft
             // #138: no S.authProbed reset here (m132 pins exactly two reset
             // sites) — after deletion auth state is known-gone and the
             // cookie is cleared server-side; a re-probe would only 401.

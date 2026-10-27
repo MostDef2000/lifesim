@@ -221,7 +221,7 @@ def test_regression_byte_pins_of_b3_survive():
     # #173: viewShop joins the #93 retry pattern → 6 alpha-critical sites.
     # #175: viewExternal + viewAdmin drop their toast-only catches → 8
     # (#67: viewProfile adds its own retry via route()).
-    assert JS.count("loadRetryNode(loading, () => view") == 9
+    assert JS.count("loadRetryNode(loading, () => view") == 10  # +1 (#65 viewAppearance)
     # #170 F2: the desire interpret-preview failure path reuses the shared
     # hint constant (m158 keeps the const def + profile-save literal).
     assert JS.count("RETRY_HINT") == 4

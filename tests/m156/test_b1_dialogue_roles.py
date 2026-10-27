@@ -557,7 +557,7 @@ def test_ui_chat_screen_new_pins():
     # session-only branch — the layout references it unconditionally.
     assert js.count('"chat-log"') == 1
     # Canonical NPC visual through the cookie-auth blob pattern.
-    assert js.count("fetchPortraitBlob") == 5
+    assert js.count("fetchPortraitBlob") == 6  # +1 (#65 appearance portrait)
     assert js.count("/visual/characters/${npcSel.value}/portrait") == 1
     assert js.count("api(`/characters/${npcSel.value}/roles`)") == 1
     # Relationship summary from the authoritative read model — one fetch

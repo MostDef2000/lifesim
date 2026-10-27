@@ -661,7 +661,7 @@ def test_ui_legacy_pins_intact():
     assert js.count('"scene-act-go"') == 2
     assert js.count('"Осматриваю окрестности…"') == 1
     assert js.count('"Визуал недоступен, показываю данные"') == 1
-    assert js.count("fetchPortraitBlob") == 5
+    assert js.count("fetchPortraitBlob") == 6  # +1 (#65 appearance portrait)
     assert js.count('"chat-msg-input"') == 2
     assert js.count('"chat-roles"') == 1
     assert js.count("/characters/${S.character.id}/relationships") == 1
