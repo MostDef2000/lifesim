@@ -72,13 +72,14 @@ def test_load_retry_sites_9_external_and_admin():
     # alpha-critical sites: viewExternal (site #7) and viewAdmin (site #8)
     # replaced their toast-only catches — a transient fetch failure now
     # explains itself and offers «Повторить» instead of a dead «Загрузка…».
-    assert js.count("loadRetryNode(loading, () => view") == 10  # +1 (#65 viewAppearance)
+    # #72: viewLocation joins the same pattern → 11 sites.
+    assert js.count("loadRetryNode(loading, () => view") == 11  # +1 (#65 viewAppearance)
     assert js.count("loadRetryNode(loading, () => viewExternal());") == 1
     assert js.count("loadRetryNode(loading, () => viewAdmin());") == 1
     # Both views keep a named loading node in scope for the retry rewrite;
     # 9 views carry the pattern (6 pre-#175 + 2 from #175 + profile from #67);
-    # #65: viewAppearance joins → 11.
-    assert js.count("const loading = el(\"div\", { class: \"muted\" }, \"Загрузка…\");") == 11
+    # #65: viewAppearance joins → 11; #72: viewLocation joins → 12.
+    assert js.count("const loading = el(\"div\", { class: \"muted\" }, \"Загрузка…\");") == 12
 
 
 # ---------- B: connection banner (poll failures are the liveness oracle) ----------
@@ -214,9 +215,11 @@ def test_hygiene_and_neighbour_pins_untouched():
     assert js.count("if (!S.visualDisabled) {") == 1
     assert js.count("S.visualDisabled = true") == 1
     assert js.count("S.visualDisabled = false") == 1
-    # m162 WS/navigation hard pins survive the #175 edits.
+    # m162 WS/navigation hard pins survive the #175 edits. (#72: the Place
+    # screen's «К карте» is a 5th gotoWorld() call site — same
+    # single-dispatch contract; `location.hash = "#/world";` stays at 4.)
     assert js.count('location.hash = "#/world";') == 4
-    assert js.count("gotoWorld();") == 4
+    assert js.count("gotoWorld();") == 5
     assert js.count("S.ws = null;") <= 2
     assert js.count("if (S.ws === ws) S.ws = null;") == 1
     # m156/m162 negative guards: no new occurrences of the pinned singletons.
@@ -224,7 +227,8 @@ def test_hygiene_and_neighbour_pins_untouched():
     assert js.count(
         "toast(isAutonomousRefusal(e) ? AUTONOMOUS_HINT : e.message, true);") == 1
     assert js.count("} else { toast(e.message, true); }") == 2
-    # Shared retry helper unchanged: one const, one def, hint reused 4×.
+    # Shared retry helper unchanged: one const, one def, hint reused 4×
+    # (#72: +1 — the Place screen's events-failure line reuses the hint).
     assert js.count("const RETRY_HINT =") == 1
     assert js.count("function loadRetryNode(") == 1
-    assert js.count("RETRY_HINT") == 4
+    assert js.count("RETRY_HINT") == 5

@@ -596,7 +596,9 @@ def test_ui_tasks_screen_pins():
     # B2-review F1: manual focus survives the poll loop and releases when
     # the player physically moves (anchor mismatch) — without this the
     # poll would clobber the task-target focus within one 5s tick.
-    assert js.count("S.mapFocusManual = true;") == 1
+    # #72: +1 — the Place screen's «К карте» sets the same manual focus
+    # inline (mapLink() itself is untouched).
+    assert js.count("S.mapFocusManual = true;") == 2
     assert js.count("if (S.mapFocusManual && S.mapFocusAnchor !== character.location_id)") == 1
     assert js.count("if (!S.mapFocusManual && character.location_id != null)") == 1
     # Cold-load safety mirrors viewChat's authoritative character read.
@@ -655,7 +657,9 @@ def test_ui_legacy_pins_intact():
     assert js.count("«Осмотреть окрестности»") == 1
     assert js.count('"Осмотреть"') == 1
     assert js.count('"Открыть Scene"') == 1
-    assert js.count('"К карте"') == 2
+    # #72: +1 — the Place screen's always-available «К карте» (read-only
+    # navigation back to the map; the two #86 escape hatches are untouched).
+    assert js.count('"К карте"') == 3
     assert js.count("S.scene = null;") >= 2
     assert js.count('"scene-act-input"') == 2
     assert js.count('"scene-act-go"') == 2

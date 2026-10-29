@@ -297,7 +297,9 @@ def test_ui_scene_state_pins_without_damaging_existing_pins():
     assert js.count('"Осматриваю окрестности…"') == 1
     assert js.count('"Визуал недоступен, показываю данные"') == 1
     # #86 review: the escape hatch exists in loading AND ready/fallback.
-    assert js.count('"К карте"') == 2
+    # #72: +1 — the Place screen's always-available «К карте» (read-only
+    # navigation back to the map with inline focus; mapLink() untouched).
+    assert js.count('"К карте"') == 3
     # #86 review: stale-scene invalidation on world re-render (travel)
     # and the one-in-flight guard against double POST.
     assert js.count("S.scene = null;") >= 2

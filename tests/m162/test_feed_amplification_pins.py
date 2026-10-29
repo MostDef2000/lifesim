@@ -175,10 +175,11 @@ def test_no_double_dispatch_navigation():
     # is whole-file-pinned == 1 by m147/m153/m154/m156/m157 (the pollEvents
     # re-render gate); this body must not add a 2nd match.
     assert JS.count('if ("#/world" === location.hash) viewWorld();') == 1
-    # Four call sites: register success, create-character success,
-    # viewExternal depart, mapLink "Показать на карте". (The work order's
-    # draft text wavered between 3 and 4 — the true post-edit count is 4.)
-    assert JS.count("gotoWorld();") == 4
+    # Five call sites: register success, create-character success,
+    # viewExternal depart, mapLink "Показать на карте", and — since #72 —
+    # the Place screen's «К карте» (same single-dispatch contract; the
+    # focus fields are set inline, mapLink() itself is untouched).
+    assert JS.count("gotoWorld();") == 5
     # route() normalizes an EMPTY hash exactly once, without a second render:
     # set the hash and return — the queued hashchange re-enters route() with
     # a concrete view.
@@ -221,10 +222,12 @@ def test_regression_byte_pins_of_b3_survive():
     # #173: viewShop joins the #93 retry pattern → 6 alpha-critical sites.
     # #175: viewExternal + viewAdmin drop their toast-only catches → 8
     # (#67: viewProfile adds its own retry via route()).
-    assert JS.count("loadRetryNode(loading, () => view") == 10  # +1 (#65 viewAppearance)
+    # #72: viewLocation joins the #93 retry pattern → 11 sites.
+    assert JS.count("loadRetryNode(loading, () => view") == 11  # +1 (#65 viewAppearance)
     # #170 F2: the desire interpret-preview failure path reuses the shared
     # hint constant (m158 keeps the const def + profile-save literal).
-    assert JS.count("RETRY_HINT") == 4
+    # #72: +1 — the Place screen's events-failure line reuses the hint.
+    assert JS.count("RETRY_HINT") == 5
     assert JS.count("innerHTML") == 0
     assert JS.count("AUTONOMOUS_HINT") == 8
     assert JS.count("isAutonomousRefusal") == 6

@@ -301,7 +301,9 @@ def test_hash_landmine_pins():
     # Shared counts (m128/m162) must stay honest after the wave:
     assert js.count('location.hash = "#/profile";') == 3
     assert js.count('location.hash = "#/world";') == 4
-    assert js.count("gotoWorld();") == 4
+    # #72: the Place screen's «К карте» is a 5th gotoWorld() call site
+    # (same single-dispatch contract; the hash assignment count is unchanged).
+    assert js.count("gotoWorld();") == 5
     # The creator never assigns #/world directly and never re-enters
     # route() next to a hash assignment (#161 single-dispatch rule).
     view = _creator_view(js)
