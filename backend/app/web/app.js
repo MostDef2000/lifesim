@@ -149,6 +149,11 @@ async function route() {
   // and the creator normalizes the address to #/create (its own route).
   // Every other hash short-circuits straight into the creator.
   if (!S.character && hash !== "#/profile") return viewCreateCharacter();
+  // #72: dynamic subordinate route — strict numeric id, matched BEFORE the
+  // static registry (the 14-entry `routes` object above stays untouched;
+  // no new topbar tab — the Place screen highlights «Мир» as the active tab).
+  const placeMatch = hash.match(/^#\/location\/(\d+)$/);
+  if (placeMatch) return viewLocation(Number(placeMatch[1]));
   (routes[hash] || viewWorld)();
 }
 
@@ -1697,6 +1702,12 @@ function locationView(locs) {
     .map((o) => o.name);
   return el("div", { class: "location-view", id: "location-view" },
     el("h3", {}, currentLoc ? currentLoc.name : "—"),
+    // #72: read-only link-over to the Place screen for the CURRENT location
+    // (marker-click and «Осмотреть» semantics stay untouched).
+    currentLoc
+      ? el("a", { class: "place-link",
+          href: `#/location/${currentLoc.id}` }, "О месте")
+      : null,
     el("div", { class: "muted" }, dayTime((S.world && S.world.game_timestamp) || 0)),
     S.weather && S.weather.enabled
       ? el("div", { class: "muted" }, S.weather.description) : null,
@@ -1704,6 +1715,223 @@ function locationView(locs) {
       nearby.length ? `Рядом: ${nearby.join(", ")}` : "Рядом никого"),
     el("button", { type: "button",
       onclick: () => inspectSurroundings() }, "Осмотреть"));
+}
+
+/* ---------- #72: Place screen — read-only view of any location ---------- */
+
+// #72: stale-response guard for the whole Place screen — one sequence covers
+// the view generation, the events fetch and the events retry. A response is
+// applied only when it is still the latest request, the player is still on
+// this place's hash with the same account/character, and the host node is
+// still mounted (A→B→A navigation drops every stale response; #66 precedent).
+let placeLoadSeq = 0;
+// #72 review F2: the events request family owns a SEPARATE sequence — an
+// events retry (or refetch) must never invalidate an in-flight main load.
+let placeEventsSeq = 0;
+
+// #72: decorative type glyph for the hero — presentation only, never a
+// capability claim; unknown types fall through to a neutral mark.
+const PLACE_TYPE_ICONS = {
+  settlement: "⌂", house: "⌂", shop: "◆", workshop: "⚒", kitchen: "♨",
+  storage: "▤", well: "○", pier: "⚓", security: "✦", island: "◈",
+};
+
+function placeTypeIcon(type) {
+  return PLACE_TYPE_ICONS[type] || "◈";
+}
+
+async function viewLocation(locId) {
+  const viewHash = `#/location/${locId}`;
+  // #72 review F1: a leading-zero deep link (#/location/05) dispatches with
+  // locId=5 while the raw hash stays "#/location/05" — the hash guards below
+  // would drop every response and strand the screen on «Загрузка…».
+  // Normalize to the canonical form BEFORE loading. history.replaceState is
+  // deliberate: it fires NO hashchange, so route() is not re-dispatched
+  // (#161 single-dispatch rule); a location.hash assignment here would
+  // re-enter viewLocation and double-fire the load.
+  if (location.hash !== "#/location/" + locId) {
+    history.replaceState(null, "", "#/location/" + locId);
+  }
+  const loading = el("div", { class: "muted" }, "Загрузка…");
+  app.replaceChildren(topbar("#/world"), loading);
+  const seq = ++placeLoadSeq;
+  let locs;
+  // #72 validator: world context is fetched into LOCALS — a stale response
+  // must not mutate the SHARED S.world/S.weather for a screen that is about
+  // to be dropped. Other screens read S.world/S.weather (topbar clock, map
+  // ambience, locationView), so the shared write is kept — but moved AFTER
+  // the stale guard below.
+  let world = null;
+  let weather = null;
+  try {
+    world = await api("/world");
+    try { weather = await api("/weather"); } catch (e) { weather = null; }
+    // ONE /locations fetch resolves the requested place — the world-scoped
+    // catalog already carries occupants; no /locations/{id} detail call.
+    locs = await api("/locations");
+  } catch (e) {
+    // #93: transient failure — explicit retry instead of a dead «Загрузка…».
+    // Same stale guard as the apply path (review F3: session checks included).
+    if (seq !== placeLoadSeq || location.hash !== viewHash
+      || !S.user || !S.character) return;
+    loadRetryNode(loading, () => viewLocation(locId));
+    toast(e.message, true);
+    return;
+  }
+  // #72 stale-response guard (#66 precedent): latest request + still on this
+  // place's hash + same session/character. Otherwise the response is dropped.
+  if (seq !== placeLoadSeq || location.hash !== viewHash
+    || !S.user || !S.character) return;
+  // Guard passed — only now do the fresh reads become shared state
+  // (topbar clock, map ambience and the overview lines read them).
+  S.world = world;
+  S.weather = weather;
+  const place = locs.find((l) => l.id === locId);
+  if (!place) {
+    // #72: honest missing-place state — the catalog has no such id.
+    app.replaceChildren(topbar("#/world"),
+      el("main", { class: "place-shell" },
+        el("section", { class: "panel place-missing" },
+          el("h2", {}, "Место не найдено"),
+          el("p", { class: "muted" },
+            `В загруженном каталоге мира нет места #${locId}.`),
+          el("a", { href: "#/world" }, "← К карте"))));
+    return;
+  }
+  renderPlace(locId, place, locs);
+}
+
+function renderPlace(locId, place, locs) {
+  const viewHash = `#/location/${locId}`;
+  const occupants = place.occupants || [];
+  const hasNpc = occupants.some((o) => o.kind === "npc");
+
+  // Hero: warm gradient + decorative type icon + real name/type; the photo
+  // note is honest — no stock or fabricated imagery exists for places.
+  const hero = el("header", { class: "place-hero" },
+    el("span", { class: "place-hero-icon", "aria-hidden": "true" },
+      placeTypeIcon(place.type)),
+    el("div", { class: "place-hero-text" },
+      el("h2", {}, place.name || `#${place.id}`),
+      el("div", { class: "muted" }, place.type || ""),
+      el("div", { class: "muted place-hero-note" }, "Фото места недоступно")));
+
+  // Read-only actions: «К карте» always (map focus when the id is known —
+  // it always is here), «Обновить» re-runs the load, «Открыть диалог» only
+  // when NPCs are present AND this is the player's CURRENT location —
+  // #72 validator: chat (viewChat) reads NPCs at S.character.location_id,
+  // so a remote place with NPCs must not promise dialogue it cannot show.
+  // No type-derived buttons, no leave button.
+  const actions = el("div", { class: "place-actions" },
+    el("button", { type: "button", onclick: () => {
+      // Same manual-focus mechanism as mapLink() (#92): survives polls,
+      // releases when the player physically moves; gotoWorld() keeps the
+      // single-dispatch navigation contract (#161).
+      S.mapFocusManual = true;
+      S.mapFocusAnchor = S.character.location_id;
+      S.mapFocusLocationId = locId;
+      gotoWorld();
+    } }, "К карте"),
+    el("button", { type: "button",
+      onclick: () => viewLocation(locId) }, "Обновить"),
+    (locId === S.character.location_id && hasNpc)
+      ? el("a", { class: "place-chat-link", href: "#/chat" },
+          "Открыть диалог") : null);
+
+  // Compact selector for remote browsing — populated from the SAME
+  // /locations payload (no extra fetch); navigation goes through the hash,
+  // so route() re-dispatches exactly once.
+  const selector = el("label", { class: "place-selector" },
+    "Место: ",
+    el("select", { onchange: (ev) => {
+      const id = Number(ev.target.value);
+      if (id && id !== locId) location.hash = `#/location/${id}`;
+    } },
+      ...locs.map((l) => el("option", l.id === locId
+        ? { value: l.id, selected: "" } : { value: l.id },
+        `${l.name || `#${l.id}`} · ${l.type || ""}`))));
+
+  const worldTs = S.world && S.world.game_timestamp;
+  const overview = el("section", { class: "panel place-overview" },
+    el("h3", {}, "Обзор"),
+    // #72: world scope is explicit in the labels; unknown time stays
+    // unavailable — no zero-fallback («День 1, 00:00» would be a lie).
+    el("div", { class: "muted" },
+      `Время мира: ${typeof worldTs === "number" ? dayTime(worldTs) : "недоступно"}`),
+    el("div", { class: "muted" },
+      S.weather && S.weather.enabled
+        ? `Погода в мире: ${S.weather.description}` : "Погода в мире: недоступна"),
+    el("div", { class: "muted" }, `Здесь сейчас: ${occupants.length}`));
+
+  const people = el("section", { class: "panel place-people" },
+    el("h3", {}, "Люди на месте"),
+    occupants.length
+      ? el("div", { class: "place-roster" },
+          ...occupants.map((o) => el("div", { class: "place-roster-row" },
+            el("span", {}, o.name || `#${o.id}`),
+            el("span", { class: "muted" }, o.kind || ""))))
+      : el("p", { class: "muted" }, "Сейчас здесь никого нет."));
+
+  // Events: the request has its own failure/retry state, independent of the
+  // main render — a feed failure never takes the whole screen down.
+  const eventsBody = el("div", { class: "place-events-body" },
+    el("div", { class: "muted" }, "Загрузка…"));
+  const eventsPanel = el("section", { class: "panel place-events" },
+    el("h3", {}, "События"),
+    el("div", { class: "muted place-events-note" }, "События в загруженной выборке"),
+    eventsBody);
+
+  async function loadPlaceEvents() {
+    // #72 review F2: the events path owns its sequence — an events retry
+    // must NOT invalidate an in-flight main load (and vice versa). Cross-
+    // navigation staleness is still caught by the hash guard and this
+    // panel's isConnected check.
+    const eseq = ++placeEventsSeq;
+    eventsBody.replaceChildren(el("div", { class: "muted" }, "Загрузка…"));
+    try {
+      const feed = await api("/world/events?since=0&limit=100");
+      // Same stale guard as the main load, plus this panel's connectivity.
+      if (eseq !== placeEventsSeq || location.hash !== viewHash
+        || !S.user || !S.character || !eventsPanel.isConnected) return;
+      const rows = feed.filter((ev) => ev.location_id === locId);
+      eventsBody.replaceChildren(
+        rows.length
+          ? el("div", { class: "place-event-list" },
+              ...rows.map((ev) => el("div", { class: "place-event-row" },
+                el("span", { class: "muted" },
+                  typeof ev.game_timestamp === "number"
+                    ? dayTime(ev.game_timestamp) : "—"),
+                el("span", {}, ev.event_type || ""))))
+          : el("p", { class: "muted" },
+              "В загруженной выборке событий этого места нет."));
+    } catch (e) {
+      // Review F3: session checks included, same as the apply path.
+      if (eseq !== placeEventsSeq || location.hash !== viewHash
+        || !S.user || !S.character || !eventsPanel.isConnected) return;
+      eventsBody.replaceChildren(
+        el("span", { class: "muted" }, "События не загрузились. " + RETRY_HINT),
+        el("button", { type: "button", onclick: loadPlaceEvents }, "Повторить"));
+    }
+  }
+  loadPlaceEvents();
+
+  // Details: authoritative catalog fields only — no invented description.
+  const parent = place.parent_id != null
+    ? locs.find((l) => l.id === place.parent_id) : null;
+  const detailRow = (label, value) => el("div", { class: "place-detail-row" },
+    el("span", { class: "place-detail-label" }, label), el("span", {}, value));
+  const details = el("section", { class: "panel place-details" },
+    el("h3", {}, "Подробности"),
+    detailRow("ID", String(place.id)),
+    detailRow("Тип", place.type || "—"),
+    detailRow("Координаты", place.x != null && place.y != null
+      ? `${place.x} · ${place.y}` : "—"),
+    detailRow("Входит в", parent ? (parent.name || `#${parent.id}`) : "—"),
+    detailRow("Людей сейчас", String(occupants.length)));
+
+  app.replaceChildren(topbar("#/world"),
+    el("main", { class: "place-shell" },
+      hero, actions, selector, overview, people, eventsPanel, details));
 }
 
 async function viewExternal() {

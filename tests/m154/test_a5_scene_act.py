@@ -494,7 +494,9 @@ def test_ui_scene_act_pins_without_damaging_existing_pins():
     assert js.count("«Осмотреть окрестности»") == 1
     assert js.count('"Осмотреть"') == 1
     assert js.count('"Открыть Scene"') == 1
-    assert js.count('"К карте"') == 2
+    # #72: +1 — the Place screen's always-available «К карте» (read-only
+    # navigation back to the map; the two #86 escape hatches are untouched).
+    assert js.count('"К карте"') == 3
     assert js.count("S.scene = null;") >= 2
     assert js.count('S.scene.state === "loading"') >= 1
     assert js.count("async function inspectSurroundings()") == 1

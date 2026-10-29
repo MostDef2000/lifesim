@@ -2270,6 +2270,124 @@ button.danger:hover { background: #93301f; }
   .appear-knobs { grid-template-columns: 1fr; }
 }
 
+/* ---------- #72: Place screen (#/location/{id}) — inserted BEFORE the #175
+   conn-banner tail block (the m175 append-only tail pin keeps the banner
+   the last rule) and AFTER the byte-pinned first media blocks (m146).
+   Warm family screen like the other outside-the-shell screens, with the
+   same token-mirror precedent: NO --w-line definition here — the
+   pinned token count stays 4 and the :root fallback (#172) carries the
+   identical value. One scrolling composition: hero → actions → selector →
+   overview → people → events → details; section headings, no tabs. */
+.place-shell {
+  --w-bg: #0a1016;
+  --w-panel: rgba(23, 33, 42, 0.72);
+  --w-panel-deep: rgba(12, 19, 25, 0.6);
+  --w-text: #dde5ec;
+  --w-dim: #8fa1b1;
+  --w-accent: #e2b45a;
+  --w-warm: rgba(226, 180, 90, 0.15);
+  --w-warm-line: rgba(226, 180, 90, 0.4);
+  --w-warm-ink: #1d1506;
+  display: grid;
+  gap: 12px;
+  align-content: start;
+  max-width: 760px;
+  margin: 0 auto;
+  padding: 16px;
+}
+.place-shell .panel {
+  background: var(--w-panel);
+  border-color: var(--w-line);
+}
+.place-shell .muted { color: var(--w-dim); }
+.place-shell h2 { margin: 0; color: var(--w-text); }
+.place-shell h3 { margin: 0 0 6px 0; color: var(--w-text); }
+.place-shell button.primary {
+  background: var(--w-accent);
+  color: var(--w-warm-ink);
+}
+
+/* hero band — warm gradient, decorative type glyph, honest photo note;
+   flex-wrap keeps the icon + text stack readable on narrow screens. */
+.place-hero {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 14px;
+  align-items: center;
+  padding: 16px;
+  border: 1px solid var(--w-warm-line);
+  border-radius: 12px;
+  background:
+    linear-gradient(135deg, var(--w-warm), rgba(12, 19, 25, 0.6) 70%),
+    var(--w-panel-deep);
+}
+.place-hero-icon {
+  font-size: 34px;
+  line-height: 1;
+  color: var(--w-accent);
+}
+.place-hero-text { display: grid; gap: 2px; }
+.place-hero-note { font-size: 12px; }
+
+/* read-only action row + compact location selector. */
+.place-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+.place-chat-link {
+  color: var(--w-warm-ink);
+  background: var(--w-accent);
+  border: 1px solid var(--w-accent);
+  border-radius: 8px;
+  padding: 6px 12px;
+}
+.place-selector {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  color: var(--w-dim);
+  font-size: 13px;
+}
+.place-selector select { max-width: 100%; }
+
+/* people roster — name + kind rows, one per occupant. */
+.place-roster { display: grid; gap: 2px; }
+.place-roster-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 4px 0;
+  border-bottom: 1px solid var(--w-line);
+}
+
+/* events — the sample label keeps the feed honest (never complete history). */
+.place-events-note { font-size: 12px; margin-bottom: 6px; }
+.place-event-list { display: grid; gap: 2px; }
+.place-event-row {
+  display: flex;
+  gap: 10px;
+  padding: 3px 0;
+  border-bottom: 1px solid var(--w-line);
+  font-size: 13px;
+}
+
+/* details — label/value grid over authoritative catalog fields. */
+.place-details { display: grid; gap: 2px; }
+.place-detail-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 4px 0;
+  border-bottom: 1px solid var(--w-line);
+  font-size: 13px;
+}
+.place-detail-label { color: var(--w-dim); }
+
+/* «О месте» link-over beside the current-location summary on #/world. */
+.location-view .place-link { font-size: 13px; }
+
 /* #175: connection banner — persistent offline signal driven by consecutive
    pollEvents failures (WS close is routine on navigation, never drives it).
    Warm-warn family on the dark panel bg; fixed top-center, below nothing —
