@@ -3146,6 +3146,9 @@ function renderShop(offers, me, items) {
         "Баланс: ",
         el("span", { class: "world-money", id: "shop-balance" },
           balance == null ? "—" : `${balance} ₽`)),
+      // #73 completion slice: standing bridge to the desire screen (topbar
+      // vocabulary «Цель») — the shop stays linked to Free Requests.
+      el("a", { href: "#/desire" }, "Цель →"),
       status);
   }
 
@@ -3196,7 +3199,18 @@ function renderShop(offers, me, items) {
           toast(`Покупка состоялась: ${buy.item_name} за ${buy.price} ₽`);
           await refreshShop();  // balance refresh comes from the read model
         } catch (e) {
-          status.textContent = shopErrorText(e);
+          // #73 completion slice: insufficient_funds is a distinct state —
+          // the honest mapped text PLUS an inline bridge to #/desire (no
+          // money → formulate a goal). The RAW code is read BEFORE mapping
+          // (same shape shopErrorText uses); every other code keeps the
+          // generic path. The toast stays mapped for all codes; balance
+          // still comes from the read model only (no client-side math).
+          if (String(e.detail ?? e.message ?? "") === "insufficient_funds") {
+            status.replaceChildren(shopErrorText(e), " ",
+              el("a", { href: "#/desire" }, "Поставить цель →"));
+          } else {
+            status.textContent = shopErrorText(e);
+          }
           toast(shopErrorText(e), true);
           buyBtn.disabled = false;
         }

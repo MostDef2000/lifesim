@@ -25,6 +25,11 @@ style (exact literal counts — updated deliberately, never weakened):
   no fake out-of-stock/fake-disable affordances, no client-side money math
   (balance always comes from the read model).
 - Wiring: inventory keeps its sell rows and links over to #/shop.
+- #73 completion slice: the shop links to Free Requests both ways — a
+  standing «Цель →» link in the head panel and a distinct insufficient-funds
+  state (honest mapped text + inline «Поставить цель →» bridge to #/desire);
+  categories/stock stay NEEDS-BACKEND (no category field on market offers,
+  no stock model).
 - XSS hygiene: innerHTML stays == 0 file-wide; all rendering textContent-only.
 """
 
@@ -160,6 +165,42 @@ def test_shop_inventory_link_pins():
     assert js.count('href: "#/inventory"') == 1  # shop sell-panel empty state
     assert js.count('"inv-sell"') == 1  # inventory sell affordance untouched
     assert js.count("function invSellRow(") == 1
+
+
+def test_shop_desire_bridge_pins():
+    # #73 completion slice: the shop is linked to Free Requests both ways —
+    # a standing head link (topbar vocabulary «Цель» + the app's arrow
+    # convention, cf. «Описать желание →») and a distinct insufficient-funds
+    # state whose status line keeps the honest mapped text and appends an
+    # inline «Поставить цель →» bridge (lack of money → formulate a goal).
+    # The RAW code is detected BEFORE mapping (same shape shopErrorText
+    # uses); every other code keeps the generic path; the toast stays
+    # mapped; balance still comes from the read model only.
+    js = _read(APP_JS)
+    start = js.index("function renderShop(")
+    # Body slice: renderShop's full body — up to its tail re-render call
+    # (the standalone `composeHome();` line; the inline call inside the
+    # «Купить» onclick ends earlier and must NOT cut the slice).
+    body = js[start:js.index("\n  composeHome();\n}", start)]
+    # (a) The standing #/desire link lives inside the shop body, once
+    # (mutation-verified: label mutation → RED → byte-identical restore).
+    assert body.count('el("a", { href: "#/desire" }, "Цель →")') == 1
+    # (b) The insufficient-funds branch compares the RAW code before
+    # mapping, once inside the shop body (mutation-verified the same way).
+    assert body.count(
+        'String(e.detail ?? e.message ?? "") === "insufficient_funds"') == 1
+    # (c) The inline bridge label, file-wide exactly once.
+    assert js.count('"Поставить цель →"') == 1
+    # File-wide #/desire hash links: 4 pre-existing (Дела empty state, Дела
+    # standing link, profile hook, appearance prompt zone) + 2 new shop
+    # sites (standing head link + insufficient-funds bridge) = 6 — same
+    # total the m170 wiring pin now records.
+    assert js.count('href: "#/desire"') == 6
+    # The generic error path is preserved for every other code: the plain
+    # status assignment stays at 3 sites (cancel + buy-else + sell), and
+    # the mapped toast at 3 (cancel + buy + sell).
+    assert js.count("status.textContent = shopErrorText(e);") == 3
+    assert js.count("toast(shopErrorText(e), true);") == 3
 
 
 def test_shop_honesty_negative_pins():
