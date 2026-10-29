@@ -338,7 +338,9 @@ def test_appearance_css_pins():
 def test_inventory_links_over_to_appearance_pin():
     # renderInventory's footer grows exactly one link-over entry.
     assert JS.count("function renderInventory(") == 1
-    assert JS.count('href: "#/appearance"') == 1
+    # == 2 since #66: the desire screen adds its own navigation-only
+    # «Одежда и образ →» link-over (the inventory entry below is the other).
+    assert JS.count('href: "#/appearance"') == 2
     assert JS.count('"Образ и одежда →"') == 1
     inv = _inventory_block()
     assert inv.count('el("a", { href: "#/appearance" }, "Образ и одежда →")') == 1
