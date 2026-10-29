@@ -1381,6 +1381,24 @@ button.danger:hover { background: #93301f; }
 .desire-shell button.primary:hover { border-color: var(--w-warm-ink); }
 .desire-shell .sugg:hover { color: var(--w-accent); border-color: var(--w-accent); }
 
+/* #66 (Free Requests): the pre-confirmation interpretation step is NAMED —
+   a small muted h3 above the free-text field, distinct from the active
+   goal. Same warm token scope as the rest of the desire block. */
+.desire-step-label { margin: 0 0 6px; font-size: 0.95em; font-weight: 600; color: var(--w-dim); }
+
+/* #66: the clarification is a first-class state, visibly NOT an interpreted
+   result — warm-bordered panel, prominent reason text, domains guidance. */
+.desire-clarify { border-color: var(--w-warm-line); }
+.desire-clarify-text { margin: 6px 0; font-weight: 600; }
+/* #66: next-step line under active-goal opportunity cards (presentation
+   only — the planner's reason/source/link stay authoritative). */
+.desire-opp-step { font-style: italic; }
+/* #66: navigation-only link to the appearance screen (clothing arrives
+   through the market and is worn there — never an interpretation claim). */
+.desire-appear-link { margin-top: 12px; padding-top: 8px; border-top: 1px solid var(--w-line); display: flex; flex-direction: column; gap: 2px; align-items: flex-start; }
+.desire-appear-link a { color: var(--w-accent); font-weight: 600; }
+.desire-appear-note { font-size: 0.9em; }
+
 /* #173: Рынок (#/shop) — the screen renders outside .world-shell, so the
    cool :root tokens would leak in; mirror ONLY the warm custom properties
    (same values as .desire-shell, self-contained on purpose — see the

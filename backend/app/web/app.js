@@ -245,6 +245,7 @@ function viewAuth() {
       S.character = null;
       creatorResetDraft();  // W118-RV1 F1: fresh login must not inherit the previous session's draft
       appearanceResetDraft();  // #65: same isolation for the outfit prompt draft
+      desireResetDraft();  // #66: same isolation for the interpret-request state
       gotoWorld();  // #161: single dispatch — no direct route() next to the hash assignment
     } catch (e) { err.textContent = e.message; }
     finally {
@@ -3226,6 +3227,20 @@ const DESIRE_SUGGESTIONS = [
   "Хочу познакомиться с новыми людьми",
 ];
 
+/* #66: the interpret-preview request sequence — a response from the desire
+   interpretation preview applies only if it is still the LATEST request AND
+   its owning composition is still mounted (see the stale guard in the
+   submit handler). Bumping the counter invalidates any pending response. */
+let desireInterpSeq = 0;
+
+/* #66 (W118-RV1 F1 precedent): the request state is per-session — reset it
+   on every auth transition (login, logout, account deletion) so a response
+   addressed to the previous account can never land on the next user's
+   screen. */
+function desireResetDraft() {
+  desireInterpSeq += 1;
+}
+
 function desireStateFetch() {
   // One authoritative read returns both the active desire and the planner's
   // bounded opportunities (title/reason/source/link included).
@@ -3279,17 +3294,40 @@ function desireChipRow(field) {
       "Примеры — только подсказки: можно написать что угодно своими словами"));
 }
 
-function desireOppCard(o) {
+/* #66: pure presentation — renames the planner's action descriptor into a
+   human next step. NOTHING is invented: the mapping only re-labels the
+   authoritative action descriptor; unknown shapes yield no step line, and
+   reason/source/link on the card stay authoritative (never promises). */
+function desireOppStep(o) {
+  const a = o && o.action;
+  if (!a) return null;
+  if (a.mechanic === "dialogue") return `Поговорить — ${o.title || ""}`;
+  if (a.mechanic === "read") return `Изучить — ${o.title || ""}`;
+  if (a.mechanic === "action") {
+    if (a.action_type === "WORK") return "Работать";
+    if (a.action_type === "MOVE") return "Переехать";
+    if (a.action_type === "SLEEP") return "Отдохнуть";
+  }
+  return null;
+}
+
+function desireOppCard(o, showSteps) {
   // #64 §7: what is available, why it is linked (reason), source, next
   // action. Links go through the opportunity's authoritative link (#/chat,
   // #/world, #/inventory, #/profile); a location pointer in the action
   // params gets the existing map focus mechanism. Nothing is invented.
+  // #66: the optional step line is presentation only — active-goal cards
+  // pass showSteps; the preview composition never does (a draft has no
+  // planner data and must not borrow the active goal's next steps).
   const locId = o.action && o.action.params ? o.action.params.location_id : null;
+  const step = showSteps ? desireOppStep(o) : null;
   return el("div", { class: "opp desire-opp" },
     el("div", { class: "desire-opp-title" }, o.title || ""),
     o.reason ? el("div", { class: "muted" }, o.reason) : null,
     o.source ? el("div", { class: "muted" }, `Источник: ${o.source}`) : null,
     o.link ? el("a", { href: o.link }, "Открыть") : null,
+    step ? el("div", { class: "muted desire-opp-step" },
+      `Следующий шаг: ${step}`) : null,
     locId != null ? mapLink(locId) : null);
 }
 
@@ -3327,25 +3365,51 @@ function renderDesire(desire, opps, preview) {
       // B2-review F2 pattern: no double-submit while a request is in flight.
       if (submitBtn.disabled) return;
       submitBtn.disabled = true;
+      const prevLabel = submitBtn.textContent;
+      // #66: the interpret call is a genuine network step — a real pending
+      // state on the button (disabled + label), never a fake spinner.
+      submitBtn.textContent = "Разбираем запрос…";
       status.textContent = "";
+      const seq = ++desireInterpSeq;
       try {
         // #64 §4-5 honesty: interpret FIRST, create ONLY on confirm — the
         // deterministic catalog runs here without mutating anything.
         const r = await api(`/characters/${S.character.id}/desire/interpret`,
           { method: "POST", body: { text } });
-        if (r && r.clarification) {
-          // #87 ok:false pattern: the reason is data, nothing was created —
-          // the typed text stays so the player can rephrase in place.
-          status.textContent = r.clarification;
-          field.focus();
+        // #66 stale-response guard: apply only if this is still the latest
+        // request, the player is still on #/desire with the same account,
+        // the draft text is unedited, and the composition that sent the
+        // request is still mounted. Otherwise the response is dropped.
+        if (seq !== desireInterpSeq || location.hash !== "#/desire"
+            || !S.user || !S.character
+            || field.value.trim() !== text || !submitBtn.isConnected) return;
+        // #66: the clarify branch discriminates on the endpoint contract
+        // itself — 200 + catalog_key:null + clarification (m157 API pin),
+        // never an interpreted result. r.clarification stays a data guard.
+        if (r && r.catalog_key === null && r.clarification) {
+          // #87 ok:false pattern + #66: the reason is data, nothing was
+          // created — a DISTINCT clarify panel, never an interpreted result
+          // and never a confirm button for this draft; the typed text stays
+          // in the field so the player can rephrase in place.
+          compose(editorPanel(text), clarifyPanel(r.clarification),
+            desire ? oppsPanel(true) : null);
           return;
         }
         renderDesire(desire, opps, { text, interpretation: r.interpretation });
       } catch (e) {
-        // #93: recoverable failure keeps the typed draft on screen.
+        // #93: recoverable failure keeps the typed draft on screen — same
+        // stale guard: a dead request must not touch a changed screen.
+        if (seq !== desireInterpSeq || location.hash !== "#/desire"
+            || !submitBtn.isConnected) return;
         status.textContent = "Не удалось разобрать желание. " + RETRY_HINT;
         toast(e.message, true);
-      } finally { submitBtn.disabled = false; }
+      } finally {
+        // A no-op when the response was applied through a full re-render
+        // (this node is detached then); restores the pending-free label on
+        // the clarify/error/stale paths where the node is still connected.
+        submitBtn.disabled = false;
+        submitBtn.textContent = prevLabel;
+      }
     },
   }, "Сформулировать желание");
 
@@ -3392,6 +3456,9 @@ function renderDesire(desire, opps, preview) {
       el("h2", {}, "Цель / желание"),
       el("p", { class: "desire-question" },
         "Чего ты хочешь для своего персонажа?"),
+      // #66: the pre-confirmation interpretation step is NAMED — distinct
+      // from the active goal shown above it.
+      el("h3", { class: "desire-step-label" }, "Свободный запрос"),
       field,
       status,
       desire
@@ -3399,7 +3466,15 @@ function renderDesire(desire, opps, preview) {
             "Текущая цель остаётся активной, пока вы не подтвердите новую.")
         : null,
       el("div", { class: "desire-actions" }, submitBtn),
-      desireChipRow(field));
+      desireChipRow(field),
+      // #66: navigation ONLY — no interpretation claim. Clothing items
+      // arrive through the market and are worn there (the appearance
+      // screen's wardrobe); this link never reads as a desire result.
+      el("div", { class: "desire-appear-link" },
+        el("a", { href: "#/appearance" }, "Одежда и образ →"),
+        el("div", { class: "muted desire-appear-note" },
+          "Одежда появляется через рынок — вещи покупаются на Рынке и "
+          + "надеваются в гардеробе.")));
   }
 
   function sidePanel() {
@@ -3414,11 +3489,31 @@ function renderDesire(desire, opps, preview) {
         + "сменится скрыто."));
   }
 
-  function oppsPanel() {
+  function clarifyPanel(clarification) {
+    // #66: the interpretation step asks back — a DISTINCT panel, visibly
+    // NOT an interpreted result: no «Как система поняла» heading, no
+    // confirm button for this draft; the reason is data (#87 pattern) and
+    // the typed text stays in the field above for rephrasing.
+    return el("div", { class: "panel desire-clarify", id: "desire-clarify" },
+      el("h2", {}, "Уточнение"),
+      el("p", { class: "desire-clarify-text" }, clarification),
+      el("p", { class: "muted" },
+        "Свободный запрос понимает четыре темы: Отношения, Публичная роль, "
+        + "Дело и достаток, Спокойная жизнь — напишите желание своими "
+        + "словами в одной из них."),
+      el("p", { class: "muted desire-note" },
+        "Это не результат разбора: желание не создано и не изменено."));
+  }
+
+  function oppsPanel(showSteps) {
     return el("div", { class: "panel", id: "desire-opps" },
-      el("h2", {}, "Возможности для цели"),
+      el("h2", {}, "Возможности по цели"),
+      // #66: the label keeps these tied to the ACTIVE goal — opportunities
+      // never masquerade as results of an unconfirmed request draft.
+      el("div", { class: "muted" },
+        "Возможности подбираются по активной цели — не по черновику запроса."),
       opps.length
-        ? opps.map((o) => desireOppCard(o))
+        ? opps.map((o) => desireOppCard(o, showSteps))
         : el("div", { class: "muted" },
             "Пока нет возможностей — мир подберёт их, когда появятся основания"));
   }
@@ -3443,7 +3538,9 @@ function renderDesire(desire, opps, preview) {
         confirmBtn,
         el("button", { type: "button",
           onclick: () => compose(editorPanel(preview.text),
-            desire ? oppsPanel() : sidePanel()) },
+            // #66: edit-back of a PREVIEW draft — no step lines here either
+            // (the draft must not borrow the active goal's planner data).
+            desire ? oppsPanel(false) : sidePanel()) },
           "Изменить формулировку"),
         dropDraftBtn));
   }
@@ -3465,20 +3562,21 @@ function renderDesire(desire, opps, preview) {
       el("div", { class: "desire-actions" },
         el("button", { type: "button", id: "desire-replace",
           onclick: () => compose(editorPanel(desire.source_text),
-            oppsPanel()) },
+            oppsPanel(true)) },
           "Заменить цель"),
         dropBtn));
   }
 
   function composeHome() {
-    if (desire) compose(activePanel(), oppsPanel());
+    if (desire) compose(activePanel(), oppsPanel(true));
     else compose(editorPanel(""), sidePanel());
   }
 
   if (preview) {
     // #64 §4-5: the interpretation preview gates the mutation — the desire
-    // becomes active only through the confirm button.
-    compose(confirmPanel(preview), desire ? oppsPanel() : sidePanel());
+    // becomes active only through the confirm button. #66: NO step lines in
+    // the preview composition — the draft has no planner data of its own.
+    compose(confirmPanel(preview), desire ? oppsPanel(false) : sidePanel());
     return;
   }
   composeHome();
@@ -3794,6 +3892,7 @@ function renderProfile(modeSel) {
           S.authProbed = false;
           creatorResetDraft();  // W118-RV1 F1: logout clears the creator draft
           appearanceResetDraft();  // #65: logout clears the outfit prompt draft
+          desireResetDraft();  // #66: logout drops the pending interpret request
           location.hash = "#/login";
           route();
         } }, "Выйти")),
@@ -3809,6 +3908,7 @@ function renderProfile(modeSel) {
             S.user = null; S.character = null;
             creatorResetDraft();  // W118-RV1 F1: deletion clears the creator draft
             appearanceResetDraft();  // #65: deletion clears the outfit prompt draft
+            desireResetDraft();  // #66: deletion drops the pending interpret request
             // #138: no S.authProbed reset here (m132 pins exactly two reset
             // sites) — after deletion auth state is known-gone and the
             // cookie is cleared server-side; a re-probe would only 401.
