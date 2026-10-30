@@ -132,6 +132,9 @@ const routes = {
   // #75: the Career screen is a subordinate STATIC route too — no topbar
   // tab; it is reached from the profile's roles block link.
   "#/career": viewCareer,
+  // #76: the Events screen is a subordinate STATIC route — no topbar tab;
+  // world-scoped (highlights «Мир»), reached from the world feed link.
+  "#/events": viewEvents,
 };
 
 async function route() {
@@ -158,9 +161,10 @@ async function route() {
   if (!S.character && hash !== "#/profile") return viewCreateCharacter();
   // #72: dynamic subordinate route — strict numeric id, matched BEFORE the
   // static registry (the registry above now also carries #74's static
-  // "#/home" entry and #75's static "#/career" entry — 15 rows total; still
-  // no topbar tab for any of them: the Place screen highlights «Мир», the
-  // Home and Career screens «Профиль»).
+  // "#/home" entry, #75's static "#/career" entry and #76's static
+  // "#/events" entry — 16 rows total; still no topbar tab for any of
+  // them: the Place and Events screens highlight «Мир», the Home and
+  // Career screens «Профиль»).
   const placeMatch = hash.match(/^#\/location\/(\d+)$/);
   if (placeMatch) return viewLocation(Number(placeMatch[1]));
   (routes[hash] || viewWorld)();
@@ -1517,9 +1521,15 @@ function renderWorld(locs, tasksData) {
   });
   const mapReady = keyedPois.every(k => poiMap[k] && poiMap[k].x !== null);
 
-  const feed = el("div", { class: "panel feed world-events-card", id: "feed" },
+  const feedNode = el("div", { class: "panel feed world-events-card", id: "feed" },
     el("h2", {}, "События"),
     ...S.feed.slice(-40).reverse().map(feedRow));
+  // #76: the entry link to the Events screen lives OUTSIDE the #feed node —
+  // both updaters (REST fallback + WS) replaceChildren the whole #feed
+  // contents on every update, so a link inside would vanish on first
+  // arrival. The wrapper keeps the feed node itself byte-identical.
+  const feedBlock = el("div", {}, feedNode,
+    el("a", { href: "#/events" }, "События мира →"));
   const actions = [["WORK", "Пойти на работу"], ["EAT", "Поесть"], ["DRINK", "Попить"],
     ["SLEEP", "Отдохнуть / поспать"], ["SOCIALIZE", "Пообщаться"]].map(([a, label]) =>
     el("button", { onclick: () => doAction(a) }, label));
@@ -1592,7 +1602,7 @@ function renderWorld(locs, tasksData) {
           taskRows.slice(0, 3)),
         portraitBox,
         sceneBox,
-        feed)));
+        feedBlock)));
 }
 
 async function doAction(actionType, params = {}, after = viewWorld) {
@@ -1758,6 +1768,112 @@ const PLACE_TYPE_ICONS = {
 
 function placeTypeIcon(type) {
   return PLACE_TYPE_ICONS[type] || "◈";
+}
+
+/* ---------- #76: Events screen — bounded historical sample, honest states ---------- */
+
+// #76: stale-response guard for the Events screen (m238/#74/#75 pattern) —
+// a response is applied only when it is still the latest request, the
+// player is still on #/events with the same account/character, and the
+// host node is still mounted (A→B→A navigation drops every stale response;
+// #66 precedent).
+let eventsLoadSeq = 0;
+
+async function viewEvents() {
+  const viewHash = "#/events";
+  const loading = el("div", { class: "muted" }, "Загрузка…");
+  app.replaceChildren(topbar("#/world"), loading);
+  const seq = ++eventsLoadSeq;
+  // #76: a fresh ONE-SHOT fetch per visit/retry — no poller start, no WS
+  // calls, no shared-feed reuse, no cursor writes. The world screen keeps
+  // its own live feed; this screen is a bounded historical read.
+  let events = null;
+  try {
+    const data = await api("/world/events?since=0&limit=100");
+    // A malformed payload is a load failure, not an empty sample — it
+    // must never silently render as «Событий пока нет».
+    if (!Array.isArray(data)) throw new Error("Malformed events payload");
+    events = data;
+  } catch (e) {
+    // #93: transient failure — explicit retry instead of a dead «Загрузка…».
+    // Same stale guard as the apply path (session + host checks included).
+    if (seq !== eventsLoadSeq || location.hash !== viewHash
+      || !S.user || !S.character || !loading.isConnected) return;
+    loadRetryNode(loading, () => viewEvents());
+    toast(e.message, true);
+    return;
+  }
+  // #76 stale-response guard (m238/#74/#75 precedent): latest request +
+  // still on #/events + same session/character + host still mounted.
+  // Otherwise the response is dropped.
+  if (seq !== eventsLoadSeq || location.hash !== viewHash
+    || !S.user || !S.character || !loading.isConnected) return;
+  renderEvents(events);
+}
+
+function renderEvents(events) {
+  // #76 persistent disclosure: the read model is the FIRST 100 historical
+  // events (since=0, id-ascending) — never claimed to be a complete or
+  // live-updating feed. Always visible, including in the empty state.
+  const disclosure = el("div", { class: "muted" },
+    "События мира: до 100 записей с начала истории. Это не полная и не обновляемая автоматически лента.");
+
+  // Rows: raw facts only — formatted tick time (feedRow precedent), the
+  // raw event_type string, the raw actor id (or «вы» for the player's own
+  // actions; the line is omitted entirely when the event has no actor —
+  // never a fabricated person). Place: top-level numeric location_id,
+  // else a DIRECT numeric payload.location_id (POWER_OUTAGE carries one) —
+  // CHARACTER_MOVED's from/to fields are NOT parsed (no guessing, no
+  // string coercion): an unusable place is no place affordance.
+  const rows = events.map((ev) => {
+    const p = ev.payload;
+    const locId = (typeof ev.location_id === "number"
+        && Number.isSafeInteger(ev.location_id) && ev.location_id > 0)
+      ? ev.location_id
+      : (p && typeof p === "object" && !Array.isArray(p)
+        && typeof p.location_id === "number"
+        && Number.isSafeInteger(p.location_id) && p.location_id > 0
+        ? p.location_id : null);
+    return el("div", { class: "panel" },
+      el("div", {}, typeof ev.game_timestamp === "number"
+        ? dayTime(ev.game_timestamp) : "—"),
+      el("div", {}, ev.event_type || "—"),
+      ev.actor_id
+        ? el("div", { class: "muted" },
+            ev.actor_id === S.character.id ? "вы" : ev.actor_id)
+        : null,
+      locId != null
+        ? el("div", { class: "place-actions" },
+            mapLink(locId),
+            el("a", { href: `#/location/${locId}` }, "Место →"))
+        : null);
+  });
+
+  // #76 honest gaps: no invitations/RSVP/importance/lifecycle/notifications
+  // backend exists, and dialogue emits no WorldEvent. The mockup's category
+  // tabs, RSVP buttons, images/avatars and «Новое» badges are fake
+  // capability — NEEDS-BACKEND rows instead, nothing invented.
+  const backend = el("section", { class: "panel" },
+    el("div", { class: "muted" }, "Приглашения недоступны"),
+    el("div", { class: "muted" },
+      "Принятие, отклонение и перенос приглашений недоступны"),
+    el("div", { class: "muted" },
+      "Оценка важности и категории событий недоступны"),
+    el("div", { class: "muted" },
+      'Состояния событий «предстоящее», «активное», «истёкшее» недоступны'),
+    el("div", { class: "muted" }, "Персональные уведомления недоступны"),
+    el("div", { class: "muted" },
+      'Статусы прочтения и отметки «Новое» недоступны'));
+
+  app.replaceChildren(topbar("#/world"),
+    el("main", { class: "place-shell" },
+      el("section", { class: "panel" },
+        el("h2", {}, "События мира"),
+        disclosure,
+        events.length
+          ? el("div", {}, ...rows)
+          : el("div", { class: "muted" }, "Событий пока нет")),
+      backend));
 }
 
 /* ---------- #75: Career screen — job + roles, honest states ---------- */

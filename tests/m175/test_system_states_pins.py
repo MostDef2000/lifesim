@@ -76,14 +76,16 @@ def test_load_retry_sites_9_external_and_admin():
     # #74: viewHome joins → 13 sites (fetch-failure retry + the distinct
     # catalog-missing failure state).
     # #75: viewCareer joins → 14 sites (one shared retry for both fetches).
-    assert js.count("loadRetryNode(loading, () => view") == 14  # +1 (#65 viewAppearance)
+    # #76: viewEvents joins → 15 sites (one-shot fetch, one retry).
+    assert js.count("loadRetryNode(loading, () => view") == 15  # +1 (#65 viewAppearance)
     assert js.count("loadRetryNode(loading, () => viewExternal());") == 1
     assert js.count("loadRetryNode(loading, () => viewAdmin());") == 1
     # Both views keep a named loading node in scope for the retry rewrite;
     # 9 views carry the pattern (6 pre-#175 + 2 from #175 + profile from #67);
     # #65: viewAppearance joins → 11; #72: viewLocation joins → 12;
-    # #74: viewHome joins → 13; #75: viewCareer joins → 14.
-    assert js.count("const loading = el(\"div\", { class: \"muted\" }, \"Загрузка…\");") == 14
+    # #74: viewHome joins → 13; #75: viewCareer joins → 14;
+    # #76: viewEvents joins → 15.
+    assert js.count("const loading = el(\"div\", { class: \"muted\" }, \"Загрузка…\");") == 15
 
 
 # ---------- B: connection banner (poll failures are the liveness oracle) ----------
