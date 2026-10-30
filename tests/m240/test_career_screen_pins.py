@@ -91,9 +91,10 @@ def test_career_route_registry_pins():
     routes_def = js.index("const routes = {")
     routes_end = js.index("};", routes_def)
     assert routes_def < js.index('"#/career": viewCareer') < routes_end
-    # The registry comment records the honest row count (14→15 with #75)
-    # and keeps the #74 note intact.
-    assert js.count("15 rows total") == 1
+    # The registry comment records the honest row count (15→16 with #76)
+    # and keeps the #74/#75 notes intact; the stale counts are rejected.
+    assert js.count("16 rows total") == 1
+    assert js.count("15 rows total") == 0
     assert js.count("14 rows total") == 0
     # NO topbar tab: the tabs array never mentions the career route…
     assert js.count('["#/career"') == 0

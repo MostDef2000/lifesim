@@ -226,7 +226,8 @@ def test_regression_byte_pins_of_b3_survive():
     # #74: viewHome joins → 13 sites (fetch-failure retry + the distinct
     # catalog-missing failure state).
     # #75: viewCareer joins → 14 sites (one shared retry for both fetches).
-    assert JS.count("loadRetryNode(loading, () => view") == 14  # +1 (#65 viewAppearance)
+    # #76: viewEvents joins → 15 sites (one-shot fetch, one retry).
+    assert JS.count("loadRetryNode(loading, () => view") == 15  # +1 (#65 viewAppearance)
     # #170 F2: the desire interpret-preview failure path reuses the shared
     # hint constant (m158 keeps the const def + profile-save literal).
     # #72: +1 — the Place screen's events-failure line reuses the hint.

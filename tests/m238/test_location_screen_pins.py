@@ -197,7 +197,9 @@ def test_place_data_and_stale_guard_pins():
     idx_assign = vbody.index("S.world = world;")
     assert idx_fetch < idx_guard < idx_assign
     # Events: bounded sample fetch, client-filtered by location_id.
-    assert js.count('api("/world/events?since=0&limit=100")') == 1
+    # #76: 1→2 — the Events screen fetches the same bounded sample for
+    # itself (one request PER SCREEN; the place screen's filter is its own).
+    assert js.count('api("/world/events?since=0&limit=100")') == 2
     assert js.count("feed.filter((ev) => ev.location_id === locId)") == 1
     # Stale-response guards (#66 precedent): one module-level sequence for
     # the main load…
@@ -216,8 +218,9 @@ def test_place_data_and_stale_guard_pins():
     # #74: +2 — the Home screen's own guards (fetch-error + apply) use the
     # same shape against homeLoadSeq/viewHash; the place slices above are
     # untouched. #75: +2 — the Career screen's guards (fetch-error + apply)
-    # use the same shape against careerLoadSeq/viewHash.
-    assert js.count("location.hash !== viewHash") == 8
+    # use the same shape against careerLoadSeq/viewHash. #76: +2 — the
+    # Events screen's guards (fetch-error + apply) against eventsLoadSeq.
+    assert js.count("location.hash !== viewHash") == 10
     vbody = _view_location_body(js)
     rbody = _render_place_body(js)
     assert vbody.count("!S.user || !S.character") == 2

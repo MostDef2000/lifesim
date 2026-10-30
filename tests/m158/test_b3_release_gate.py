@@ -385,7 +385,8 @@ def test_ui_transient_failure_catch_pins():
     # catalog-missing failure state).
     # #75: viewCareer joins → 14 sites (ONE shared failure path for both
     # of its fetches — character payload + roles).
-    assert js.count("loadRetryNode(loading, () => view") == 14  # +1 (#65 viewAppearance)
+    # #76: viewEvents joins → 15 sites (one-shot fetch, one retry).
+    assert js.count("loadRetryNode(loading, () => view") == 15  # +1 (#65 viewAppearance)
     assert js.count('"Загрузка не удалась. " + RETRY_HINT') == 1
     assert js.count('el("button", { type: "button", onclick: retry }, "Повторить")') == 1
     # Scene act draft preservation (never uses the chat literals — m156 pins

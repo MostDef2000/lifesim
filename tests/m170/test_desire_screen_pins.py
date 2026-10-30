@@ -164,7 +164,9 @@ def test_desire_deep_link_and_wiring_pins():
     assert js.count("tasks-desire-link") == 1
     # Opportunity cards reuse the existing map focus mechanism — no new
     # "Показать на карте" literal (m157 pins it == 1 inside mapLink()).
-    assert js.count("mapLink(locId)") == 2  # def + desireOppCard call
+    # #76: +1 — the Events screen's place affordance reuses mapLink too
+    # (def + desireOppCard call + events row call = 3).
+    assert js.count("mapLink(locId)") == 3
 
 
 def test_desire_endpoint_use_pins():
