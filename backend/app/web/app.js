@@ -125,6 +125,10 @@ const routes = {
   "#/people": viewPeople,
   "#/inventory": viewInventory, "#/shop": viewShop, "#/tasks": viewTasks, "#/desire": viewDesire,
   "#/profile": viewProfile, "#/appearance": viewAppearance, "#/admin": viewAdmin, "#/external": viewExternal,
+  // #74: the Home screen is a subordinate STATIC route — no topbar tab
+  // (the tabs array stays as-is); it is reached from the profile's
+  // housing link and from the desire bridge.
+  "#/home": viewHome,
 };
 
 async function route() {
@@ -150,8 +154,9 @@ async function route() {
   // Every other hash short-circuits straight into the creator.
   if (!S.character && hash !== "#/profile") return viewCreateCharacter();
   // #72: dynamic subordinate route — strict numeric id, matched BEFORE the
-  // static registry (the 14-entry `routes` object above stays untouched;
-  // no new topbar tab — the Place screen highlights «Мир» as the active tab).
+  // static registry (the registry above now also carries #74's static
+  // "#/home" entry — 14 rows total; still no topbar tab for either: the
+  // Place screen highlights «Мир», the Home screen «Профиль»).
   const placeMatch = hash.match(/^#\/location\/(\d+)$/);
   if (placeMatch) return viewLocation(Number(placeMatch[1]));
   (routes[hash] || viewWorld)();
@@ -1586,17 +1591,28 @@ function renderWorld(locs, tasksData) {
         feed)));
 }
 
-async function doAction(actionType, params = {}) {
+async function doAction(actionType, params = {}, after = viewWorld) {
   try {
     await api("/actions", { method: "POST",
       body: { character_id: S.character.id, action_type: actionType, params } });
     toast(`Задача ${actionType} принята`);
-    viewWorld();
+    // #74: the success navigation is injectable — the Home screen's sleep
+    // passes a no-op stay (task acceptance is not a completed sleep; no
+    // yank to the world map, no fake refresh). Default keeps the historic
+    // behavior for every existing caller.
+    after();
   } catch (e) {
     // #144/§61: map the AUTONOMOUS refusal to the localized hint; every
     // other server error keeps its raw message (out of scope here).
+    // #74: ONE SLEEP-specific mapping (moveTo's needs_move precedent) —
+    // the validator rejects SLEEP at energy>=100 with the raw detail
+    // "Energy already full"; speak the honest note instead. Every other
+    // error keeps its existing behavior.
     if (isAutonomousRefusal(e)) {
       toast(AUTONOMOUS_HINT, true);
+    } else if (e.status === 422
+      && String(e.detail).includes("Energy already full")) {
+      toast("Энергия уже полная — сон сейчас не нужен", true);
     } else { toast(e.message, true); }
   }
 }
@@ -1738,6 +1754,140 @@ const PLACE_TYPE_ICONS = {
 
 function placeTypeIcon(type) {
   return PLACE_TYPE_ICONS[type] || "◈";
+}
+
+/* ---------- #74: Home screen — the player's housing, honest states ---------- */
+
+// #74: stale-response guard for the Home screen (m238 pattern) — a response
+// is applied only when it is still the latest request, the player is still
+// on #/home with the same account/character, and the host node is still
+// mounted (A→B→A navigation drops every stale response; #66 precedent).
+let homeLoadSeq = 0;
+
+async function viewHome() {
+  const viewHash = "#/home";
+  const loading = el("div", { class: "muted" }, "Загрузка…");
+  app.replaceChildren(topbar("#/profile"), loading);
+  const seq = ++homeLoadSeq;
+  // Missing hydration is NOT a null home: the owner payload is fetched
+  // fresh, and the home id is read from the FRESH character only — a stale
+  // S.character must never decide the no-home state.
+  let fresh = null;
+  let homeId = null;
+  let home = null;
+  try {
+    fresh = await api(`/characters/${S.character.id}`);
+    // ONE home read off the fresh payload; the /locations fetch resolves it
+    // from the world-scoped catalog (name/type — the same source the place
+    // screen reads; no /locations/{id} detail call). Skipped entirely when
+    // no home is set.
+    homeId = fresh.home_location_id;
+    if (homeId != null) {
+      const locs = await api("/locations");
+      home = locs.find((l) => l.id === homeId) || null;
+    }
+  } catch (e) {
+    // #93: transient failure — explicit retry instead of a dead «Загрузка…».
+    // Same stale guard as the apply path (session + host checks included).
+    if (seq !== homeLoadSeq || location.hash !== viewHash
+      || !S.user || !S.character || !loading.isConnected) return;
+    loadRetryNode(loading, () => viewHome());
+    toast(e.message, true);
+    return;
+  }
+  // #74 stale-response guard (m238/#66 precedent): latest request + still
+  // on #/home + same session/character + host still mounted. Otherwise the
+  // response is dropped.
+  if (seq !== homeLoadSeq || location.hash !== viewHash
+    || !S.user || !S.character || !loading.isConnected) return;
+  if (homeId == null) {
+    // #74 honest no-home state (#73 insufficient-funds bridge pattern):
+    // no home → formulate a goal. No Sleep / Open-place affordances —
+    // there is nothing to sleep in and nowhere to open.
+    app.replaceChildren(topbar("#/profile"),
+      el("main", { class: "place-shell" },
+        el("section", { class: "panel" },
+          el("h2", {}, "Жильё не назначено"),
+          el("p", { class: "muted" },
+            "У персонажа пока нет жилья — сформулируйте цель, чтобы его найти."),
+          el("a", { href: "#/desire" }, "Сформулировать цель →"))));
+    return;
+  }
+  if (!home) {
+    // #74: the home id is set but the catalog read does not carry it — a
+    // DISTINCT failure state with retry. An unavailable read is never
+    // rendered as a no-home state.
+    app.replaceChildren(topbar("#/profile"),
+      el("main", { class: "place-shell" },
+        el("section", { class: "panel" },
+          el("h2", {}, "Жильё недоступно"),
+          el("p", { class: "muted" },
+            `В каталоге мира нет жилья #${homeId}.`),
+          loading)));
+    loadRetryNode(loading, () => viewHome());
+    return;
+  }
+  renderHome(homeId, fresh, home);
+}
+
+function renderHome(homeId, fresh, home) {
+  // Hero-lite: real name/type from the catalog entry; the photo note is
+  // honest — no place-image endpoint exists, so no imagery is implied.
+  const hero = el("header", { class: "place-hero" },
+    el("span", { class: "place-hero-icon", "aria-hidden": "true" },
+      placeTypeIcon(home.type)),
+    el("div", { class: "place-hero-text" },
+      el("h2", {}, "Дом"),
+      el("div", { class: "muted" }, home.name || `#${home.id}`),
+      el("div", { class: "muted" }, home.type || ""),
+      el("div", { class: "muted place-hero-note" }, "Фото жилья недоступно")));
+
+  // Energy: the fresh owner payload's real needs.energy; missing stays
+  // unavailable — never zero (zero would read as "drained", a fact the
+  // payload does not carry). At 100 the validator would reject SLEEP, so
+  // the button is disabled and the state says why.
+  const energyVal = fresh.needs && Number.isFinite(Number(fresh.needs.energy))
+    ? Number(fresh.needs.energy) : null;
+  const energyFull = energyVal !== null && energyVal >= 100;
+  // Away from home: the SLEEP validator accepts the task and auto-redirects
+  // the character home — the note says so up front instead of pretending
+  // the sleep happens in place.
+  const away = fresh.location_id !== homeId;
+
+  // Sleep goes through the EXISTING doAction (POST /actions): the no-op
+  // stay is deliberate — task acceptance is not a completed sleep, so the
+  // screen neither navigates away nor fakes an energy refresh.
+  const actions = el("div", { class: "place-actions" },
+    el("button", { type: "button",
+        ...(energyFull ? { disabled: "" } : {}),
+        onclick: () => doAction("SLEEP", {}, () => {}) }, "Поспать"),
+    el("a", { href: `#/location/${homeId}` }, "Открыть место"));
+
+  const energy = el("section", { class: "panel" },
+    el("div", { class: "muted" },
+      energyVal === null ? "Энергия недоступна"
+        : `Энергия: ${Math.round(energyVal)}`),
+    energyFull ? el("div", { class: "muted" },
+      "Энергия уже полная — сон сейчас не нужен") : null,
+    away ? el("div", { class: "muted" },
+      "Персонаж сначала отправится домой") : null);
+
+  // #74 honest gaps: the sim has no housing read model — conditions,
+  // amenities, rooms, upgrades and housing offers are NEEDS-BACKEND and
+  // stay honestly unavailable (nothing is invented).
+  const backend = el("section", { class: "panel" },
+    el("div", { class: "muted" }, "Условия проживания недоступны"),
+    el("div", { class: "muted" },
+      "Данные об удобстве, оснащении и хранении недоступны"),
+    el("div", { class: "muted" }, "Данные о комнатах недоступны"),
+    el("div", { class: "muted" }, "Улучшения жилья пока недоступны"),
+    el("div", { class: "muted" }, "Предложения нового жилья недоступны"));
+
+  app.replaceChildren(topbar("#/profile"),
+    el("main", { class: "place-shell" },
+      hero, actions, energy, backend,
+      el("div", { class: "panel" },
+        el("a", { href: "#/desire" }, "Цель →"))));
 }
 
 async function viewLocation(locId) {
@@ -4070,7 +4220,10 @@ function renderProfile(modeSel) {
       el("h2", {}, "Текущая ситуация"),
       el("div", { class: "profile-rows" },
         el("div", { class: "profile-row" },
-          el("span", { class: "profile-row-k" }, "Локация"), locValue),
+          el("span", { class: "profile-row-k" }, "Локация"), locValue,
+          // #74: standing link to the Home screen (no topbar tab — the
+          // screen is reached from here and from the desire bridge).
+          el("a", { href: "#/home", class: "muted" }, "Моё жильё →")),
         el("div", { class: "profile-row" },
           el("span", { class: "profile-row-k" }, "Работа"), jobValue),
         el("div", { class: "profile-row" },

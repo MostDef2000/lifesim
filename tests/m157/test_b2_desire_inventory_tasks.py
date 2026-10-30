@@ -676,8 +676,11 @@ def test_ui_legacy_pins_intact():
     assert js.count("/travel/plan") == 1
     assert js.count("S.authProbed = false") == 2
     assert js.count("S.authProbed = true") == 1
-    assert js.count("home_location_id") == 0
-    assert js.count("Дом") == 0
+    # #74: +1 each — the Home screen reads home_location_id (outside the
+    # map, per the m149 revision) and its h2 is «Дом»; deliberate
+    # screen-only exception, the map layer stays anchor-free.
+    assert js.count("home_location_id") == 1
+    assert js.count("Дом") == 1
     assert js.count('"Сделать"') == 1
     assert js.count('api("/scene/act"') == 1
     # m150: appended CSS rules must not disturb the pinned media blocks.

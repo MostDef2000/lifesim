@@ -12,12 +12,10 @@ this lane only appends.
   same 8px ``.anchor .dot`` visual, no button, no tabindex, no
   onpointerdown reveal, no ::before hit target, no MOVE wiring. Night
   lights + NPC clusters keep consuming the same visibleLocs set.
-- NO interactive own-house anchor: the client cannot know the player's
-  home id — ``Character.home_location_id`` exists (db/models.py) but is not
-  exposed by any client payload (/characters/by-user, /characters/{cid},
-  /auth/me, /world, /locations, POST /characters). Backend is out of scope
-  for this lane, so path (b) applies: all 24 houses are spans and home
-  MOVE from the map is dropped (alternative: profile screen / future pill).
+- NO interactive own-house anchor ON THE MAP (#74 revision of the stale
+  path-(b) rationale below: the owner payload DOES expose
+  ``Character.home_location_id`` — the #74 Home screen consumes it outside
+  the map; the map-layer prohibition stands and is pinned directly).
 - Lane A must not regress: ``onpointerdown: markTouchedAnchor`` stays
   count==1, the touched classList pins stay, and the 24px ::before hit
   target stays for POI anchors (now without the 24-house overlap — the
@@ -85,11 +83,24 @@ def test_lane_b_house_span_pins():
 
 
 def test_lane_b_no_own_house_button():
-    """Path (b): the client never learns home_location_id — no «Дом» anchor."""
+    """No interactive own-house anchor ON THE MAP (#74 revision).
+
+    The original path-(b) rationale — «the client never learns
+    home_location_id» — is STALE: the owner payload exposes the field
+    (GET /characters/{cid}), and #74's Home screen consumes it OUTSIDE the
+    map (subordinate static route #/home). The MAP-layer prohibition
+    itself stands unchanged — houses stay ambient spans, and no home
+    anchor/button exists in the map code — so the boundary is pinned
+    directly below (span variant count, zero map-side home wiring) rather
+    than via payload ignorance.
+    """
     js = _read(APP_JS)
-    # No backend field leaks into the client and no own-house button exists.
-    assert js.count("home_location_id") == 0
-    assert js.count("Дом") == 0  # no «Дом» label — path (b) fallback
+    # #74: the Home screen reads the field ONCE, outside the map layer;
+    # the map still has no access to it and no own-house button.
+    assert js.count("home_location_id") == 1
+    # #74: the only «Дом» literal is the Home screen's h2 heading — no
+    # map anchor carries it.
+    assert js.count("Дом") == 1
     assert js.count("anchor--house") == 1  # spans only; no button variant
 
 
