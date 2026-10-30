@@ -381,7 +381,9 @@ def test_ui_transient_failure_catch_pins():
     # #175: viewExternal + viewAdmin replace their toast-only catches → 8
     # (#67: viewProfile adds its own retry via route()).
     # #72: viewLocation joins the #93 retry pattern → 11 sites.
-    assert js.count("loadRetryNode(loading, () => view") == 11  # +1 (#65 viewAppearance)
+    # #74: viewHome joins → 13 sites (fetch-failure retry + the distinct
+    # catalog-missing failure state).
+    assert js.count("loadRetryNode(loading, () => view") == 13  # +1 (#65 viewAppearance)
     assert js.count('"Загрузка не удалась. " + RETRY_HINT') == 1
     assert js.count('el("button", { type: "button", onclick: retry }, "Повторить")') == 1
     # Scene act draft preservation (never uses the chat literals — m156 pins

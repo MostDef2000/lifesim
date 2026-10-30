@@ -156,7 +156,9 @@ def test_desire_deep_link_and_wiring_pins():
     # +1 (#65): the appearance prompt zone adds a link-over entry.
     # +2 (#73): the shop screen joins the wiring — a standing «Цель →» head
     # link and the insufficient-funds «Поставить цель →» inline bridge.
-    assert js.count('href: "#/desire"') == 6
+    # +2 (#74): the Home screen joins — a standing «Цель →» link and the
+    # no-home «Сформулировать цель →» bridge.
+    assert js.count('href: "#/desire"') == 8
     # The standing Дела link renders only when a desire exists (ternary).
     assert js.count("tasks-desire-link") == 1
     # Opportunity cards reuse the existing map focus mechanism — no new

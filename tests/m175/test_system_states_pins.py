@@ -73,13 +73,16 @@ def test_load_retry_sites_9_external_and_admin():
     # replaced their toast-only catches — a transient fetch failure now
     # explains itself and offers «Повторить» instead of a dead «Загрузка…».
     # #72: viewLocation joins the same pattern → 11 sites.
-    assert js.count("loadRetryNode(loading, () => view") == 11  # +1 (#65 viewAppearance)
+    # #74: viewHome joins → 13 sites (fetch-failure retry + the distinct
+    # catalog-missing failure state).
+    assert js.count("loadRetryNode(loading, () => view") == 13  # +1 (#65 viewAppearance)
     assert js.count("loadRetryNode(loading, () => viewExternal());") == 1
     assert js.count("loadRetryNode(loading, () => viewAdmin());") == 1
     # Both views keep a named loading node in scope for the retry rewrite;
     # 9 views carry the pattern (6 pre-#175 + 2 from #175 + profile from #67);
-    # #65: viewAppearance joins → 11; #72: viewLocation joins → 12.
-    assert js.count("const loading = el(\"div\", { class: \"muted\" }, \"Загрузка…\");") == 12
+    # #65: viewAppearance joins → 11; #72: viewLocation joins → 12;
+    # #74: viewHome joins → 13.
+    assert js.count("const loading = el(\"div\", { class: \"muted\" }, \"Загрузка…\");") == 13
 
 
 # ---------- B: connection banner (poll failures are the liveness oracle) ----------

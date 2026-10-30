@@ -193,9 +193,10 @@ def test_shop_desire_bridge_pins():
     assert js.count('"Поставить цель →"') == 1
     # File-wide #/desire hash links: 4 pre-existing (Дела empty state, Дела
     # standing link, profile hook, appearance prompt zone) + 2 new shop
-    # sites (standing head link + insufficient-funds bridge) = 6 — same
-    # total the m170 wiring pin now records.
-    assert js.count('href: "#/desire"') == 6
+    # sites (standing head link + insufficient-funds bridge) + 2 Home
+    # sites (#74: standing «Цель →» + no-home «Сформулировать цель →»
+    # bridge) = 8 — same total the m170 wiring pin now records.
+    assert js.count('href: "#/desire"') == 8
     # The generic error path is preserved for every other code: the plain
     # status assignment stays at 3 sites (cancel + buy-else + sell), and
     # the mapped toast at 3 (cancel + buy + sell).
