@@ -133,7 +133,10 @@ def test_carry_forward_pins():
     # m156: profile roles hook (NOT the chat line — different string).
     assert js.count('"Роли: " + (rolesText || "нет")') == 1
     assert js.count("profile-roles") == 1
-    assert js.count('api(`/characters/${S.character.id}/roles`)') == 1
+    # #75: 1→2 — the Career screen fetches roles for itself; one request
+    # PER SCREEN (the profile card still reuses its single fetch, never
+    # re-fetches for its summary/chip/list).
+    assert js.count('api(`/characters/${S.character.id}/roles`)') == 2
     # m156: suggested replies remain fill-never-send shortcuts.
     assert js.count("if (inp) { inp.value = s; inp.focus(); }") == 1
     assert js.count("input.value = s; send();") == 0

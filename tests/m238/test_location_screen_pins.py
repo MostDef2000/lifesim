@@ -215,8 +215,9 @@ def test_place_data_and_stale_guard_pins():
     assert js.count("(eseq !== placeEventsSeq") == 2
     # #74: +2 — the Home screen's own guards (fetch-error + apply) use the
     # same shape against homeLoadSeq/viewHash; the place slices above are
-    # untouched.
-    assert js.count("location.hash !== viewHash") == 6
+    # untouched. #75: +2 — the Career screen's guards (fetch-error + apply)
+    # use the same shape against careerLoadSeq/viewHash.
+    assert js.count("location.hash !== viewHash") == 8
     vbody = _view_location_body(js)
     rbody = _render_place_body(js)
     assert vbody.count("!S.user || !S.character") == 2

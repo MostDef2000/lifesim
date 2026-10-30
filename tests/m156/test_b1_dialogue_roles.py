@@ -602,7 +602,11 @@ def test_ui_error_keeps_draft_and_shows_retry_fallback():
 def test_ui_profile_roles_hook():
     js = _read(APP_JS)
     assert js.count("profile-roles") == 1
-    assert js.count('api(`/characters/${S.character.id}/roles`)') == 1
+    # #75: 1→2 — the roles fetch is no longer profile-exclusive: the Career
+    # screen fetches its own. One request PER SCREEN — the profile card
+    # still reuses this single fetch for its summary line, partner chip and
+    # detail list (never re-fetches).
+    assert js.count('api(`/characters/${S.character.id}/roles`)') == 2
     assert js.count('"Роли: " + (rolesText || "нет")') == 1
 
 
