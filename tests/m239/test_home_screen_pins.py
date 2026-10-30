@@ -167,8 +167,10 @@ def test_home_desire_bridge_pins():
     # formulate a goal), once.
     assert body.count(
         'el("a", { href: "#/desire" }, "Сформулировать цель →")') == 1
-    # File-wide #/desire hash links: 6 pre-existing + 2 from #74 = 8.
-    assert js.count('href: "#/desire"') == 8
+    # File-wide #/desire hash links: 6 pre-existing + 2 from #74 = 8;
+    # #75 adds the Career screen's standing «Цель →» bridge → 9. The
+    # home-body pins above are body-scoped and stay at 1 each.
+    assert js.count('href: "#/desire"') == 9
 
 
 # ---------- h: data contract + stale guards ----------

@@ -129,6 +129,9 @@ const routes = {
   // (the tabs array stays as-is); it is reached from the profile's
   // housing link and from the desire bridge.
   "#/home": viewHome,
+  // #75: the Career screen is a subordinate STATIC route too — no topbar
+  // tab; it is reached from the profile's roles block link.
+  "#/career": viewCareer,
 };
 
 async function route() {
@@ -155,8 +158,9 @@ async function route() {
   if (!S.character && hash !== "#/profile") return viewCreateCharacter();
   // #72: dynamic subordinate route — strict numeric id, matched BEFORE the
   // static registry (the registry above now also carries #74's static
-  // "#/home" entry — 14 rows total; still no topbar tab for either: the
-  // Place screen highlights «Мир», the Home screen «Профиль»).
+  // "#/home" entry and #75's static "#/career" entry — 15 rows total; still
+  // no topbar tab for any of them: the Place screen highlights «Мир», the
+  // Home and Career screens «Профиль»).
   const placeMatch = hash.match(/^#\/location\/(\d+)$/);
   if (placeMatch) return viewLocation(Number(placeMatch[1]));
   (routes[hash] || viewWorld)();
@@ -1754,6 +1758,102 @@ const PLACE_TYPE_ICONS = {
 
 function placeTypeIcon(type) {
   return PLACE_TYPE_ICONS[type] || "◈";
+}
+
+/* ---------- #75: Career screen — job + roles, honest states ---------- */
+
+// #75: stale-response guard for the Career screen (m238/#74 pattern) — a
+// response is applied only when it is still the latest request, the player
+// is still on #/career with the same account/character, and the host node
+// is still mounted (A→B→A navigation drops every stale response; #66
+// precedent).
+let careerLoadSeq = 0;
+
+async function viewCareer() {
+  const viewHash = "#/career";
+  const loading = el("div", { class: "muted" }, "Загрузка…");
+  app.replaceChildren(topbar("#/profile"), loading);
+  const seq = ++careerLoadSeq;
+  // Missing hydration is NOT no-job/no-roles: both reads are fetched fresh —
+  // the owner payload carries ch.job, the roles endpoint derives on read.
+  // ONE shared failure path: either fetch failing (or a malformed roles
+  // payload) is a load failure with retry — never a no-job/no-roles state.
+  let fresh = null;
+  let roles = null;
+  try {
+    fresh = await api(`/characters/${S.character.id}`);
+    const data = await api(`/characters/${S.character.id}/roles`);
+    // #75: a malformed roles payload is a load failure, not an empty
+    // roster — it must never silently render as «Ролей нет».
+    if (!data || !Array.isArray(data.roles)) {
+      throw new Error("Malformed roles payload");
+    }
+    roles = data.roles;
+  } catch (e) {
+    // #93: transient failure — explicit retry instead of a dead «Загрузка…».
+    // Same stale guard as the apply path (session + host checks included).
+    if (seq !== careerLoadSeq || location.hash !== viewHash
+      || !S.user || !S.character || !loading.isConnected) return;
+    loadRetryNode(loading, () => viewCareer());
+    toast(e.message, true);
+    return;
+  }
+  // #75 stale-response guard (m238/#74 precedent): latest request + still
+  // on #/career + same session/character + host still mounted. Otherwise
+  // the response is dropped.
+  if (seq !== careerLoadSeq || location.hash !== viewHash
+    || !S.user || !S.character || !loading.isConnected) return;
+  renderCareer(fresh, roles);
+}
+
+function renderCareer(fresh, roles) {
+  // Job: the fresh owner payload's ch.job is the only work fact the client
+  // has. WORK rides the EXISTING doAction (POST /actions) with a no-op
+  // stay: task acceptance is not a completed shift — no navigation, no
+  // fake refresh. No away-note: the client does not know the workplace id —
+  // the validator auto-redirects the character transparently (needs_move).
+  const job = fresh.job;
+  const jobPanel = el("section", { class: "panel" },
+    el("h2", {}, job ? `Работа: ${job}` : "Работа не назначена"),
+    job ? el("div", { class: "place-actions" },
+      el("button", { type: "button",
+        onclick: () => doAction("WORK", {}, () => {}) }, "Работать")) : null);
+
+  // Roles: title + source + reason — the reason is WHY the role is derived
+  // (the honest world-behavior link), never a progress meter. The payload
+  // is {id,title,source,reason} and nothing more.
+  const rolesBlock = roles.length
+    ? el("div", { class: "profile-rolelist" },
+        ...roles.map((r) => el("div", { class: "profile-role" },
+          el("span", { class: "profile-role-title" }, r.title || r.id || "—"),
+          r.source ? el("span", { class: "muted" }, r.source) : null,
+          r.reason ? el("span", { class: "muted profile-role-reason" },
+            r.reason) : null)))
+    : el("div", { class: "muted" }, "Ролей нет");
+
+  // #75 honest gaps: the sim has no career read model — the roles payload
+  // carries no level/progress/requirements/benefits, and no career ladder,
+  // rewards or role-development states exist anywhere. The mockup's XP/
+  // levels/benefits/rewards and its aspirational role catalog are fake
+  // capability — NEEDS-BACKEND rows instead, nothing invented.
+  const backend = el("section", { class: "panel" },
+    el("div", { class: "muted" }, "Уровень и прогресс недоступны"),
+    el("div", { class: "muted" }, "Требования для развития ролей недоступны"),
+    el("div", { class: "muted" }, "Преимущества ролей недоступны"),
+    el("div", { class: "muted" }, "Карьерные возможности и награды недоступны"),
+    el("div", { class: "muted" }, "Состояния развития ролей недоступны"));
+
+  app.replaceChildren(topbar("#/profile"),
+    el("main", { class: "place-shell" },
+      el("section", { class: "panel" },
+        el("h2", {}, "Развитие"),
+        jobPanel,
+        el("h3", {}, "Роли"),
+        rolesBlock),
+      backend,
+      el("div", { class: "panel" },
+        el("a", { href: "#/desire" }, "Цель →"),
+        el("a", { href: "#/tasks" }, "Дела →"))));
 }
 
 /* ---------- #74: Home screen — the player's housing, honest states ---------- */
@@ -4176,7 +4276,11 @@ function renderProfile(modeSel) {
       partnerValue.textContent = "недоступно";
       rolesList.replaceChildren(el("span", { class: "muted" }, "недоступно"));
     });
-    return el("div", {}, rolesLine, rolesList);
+    return el("div", {}, rolesLine, rolesList,
+      // #75: standing link to the Career screen (no topbar tab — the
+      // screen is reached from here; the profile keeps its ONE roles
+      // fetch — the career screen fetches its own).
+      el("a", { href: "#/career", class: "muted" }, "Развитие →"));
   })();
 
   // «Основное» — label+bar+value rows in the existing .need markup style;
