@@ -222,7 +222,9 @@ def test_events_hash_guard_total_pin():
     js = _read(APP_JS)
     # 8 pre-#76 (place ×2 + home ×2 + career ×2 + … the m238 total) + 2
     # events guards (fetch-error + apply) = 10 (m238 records the same).
-    assert js.count("location.hash !== viewHash") == 10
+    # #77: +2 — the external-trip screen's guards (fetch-error + apply)
+    # against externalLoadSeq join the same house shape → 12 file-wide.
+    assert js.count("location.hash !== viewHash") == 12
 
 
 # ---------- i: placement ----------
