@@ -220,7 +220,10 @@ def test_place_data_and_stale_guard_pins():
     # untouched. #75: +2 — the Career screen's guards (fetch-error + apply)
     # use the same shape against careerLoadSeq/viewHash. #76: +2 — the
     # Events screen's guards (fetch-error + apply) against eventsLoadSeq.
-    assert js.count("location.hash !== viewHash") == 10
+    # #77: +2 — the external-trip screen's guards (fetch-error + apply)
+    # against externalLoadSeq (the redesigned #/external keeps the house
+    # stale-guard shape).
+    assert js.count("location.hash !== viewHash") == 12
     vbody = _view_location_body(js)
     rbody = _render_place_body(js)
     assert vbody.count("!S.user || !S.character") == 2

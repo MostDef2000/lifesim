@@ -2301,51 +2301,219 @@ function renderPlace(locId, place, locs) {
 }
 
 async function viewExternal() {
-  const oldHash = location.hash;
-  location.hash = "#/external";
+  // #77 entry normalization: exactly ONE hash assignment (m175 pin) — a
+  // world-button click fires hashchange → route() → viewExternal again with
+  // the hash already current, so the catalog fetch happens exactly once
+  // (the old code assigned the hash AND fetched, double-fetching on every
+  // button entry). Direct hash entry (reload on #/external) loads at once.
+  if (location.hash !== "#/external") { location.hash = "#/external"; return; }
+  const viewHash = "#/external";
   const loading = el("div", { class: "muted" }, "Загрузка…");
   app.replaceChildren(topbar("#/world"), loading);
+  const seq = ++externalLoadSeq;
+  let catalog = null;
   try {
-    const catalog = await api("/external");
-    const services = [];
-    for (const loc of catalog) {
-      for (const svc of loc.services || []) {
-        services.push({
-          id: svc.id,
-          label: `${loc.name || `#${loc.id}`} — ${svc.service_type}` +
-            (svc.item_type ? ` (${svc.item_type})` : ""),
-          type: svc.service_type,
-        });
-      }
+    const data = await api("/external");
+    // #77 defensive: a non-array catalog or a venue without a services
+    // array is a load failure with retry — never a silent empty screen.
+    if (!Array.isArray(data)
+      || data.some((loc) => !loc || !Array.isArray(loc.services))) {
+      throw new Error("Malformed external catalog");
     }
-    const svcSel = el("select", {},
-      ...services.map((s) => el("option", { value: s.id }, s.label)));
-    const purpose = el("select", {},
-      el("option", { value: "heal" }, "лечение"),
-      el("option", { value: "shop" }, "покупки"),
-      el("option", { value: "visit" }, "визит"));
-    const items = el("input", { placeholder: '{"food_groceries": 2} — для покупок' });
-    const err = el("div", { class: "err-text" });
-    app.replaceChildren(topbar("#/world"),
-      el("div", { class: "panel", style: "max-width:520px" },
+    catalog = data;
+  } catch (e) {
+    // #175/#93: transient failure — explicit retry instead of a dead «Загрузка…».
+    // Same stale guard as the apply path (session + host checks included).
+    if (seq !== externalLoadSeq || location.hash !== viewHash
+      || !S.user || !S.character || !loading.isConnected) return;
+    loadRetryNode(loading, () => viewExternal());
+    toast(e.message, true);
+    return;
+  }
+  // #77 stale-response guard (m238/#74/#75/#76 precedent): latest request +
+  // still on #/external + same session/character + host still mounted.
+  // Otherwise the response is dropped.
+  if (seq !== externalLoadSeq || location.hash !== viewHash
+    || !S.user || !S.character || !loading.isConnected) return;
+  renderExternal(catalog);
+}
+
+// #77: stale-response guard for the external-trip screen (m238/#74/#75/#76
+// pattern). Declared AFTER the viewExternal definition ON PURPOSE: m238's
+// renderPlace body slice runs to `async function viewExternal(` — anything
+// between renderPlace and viewExternal would enter that pinned slice (the
+// top-level declaration executes before any call, so TDZ is not a concern).
+let externalLoadSeq = 0;
+
+function renderExternal(catalog) {
+  // Flattened service options (label format unchanged): item_type and
+  // service_type ride along for the structured quantity control.
+  const services = [];
+  for (const loc of catalog) {
+    for (const svc of loc.services) {
+      services.push({
+        id: svc.id,
+        label: `${loc.name || `#${loc.id}`} — ${svc.service_type}` +
+          (svc.item_type ? ` (${svc.item_type})` : ""),
+        type: svc.service_type,
+        itemType: svc.item_type || null,
+      });
+    }
+  }
+  const svcSel = el("select", {},
+    ...services.map((s) => el("option", { value: s.id }, s.label)));
+  const purpose = el("select", {},
+    el("option", { value: "heal" }, "лечение"),
+    el("option", { value: "shop" }, "покупки"),
+    el("option", { value: "visit" }, "визит"));
+
+  const qtyLabel = el("span", {});
+  const qtyInput = el("input", { type: "number", min: "1", max: "10",
+    step: "1", value: "1" });
+  const qtyRow = el("label", {}, qtyLabel, qtyInput);
+  const err = el("div", { class: "err-text" });
+
+  function selectedSvc() {
+    return services.find((s) => String(s.id) === String(svcSel.value)) || null;
+  }
+
+  // Selector sync: reset the quantity to 1 on every service change, show
+  // the quantity row only for a purchase service with a usable item_type,
+  // and disable submit for a purchase service WITHOUT one (the backend
+  // would reject the basket — the screen says so instead of pretending).
+  // The button is looked up by id: the change event only fires after the
+  // screen is mounted.
+  // #77 (validator F1): in-flight latch — syncQtyRow re-enables the submit
+  // button on every selector change, so the disabled attribute alone is
+  // bypassable mid-POST (select another service → submit re-enabled →
+  // second POST; the backend does NOT reject concurrent trips). The latch
+  // is respected by BOTH the handler and the selector sync.
+  let submitting = false;
+
+  function syncQtyRow() {
+    const svc = selectedSvc();
+    const usable = !!svc && svc.type === "purchase" && !!svc.itemType;
+    const broken = !!svc && svc.type === "purchase" && !svc.itemType;
+    // style.display, not the hidden attribute: the author rule
+    // `label { display: block }` (style.css) outranks the UA
+    // `[hidden] { display: none }`, so the attribute would not hide it.
+    qtyRow.style.display = usable ? "" : "none";
+    if (usable) qtyLabel.textContent = `Количество (${svc.itemType})`;
+    qtyInput.value = "1";
+    const btn = document.getElementById("external-submit");
+    if (btn) btn.disabled = submitting || broken || services.length === 0;
+    err.textContent = broken ? "Конфигурация покупки недоступна" : "";
+  }
+  svcSel.addEventListener("change", syncQtyRow);
+
+  // #77 framing + honesty lines (always visible): the destination is OFF
+  // the island map — no map-focus affordance and no place links (external
+  // venues carry no island coordinates); the trip is an AUTOMATIC ROUND-TRIP
+  // (one completion handler logs departed + returned); total cost and
+  // duration are config values the catalog contract does not expose.
+  const framing = el("div", { class: "muted" },
+    "Внешняя локация — вне карты острова. Проезд через порт острова.");
+  const returnNote = el("div", { class: "muted" },
+    "Возврат автоматический — задача поездки завершается возвращением на Рейнеке.");
+  const totalsNote = el("div", { class: "muted" },
+    "Полная стоимость и длительность поездки здесь недоступны.");
+
+  // EVERY returned venue renders (never a hard-coded set): real fields
+  // only — raw ext_type, description or the honest unavailable note, and
+  // per-service raw types with price/duration; the heal note ONLY when
+  // heal_amount is a number (treatment).
+  const venueBlocks = catalog.map((loc) =>
+    el("div", { class: "panel" },
+      el("h3", {}, loc.name || `#${loc.id}`),
+      el("div", { class: "muted" }, loc.ext_type || "—"),
+      loc.description
+        ? el("div", { class: "muted" }, loc.description)
+        : el("div", { class: "muted" }, "Описание места недоступно"),
+      ...loc.services.map((svc) => {
+        const parts = [
+          `${svc.service_type}${svc.item_type ? ` (${svc.item_type})` : ""}`,
+          `Цена услуги: ${svc.price} ₽`,
+          `Длительность услуги: ${svc.duration_minutes} мин`];
+        if (typeof svc.heal_amount === "number") {
+          parts.push(`Восстановление здоровья: до ${svc.heal_amount}`);
+        }
+        return el("div", { class: "muted" }, parts.join(" — "));
+      })));
+
+  // #77 honest gaps: no city-level description, no city places beyond the
+  // catalog, no player-chosen return, no service-availability states. The
+  // mockup's tabs, venue-category strip, decorative imagery and Plan-Trip
+  // composer are fake capability — NEEDS-BACKEND rows, nothing invented.
+  const backend = el("section", { class: "panel" },
+    el("div", { class: "muted" }, "Общее описание города недоступно"),
+    el("div", { class: "muted" }, "Связь поездки со свободными запросами недоступна"),
+    el("div", { class: "muted" }, "Пребывание и перемещения по городу недоступны"),
+    el("div", { class: "muted" }, "Возвращение по выбору игрока недоступно"),
+    el("div", { class: "muted" }, "Данные о временной недоступности услуг недоступны"),
+    el("div", { class: "muted" },
+      "Места вне каталога, включая рестораны, ночные заведения и достопримечательности, недоступны"));
+
+  app.replaceChildren(topbar("#/world"),
+    el("main", { class: "place-shell" },
+      el("section", { class: "panel" },
         el("h2", {}, "Поездка во Владивосток"),
+        framing),
+      el("section", { class: "panel" },
+        el("h3", {}, "Места и услуги"),
+        catalog.length
+          ? el("div", {}, ...venueBlocks)
+          : el("div", { class: "muted" }, "Места и услуги не найдены")),
+      el("section", { class: "panel" },
+        el("h3", {}, "Поездка"),
         el("label", {}, "Сервис"), svcSel,
         el("label", {}, "Цель"), purpose,
-        el("label", {}, "Корзина (JSON, только для покупок)"), items,
+        qtyRow,
         err,
-        el("div", { style: "margin-top:10px; display:flex; gap:6px" },
-          el("button", { class: "primary", onclick: async () => {
-            let parsed = {};
-            try {
-              if (items.value.trim()) parsed = JSON.parse(items.value);
-            } catch (e) { err.textContent = "Корзина: невалидный JSON"; return; }
+        el("div", { class: "place-actions" },
+          el("button", { id: "external-submit", class: "primary",
+            onclick: async (ev) => {
+            const btn = ev.currentTarget;
+            // #77 (validator F1): check-and-set latch — a second click
+            // during the in-flight POST is a no-op.
+            if (submitting) return;
+            const svc = selectedSvc();
+            let items = {};
+            if (svc && svc.type === "purchase") {
+              if (!svc.itemType) return;  // submit is disabled for broken services
+              const qty = Number(qtyInput.value);
+              // #77: explicit integer 1–10 validation — a non-integer or
+              // out-of-range value is rejected with an honest error, NEVER
+              // silently clamped.
+              if (!Number.isSafeInteger(qty) || qty < 1 || qty > 10) {
+                err.textContent = "Количество: целое число от 1 до 10";
+                return;
+              }
+              items = { [svc.itemType]: qty };
+            }
+            submitting = true;
+            btn.disabled = true;
+            const submittedHash = location.hash;
+            const submittedCharId = S.character ? S.character.id : null;
+            // #77 (validator F2): the ORIGINATING screen's root node —
+            // hash+character alone cannot distinguish external → away →
+            // external during a pending POST (the stale response would
+            // match and yank the freshly opened screen); connectivity of
+            // the originating render closes that hole.
+            const screenNode = ev.currentTarget.closest("main");
             try {
               await api("/actions", { method: "POST", body: {
                 character_id: S.character.id, action_type: "TRAVEL_EXTERNAL",
                 params: { service_id: Number(svcSel.value),
-                  purpose: purpose.value, items: parsed } } });
+                  purpose: purpose.value, items } } });
               toast("Поездка запланирована (транзит через порт)");
-              gotoWorld();  // #161: single dispatch — no direct viewWorld() next to the hash assignment
+              // #77: no yank after navigation away — the task exists
+              // server-side either way; only a still-current screen
+              // navigates to the world.
+              if (location.hash === submittedHash
+                && S.character && S.character.id === submittedCharId
+                && screenNode.isConnected) {
+                gotoWorld();  // #161: single dispatch — no direct viewWorld() next to the hash assignment
+              }
             } catch (e) {
               // #144/§61: same stale-state class as moveTo — localize.
               err.textContent = isAutonomousRefusal(e)
@@ -2355,17 +2523,17 @@ async function viewExternal() {
               if (String(e.detail).includes("port"))
                 toast("Сначала дойдите до порта", true);
             }
-          } }, "Отправиться"),
-          // #161: single dispatch — when the hash is already oldHash the
-          // assignment would fire no hashchange, so render directly; otherwise
-          // just set it and let the queued hashchange route once.
-          el("button", { onclick: () => { if (location.hash === oldHash) viewWorld(); else location.hash = oldHash; } },
-            "Назад"))));
-  } catch (e) {
-    // #175/#93: transient failure — explicit retry instead of a dead «Загрузка…».
-    loadRetryNode(loading, () => viewExternal());
-    toast(e.message, true);
-  }
+            submitting = false;
+            btn.disabled = false;
+          } }, "Отправиться")),
+        returnNote,
+        totalsNote),
+      backend,
+      el("div", { class: "panel" },
+        el("a", { href: "#/world" }, "К острову →"))));
+  // Initial selector sync runs AFTER mounting (the submit button lookup
+  // needs the live DOM); change events only fire post-mount anyway.
+  syncQtyRow();
 }
 
 /* ---------- event feed (§79 WS + polling fallback) ---------- */
