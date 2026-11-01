@@ -2126,6 +2126,53 @@ button.danger:hover { background: #93301f; }
   .creator-shell .creator-hero { padding: 16px; }
 }
 
+/* ---------- #78: guided creator flow ----------
+   Numbered section guide in the hero, two-column preview layout, honest
+   empty state. Every new selector stays shell-scoped; no new tokens (the
+   --w-line count stays 4). Hidden-state rules exist because an author
+   `display` rule outranks the UA [hidden] style (#77 lesson):
+   .preview-image { display: block } would otherwise keep a hidden image
+   laid out. The columns wrapper owns the section spacing (the shell grid
+   gap only separates its DIRECT children: hero / columns / confirm). */
+.creator-shell .creator-guide { margin-top: 12px; }
+.creator-shell .creator-guide-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 8px;
+}
+.creator-shell .creator-guide-link {
+  padding: 3px 10px;
+  border: 1px solid var(--w-line);
+  border-radius: 999px;
+  background: var(--w-panel-deep);
+  color: var(--w-dim);
+  font-size: 12px;
+}
+.creator-shell .creator-guide-link:hover { color: var(--w-text); }
+.creator-shell .creator-columns {
+  display: grid;
+  gap: 14px;
+  grid-template-columns: minmax(0, 1fr);
+  align-items: start;
+}
+.creator-shell .creator-form { display: grid; gap: 14px; }
+/* hidden actually hides (author display beats the UA [hidden] style) */
+.creator-shell .preview-image[hidden] { display: none; }
+.creator-shell .creator-preview-empty[hidden] { display: none; }
+/* two columns + sticky preview ONLY on sufficiently wide AND tall
+   screens; narrower or shorter keeps the normal stacked flow (the preview
+   renders in its DOM position, after «Одежда») */
+@media (min-width: 1100px) and (min-height: 720px) {
+  .creator-shell .creator-columns {
+    grid-template-columns: minmax(0, 1fr) 280px;
+  }
+  .creator-shell .creator-preview {
+    position: sticky;
+    top: 12px;
+  }
+}
+
 /* 020 P3 stage 2: reference consumption row in the portrait block —
    compact picker + style + nude toggle + upload, tokens only (same
    no-new-literals discipline as .people-shell/.desire-shell blocks). */

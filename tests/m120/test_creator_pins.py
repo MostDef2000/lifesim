@@ -9,7 +9,10 @@ m170 house style (exact literal counts — update deliberately, never
 weaken). Frontend-only wave: no runner, no jsdom — the source text IS the
 observable artifact.
 
-- Route + structure: "#/create" registered, the four panels + confirm,
+- Route + structure: "#/create" registered, the guided single-page flow
+  (#78): a numbered section guide in the hero, the sections in order
+  кто вы / образ / биография / одежда / предпросмотр (the preview panel
+  a prominent right column beside them on wide screens), confirm last;
   the 12 structured appearance fields (CREATOR_FIELDS verbatim), the
   free-text maxlengths (looks ≤500, biography ≤2000).
 - P2 persistence contract (evolved from P1's UI-only shape, plan.md:26):
@@ -28,7 +31,7 @@ observable artifact.
   joiners ", " / ". "; the biography textarea has exactly TWO writers
   (seed + rebuildDraft) — assembly is explicit-action only.
 - Hash landmines (m128/m162 shared pins): #/profile stays 3, #/world
-  stays 4, gotoWorld stays 4; the route() guard line is byte-identical;
+  stays 4, gotoWorld stays 5; the route() guard line is byte-identical;
   the creator normalizes its own hash to #/create and redirects a
   with-character visitor to #/profile.
 - CSS: .creator-shell block exists, EVERY .creator-* selector is shell-
