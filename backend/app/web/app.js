@@ -460,6 +460,13 @@ function viewCreateCharacter() {
   // first (the descriptor plumbing for it is kept pinned in tests/m236).
   const previewStatus = el("p", { class: "muted creator-note", hidden: true });
   const previewErr = el("p", { class: "err-text" });
+  // #78: honest empty state — visible until the first SUCCESSFUL
+  // generation hides it; a failed regeneration keeps the last good image
+  // and the placeholder stays hidden (previewOk semantics). Toggling it
+  // is a local preview-node update (W2): the form is never touched.
+  const previewPlaceholder = el("p",
+    { class: "muted creator-note creator-preview-empty" },
+    "Предпросмотр пока не создан. Нажмите «Создать предпросмотр», чтобы увидеть образ.");
   const previewImg = el("img", {
     class: "preview-image", alt: "Предпросмотр персонажа", hidden: true });
   let previewBusy = false;
@@ -483,6 +490,7 @@ function viewCreateCharacter() {
       } });
       previewImg.src = `data:image/png;base64,${r.image_base64}`;
       previewImg.hidden = false;
+      previewPlaceholder.hidden = true;
       previewStatus.hidden = true;
       previewOk = true;
     } catch (e) {
@@ -570,49 +578,108 @@ function viewCreateCharacter() {
     },
   }, "Появиться на острове");
 
+  // #78: the five guided sections as named nodes — the section guide
+  // scrolls+focuses them, the composition orders them. tabindex="-1"
+  // makes each a programmatic focus target (not a tab stop). DOM order IS
+  // the guided order: кто вы → образ → биография → одежда → предпросмотр;
+  // the confirm section stays a separate full-width node below.
+  const secWho = el("section", { class: "panel", tabindex: "-1" },
+    el("h2", {}, "Кто вы"),
+    el("label", {}, "Имя"), name,
+    el("label", {}, "Пол"), sex,
+    el("label", {}, "Возраст"), age);
+  const secLook = el("section", { class: "panel", tabindex: "-1" },
+    el("h2", {}, "Образ"),
+    appearanceGrid,
+    el("label", {}, "Внешность"), looks,
+    el("p", { class: "muted creator-note" },
+      "Свободное описание — основное; отдельные поля подсказывают детали. Предпросмотр собирается по текущим полям формы по запросу — правки в саму форму не вносятся и не сбрасываются."),
+    el("p", { class: "muted creator-note" },
+      "Поля внешности сохраняются при создании; редактирование этих полей после создания пока недоступно. Режим одежды можно изменить позже."));
+  const secBio = el("section", { class: "panel", tabindex: "-1" },
+    el("h2", {}, "Биография"),
+    el("p", { class: "muted creator-note" },
+      "Биография — стартовый контекст, а не жёсткая судьба. Происхождение, занятия, характер и мечты здесь описываются словами: они не выбирают игровые характеристики или профессию."),
+    el("p", { class: "muted creator-note" },
+      "Клик по ингредиенту добавит его в черновик. Можно писать что угодно своими словами — ваша правка не сотрётся, пока вы сами не нажмёте сборку."),
+    el("p", { class: "muted creator-note" },
+      "Нажатие на тег или «Собрать черновик» пересобирает текст биографии. После этого его можно отредактировать."),
+    tagCloud,
+    el("div", { class: "creator-bio-actions" },
+      el("button", { type: "button", onclick: rebuildDraft }, "Собрать черновик")),
+    el("label", {}, "Биография"), biography,
+    el("p", { class: "muted creator-note" },
+      "Биография видна миру и помогает острову понять, кто вы."));
+  const secOutfit = el("section", { class: "panel", tabindex: "-1" },
+    el("h2", {}, "Одежда"),
+    el("label", {}, "Одежда"), outfit,
+    el("p", { class: "muted creator-note" },
+      "Как персонаж одевается по умолчанию: auto — как сегодня, остальные режимы добавляют одежду в портрет. nude — только для 18+. Изменить можно позже в профиле."));
+  const secPreview = el("section", { class: "panel creator-preview", tabindex: "-1" },
+    el("h2", {}, "Предпросмотр"),
+    el("p", { class: "muted creator-note" },
+      "Как персонаж будет выглядеть. Собирается по текущим полям формы — правки в саму форму не вносятся и не сбрасываются."),
+    el("p", { class: "muted creator-note" },
+      "Это предпросмотр, а не сохранённый портрет. После изменения полей создайте его заново. Можно появиться на острове без предпросмотра."),
+    el("label", {}, "Ракурс"), previewMode,
+    el("div", { class: "creator-actions" }, previewBtn, previewRegenBtn),
+    previewPlaceholder, previewStatus, previewImg, previewErr);
+
+  // #78: numbered section guide — a compact map of the single-page flow,
+  // pinned inside the hero. Each entry scrolls its section into view and
+  // focuses it. Deliberate NON-features (#78 decisions): no hash
+  // assignment (the m120/m162 hash counts stay put), no re-render, no
+  // validation, no draft writes, no completion state, no Next/Back, no
+  // percentages — a stateful wizard over a single page would be fake
+  // structure, and step-completion markers would be fake progress.
+  const guideEntry = (section, label) => el("button", {
+    type: "button", class: "creator-guide-link",
+    onclick: () => {
+      section.scrollIntoView({ behavior: "smooth", block: "start" });
+      section.focus({ preventScroll: true });
+    },
+  }, label);
+  const sectionGuide = el("div", { class: "creator-guide" },
+    el("div", { class: "muted creator-eyebrow" }, "Разделы создания персонажа"),
+    el("div", { class: "creator-guide-row" },
+      guideEntry(secWho, "1. Кто вы"),
+      guideEntry(secLook, "2. Образ"),
+      guideEntry(secBio, "3. Биография"),
+      guideEntry(secOutfit, "4. Одежда"),
+      guideEntry(secPreview, "5. Предпросмотр")));
+
+  // #78: guided composition — hero (with the section guide), then
+  // .creator-columns: the editing sections in one column, the preview
+  // panel as a narrow right column on wide+tall screens (CSS media query;
+  // narrow/short screens keep the normal stacked flow). The preview panel
+  // is a single node — never duplicated. Confirm stays full-width below.
+  // The honest NEEDS-BACKEND rows and the post-creation disclosure sit at
+  // the decision point, above the confirm button.
   app.replaceChildren(el("main", { class: "creator-shell" },
     el("section", { class: "panel creator-hero" },
       el("div", { class: "muted creator-eyebrow" }, "ВЛ1: Рейнеке"),
       el("h1", {}, "Новый житель Рейнеке"),
       el("p", { class: "creator-intro" },
-        "Соберите образ и биографию до появления на острове. Всё, кроме имени, необязательно — свободный текст главный.")),
-    el("div", { class: "creator-form" },
-      el("section", { class: "panel" },
-        el("h2", {}, "Кто вы"),
-        el("label", {}, "Имя"), name,
-        el("label", {}, "Пол"), sex,
-        el("label", {}, "Возраст"), age),
-      el("section", { class: "panel" },
-        el("h2", {}, "Образ"),
-        appearanceGrid,
-        el("label", {}, "Внешность"), looks,
-        el("p", { class: "muted creator-note" },
-          "Свободное описание — основное; отдельные поля подсказывают детали. Живой предпросмотр — в панели «Предпросмотр» ниже.")),
-      el("section", { class: "panel" },
-        el("h2", {}, "Одежда"),
-        el("label", {}, "Одежда"), outfit,
-        el("p", { class: "muted creator-note" },
-          "Как персонаж одевается по умолчанию: auto — как сегодня, остальные режимы добавляют одежду в портрет. nude — только для 18+. Изменить можно позже в профиле.")),
-      el("section", { class: "panel creator-preview" },
-        el("h2", {}, "Предпросмотр"),
-        el("p", { class: "muted creator-note" },
-          "Как персонаж будет выглядеть. Собирается по текущим полям формы — правки в саму форму не вносятся и не сбрасываются."),
-        el("label", {}, "Ракурс"), previewMode,
-        el("div", { class: "creator-actions" }, previewBtn, previewRegenBtn),
-        previewStatus, previewImg, previewErr),
-      el("section", { class: "panel" },
-        el("h2", {}, "Биография"),
-        el("p", { class: "muted creator-note" },
-          "Клик по ингредиенту добавит его в черновик. Можно писать что угодно своими словами — ваша правка не сотрётся, пока вы сами не нажмёте сборку."),
-        tagCloud,
-        el("div", { class: "creator-bio-actions" },
-          el("button", { type: "button", onclick: rebuildDraft }, "Собрать черновик")),
-        el("label", {}, "Биография"), biography,
-        el("p", { class: "muted creator-note" },
-          "Биография видна миру и помогает острову понять, кто вы.")),
-      el("section", { class: "panel creator-confirm" },
-        err,
-        el("div", { class: "creator-actions" }, confirmBtn)))));
+        "Соберите образ и биографию до появления на острове. Всё, кроме имени, необязательно — свободный текст главный."),
+      sectionGuide),
+    el("div", { class: "creator-columns" },
+      el("div", { class: "creator-form" },
+        secWho,
+        secLook,
+        secBio,
+        secOutfit),
+      secPreview),
+    el("section", { class: "panel creator-confirm" },
+      el("p", { class: "muted creator-note" },
+        "Структурированный выбор происхождения недоступен."),
+      el("p", { class: "muted creator-note" },
+        "Выбор игровых черт личности недоступен."),
+      el("p", { class: "muted creator-note" },
+        "Персональная сцена прибытия по вашей биографии недоступна."),
+      el("p", { class: "muted creator-note" },
+        "После создания откроется «Мир» — карта острова и первые дела. При первом посещении этого браузера кошка-консьержка может показать подсказки."),
+      err,
+      el("div", { class: "creator-actions" }, confirmBtn))));
 }
 
 /* ---------- portrait + scene (014, M6 visual pipeline) ---------- */
