@@ -144,6 +144,26 @@ _PROFILE_STYLE_HIGH_FRAGMENTS = (
     ("risk_tolerance", "bold, adventurous styling"),
 )
 
+# #119 wave 3 (scene location grounding): deterministic environmental anchor
+# per COMMITTED location type (config/default.yaml §world.locations). The
+# anchor rides the scene prompt directly after the "<type> <name>" head so
+# the render anchors to the actual environment instead of the bare type
+# word. Keys are the nine committed types ONLY — unknown types (hand-made
+# descriptors, legacy rows, e.g. the m6 "port" fixture) keep the EXACT
+# legacy prompt bytes; no aliasing ("port" is not "pier"). Scene branch
+# only: portraits and preview modes never see it.
+_SCENE_LOCATION_ANCHORS = {
+    "island": "outdoor island landscape, rocky coastline and surrounding sea",
+    "settlement": "outdoor coastal village, wooden houses along village paths",
+    "house": "wooden house interior, domestic living space",
+    "shop": "small general store interior, shelves and a shop counter",
+    "workshop": "workshop interior, workbenches and hand tools",
+    "storage": "storage building interior, shelves and stacked crates",
+    "well": "outdoor village water well, stone well rim and bucket",
+    "pier": "outdoor wooden pier over sea water, mooring posts and open shoreline",
+    "kitchen": "communal kitchen interior, cooking stove and preparation tables",
+}
+
 # 020 P2: canonical structured-appearance key set (the 12 creator fields,
 # stored on CharacterAppearance.appearance). The same set is validated for
 # POST /characters (CharacterIn) and POST /visual/preview (PreviewIn) —
@@ -822,13 +842,20 @@ def build_prompt(descriptor: dict, visual_config_weather: str = "clear") -> str:
         f"characters: {[c['name'] for c in descriptor['characters']]}",
         f"objects: {[o['type'] for o in descriptor['objects']]}",
     ]
+    # #119 wave 3: the environmental anchor joins IMMEDIATELY AFTER the
+    # "<type> <name>" head for recognized location types; unknown types
+    # keep the exact legacy bytes (no aliasing — m6 "port" pin).
+    anchor = _SCENE_LOCATION_ANCHORS.get(loc["type"])
+    if anchor is not None:
+        parts.insert(1, anchor)
     # W2 scene grounding: committed worn outfits ride the prompt so the
     # render shows what people actually wear (the same committed state the
     # portrait path serializes). The protagonist's fragment joins the raw
     # player-part object names (pre-A4 pinned shape); NPC entries carry
     # phrase-form worn lists ("wearing_phrases"). Fragments fire ONLY when
-    # something is worn — scenes without worn items keep byte-identical
-    # prompts (m119/m154 pins).
+    # something is worn — scenes without worn items keep prompts
+    # byte-identical to the #119 location-grounded baseline (the m119
+    # pins are relative to that baseline since #119 wave 3).
     player = descriptor.get("player")
     if player and player.get("worn"):
         parts.append(f"the protagonist wears: {', '.join(player['worn'])}")
