@@ -131,10 +131,14 @@ def test_creator_section_guide_pins():
                   'guideEntry(secOutfit, "4. Одежда")',
                   'guideEntry(secPreview, "5. Предпросмотр")'):
         assert view.count(entry) == 1, entry
-    # Navigation mechanics: smooth scroll + focus (preventScroll — the
-    # scroll already positioned the section).
+    # Navigation mechanics: scroll + focus (preventScroll — the scroll
+    # already positioned the section). #79 intent update: the scroll is no
+    # longer unconditionally smooth — it honours the effective-motion policy
+    # (OS prefers-reduced-motion OR the user's settings toggle): "auto" when
+    # reduced, "smooth" otherwise.
     assert view.count(
-        'section.scrollIntoView({ behavior: "smooth", block: "start" });') == 1
+        'section.scrollIntoView({ behavior: S.mapReducedMotion '
+        '? "auto" : "smooth", block: "start" });') == 1
     assert view.count("section.focus({ preventScroll: true });") == 1
     # The guide block (guideEntry + sectionGuide) is navigation ONLY:
     # no hash assignment, no re-render, no validation, no draft writes.

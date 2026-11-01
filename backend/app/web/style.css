@@ -764,6 +764,18 @@ body.landing-mode #app {
   }
 }
 
+/* #79: the settings toggle's class hook — same freeze as the OS media
+   query, for users who reduce motion in settings without an OS-level
+   preference. The map freeze is NOT duplicated here: .map-card.reduced-
+   motion (same effective flag) already covers the map surfaces. */
+.settings-reduced-motion .landing-shell *,
+.settings-reduced-motion .landing-shell *::before,
+.settings-reduced-motion .landing-shell *::after {
+  scroll-behavior: auto !important;
+  transition: none !important;
+  animation: none !important;
+}
+
 
 /* ---------- A2 Living Map: LOD, authoritative dynamic layer, weather ---------- */
 .living-map { display: flex; flex-direction: column; gap: 7px; }
@@ -1610,6 +1622,9 @@ button.danger:hover { background: #93301f; }
   .typing-dots i { animation: none; opacity: 1; }
 }
 
+/* #79: settings-toggle mirror of the typing-dots freeze. */
+.settings-reduced-motion .typing-dots i { animation: none; opacity: 1; }
+
 /* #63: inline error row in the chatlog (reuses the warm --warn signal;
    the toast and the assistive status line stay). */
 .chat-error {
@@ -2435,6 +2450,161 @@ button.danger:hover { background: #93301f; }
 
 /* «О месте» link-over beside the current-location summary on #/world. */
 .location-view .place-link { font-size: 13px; }
+
+/* ---------- #79: Settings screen (#/settings) — inserted BEFORE the #175
+   conn-banner tail block (the m175 append-only tail pin keeps the banner
+   the last rule). Warm family screen like the other outside-the-shell
+   screens, same token-mirror precedent as .creator-shell/.place-shell:
+   the warm --w-* tokens are mirrored LOCALLY and NO --w-line definition
+   is added here — the pinned token count stays 4 and the :root fallback
+   (#172) carries the identical value. Single stacked column (hero →
+   Графика → Интерфейс → Специальные возможности → Звук → Сохранение);
+   deliberately NO nav-rail — the mockup's rail hides the sections behind
+   clicks, and every section must stay visible on one page. Every new
+   selector is scoped under .settings-shell; no settings element ever
+   toggles [hidden], so no [hidden] display override is needed (the #77
+   lesson is respected vacuously — an author display rule would need a
+   hidden state to beat). */
+.settings-shell {
+  --w-bg: #0a1016;
+  --w-panel: rgba(23, 33, 42, 0.72);
+  --w-panel-deep: rgba(12, 19, 25, 0.6);
+  --w-text: #dde5ec;
+  --w-dim: #8fa1b1;
+  --w-accent: #e2b45a;
+  --w-warm: rgba(226, 180, 90, 0.15);
+  --w-warm-line: rgba(226, 180, 90, 0.4);
+  --w-warm-ink: #1d1506;
+  display: grid;
+  gap: 14px;
+  align-content: start;
+  max-width: 860px;
+  margin: 0 auto;
+}
+.settings-shell .panel {
+  background: var(--w-panel);
+  border-color: var(--w-line);
+  border-radius: 14px;
+  backdrop-filter: blur(10px);
+  box-shadow: 0 12px 30px rgba(2, 8, 14, 0.35);
+}
+/* the shell stacks panels by grid gap — the flat sibling margin would
+   double the spacing (creator-shell precedent) */
+.settings-shell .panel + .panel { margin-top: 0; }
+.settings-shell .muted { color: var(--w-dim); }
+.settings-shell h1 { color: var(--w-text); }
+.settings-shell h2 { color: var(--w-dim); }
+.settings-shell button:hover { border-color: var(--w-accent); }
+.settings-shell input[type="range"] {
+  width: 100%;
+  max-width: 320px;
+  accent-color: var(--w-accent);
+}
+.settings-shell input[type="radio"] { accent-color: var(--w-accent); }
+/* #79: width:auto + margin:0 — the global `input { width: 100% }` rule
+   otherwise stretches the checkbox across the flex toggle row (the map
+   toggle solves the identical problem the same way, .map-reduced-toggle
+   input). The range slider keeps width:100% deliberately (full-width
+   slider in its field grid); the preset radios are unaffected
+   (their grid option layout sizes them natively). */
+.settings-shell input[type="checkbox"] { accent-color: var(--w-accent); width: auto; margin: 0; }
+
+/* hero: warm gradient band over the shell (creator-hero mirror) */
+.settings-shell .settings-hero {
+  padding: 22px 24px;
+  background:
+    radial-gradient(640px 240px at 18% 0%, rgba(226, 180, 90, 0.10), transparent 62%),
+    linear-gradient(180deg, rgba(23, 33, 42, 0.55), var(--w-panel-deep));
+}
+.settings-shell .settings-eyebrow {
+  font-size: 11px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+.settings-shell .settings-intro { margin: 6px 0 0; max-width: 60ch; }
+
+/* numbered section guide (creator-guide mirror) */
+.settings-shell .settings-guide { margin-top: 12px; }
+.settings-shell .settings-guide-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 8px;
+}
+.settings-shell .settings-guide-link {
+  padding: 3px 10px;
+  border: 1px solid var(--w-line);
+  border-radius: 999px;
+  background: var(--w-panel-deep);
+  color: var(--w-dim);
+  font-size: 12px;
+}
+.settings-shell .settings-guide-link:hover { color: var(--w-text); }
+
+/* preset radios: fieldset reset + stacked options with consequence lines */
+.settings-shell .settings-preset-group { border: 0; margin: 0 0 8px; padding: 0; }
+.settings-shell .settings-preset-group legend {
+  padding: 0;
+  margin-bottom: 6px;
+  color: var(--w-text);
+}
+.settings-shell .settings-preset-option {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 2px 8px;
+  align-items: baseline;
+  padding: 6px 8px;
+  border: 1px solid var(--w-line);
+  border-radius: 10px;
+  background: var(--w-panel-deep);
+  margin-bottom: 6px;
+}
+.settings-shell .settings-preset-name {
+  color: var(--w-text);
+  font-weight: 600;
+}
+.settings-shell .settings-preset-mark {
+  margin-left: 6px;
+  padding: 1px 8px;
+  border: 1px solid var(--w-warm-line);
+  border-radius: 999px;
+  background: var(--w-warm);
+  color: var(--w-text);
+  font-size: 11px;
+  font-weight: 400;
+}
+.settings-shell .settings-preset-note { grid-column: 2; font-size: 12px; }
+
+.settings-shell .settings-note { margin: 8px 0 0; font-size: 12px; }
+.settings-shell .settings-honest {
+  display: grid;
+  gap: 2px;
+  margin-top: 10px;
+  padding-top: 8px;
+  border-top: 1px solid var(--w-line);
+}
+.settings-shell .settings-field {
+  display: grid;
+  gap: 6px;
+  margin: 8px 0 0;
+  color: var(--w-text);
+}
+.settings-shell .settings-toggle {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  color: var(--w-text);
+}
+.settings-shell .settings-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-top: 10px;
+}
+
+@media (max-width: 640px) {
+  .settings-shell .settings-hero { padding: 16px; }
+}
 
 /* #175: connection banner — persistent offline signal driven by consecutive
    pollEvents failures (WS close is routine on navigation, never drives it).

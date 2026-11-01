@@ -223,7 +223,9 @@ def test_place_data_and_stale_guard_pins():
     # #77: +2 — the external-trip screen's guards (fetch-error + apply)
     # against externalLoadSeq (the redesigned #/external keeps the house
     # stale-guard shape).
-    assert js.count("location.hash !== viewHash") == 12
+    # #79: +1 — the settings screen's sync stale-guard (viewSettings) joins
+    # the same house shape → 13 file-wide.
+    assert js.count("location.hash !== viewHash") == 13
     vbody = _view_location_body(js)
     rbody = _render_place_body(js)
     assert vbody.count("!S.user || !S.character") == 2
