@@ -7,7 +7,11 @@ const toastEl = document.getElementById("toast");
 const S = { user: null, character: null, world: null, ws: null, wsTries: 0,
   feed: [], cursor: 0, pollTimer: null, canonicalPortraitId: null, authProbed: false, visualDisabled: false,
   connLost: false, pollFails: 0,  // #175: poll-failure liveness banner (WS close is routine — never drives this)
-  mapLod: "island", mapQuality: "balanced",
+  mapLod: "island", mapQuality: "balanced",  // #79: pre-settings default — loadSettings() applies the stored preset BEFORE the first render
+  // #79: the GLOBAL EFFECTIVE-motion flag (legacy name kept — every scroll
+  // ternary and the map ambient read it): OS prefers-reduced-motion OR the
+  // user's settings toggle. Never a second motion state; recomputed by
+  // setReducedMotionPref() and the matchMedia change listener at boot.
   mapReducedMotion: window.matchMedia("(prefers-reduced-motion: reduce)").matches,
   mapFocusLocationId: null, mapLocations: [], travel: null, scene: null, sceneAct: null,
   sceneActDraft: null, pollBusy: false,
@@ -135,6 +139,10 @@ const routes = {
   // #76: the Events screen is a subordinate STATIC route — no topbar tab;
   // world-scoped (highlights «Мир»), reached from the world feed link.
   "#/events": viewEvents,
+  // #79: the Settings screen is a subordinate STATIC route — no topbar
+  // tab; it is reached from the profile's settings link and highlights
+  // «Профиль» (its parent surface).
+  "#/settings": viewSettings,
 };
 
 async function route() {
@@ -161,10 +169,10 @@ async function route() {
   if (!S.character && hash !== "#/profile") return viewCreateCharacter();
   // #72: dynamic subordinate route — strict numeric id, matched BEFORE the
   // static registry (the registry above now also carries #74's static
-  // "#/home" entry, #75's static "#/career" entry and #76's static
-  // "#/events" entry — 16 rows total; still no topbar tab for any of
-  // them: the Place and Events screens highlight «Мир», the Home and
-  // Career screens «Профиль»).
+  // "#/home" entry, #75's static "#/career" entry, #76's static
+  // "#/events" entry and #79's static "#/settings" entry — 17 rows total;
+  // still no topbar tab for any of them: the Place and Events screens
+  // highlight «Мир», the Home, Career and Settings screens «Профиль»).
   const placeMatch = hash.match(/^#\/location\/(\d+)$/);
   if (placeMatch) return viewLocation(Number(placeMatch[1]));
   (routes[hash] || viewWorld)();
@@ -635,7 +643,8 @@ function viewCreateCharacter() {
   const guideEntry = (section, label) => el("button", {
     type: "button", class: "creator-guide-link",
     onclick: () => {
-      section.scrollIntoView({ behavior: "smooth", block: "start" });
+      // #79: the scroll joins the effective-motion policy (OS OR user pref).
+      section.scrollIntoView({ behavior: S.mapReducedMotion ? "auto" : "smooth", block: "start" });
       section.focus({ preventScroll: true });
     },
   }, label);
@@ -1560,12 +1569,19 @@ function setMapLod(lod) {
 function setMapQuality(quality) {
   if (!["high", "balanced", "low-mobile"].includes(quality)) return;
   S.mapQuality = quality;
+  // #79: ONE preset source of truth — the map toolbar's quality buttons and
+  // the settings screen's preset control both land here; the choice
+  // persists (and the preset NEVER touches the motion toggle — independent
+  // controls).
+  S.settings.preset = quality;
+  persistSettings();
   rerenderLivingMap();
 }
 
 function setMapReducedMotion(enabled) {
-  S.mapReducedMotion = !!enabled;
-  rerenderLivingMap();
+  // #79: routed through the shared pref setter — the settings screen's
+  // toggle uses the same path (one motion state, no second one).
+  setReducedMotionPref(enabled);
 }
 
 function renderWorld(locs, tasksData) {
@@ -4502,6 +4518,257 @@ function profileDesireBlock(extraDesireNode) {
     status);
 }
 
+/* ---------- #79: Settings screen (#/settings) — graphics / interface /
+   accessibility, honest rows ---------- */
+
+/* #79: the canonical USER settings object. The OS media-query sample is
+   NEVER stored here — it is read live by osReducedMotion(); the stored
+   reducedMotion is the user's override only. Loaded once at boot
+   (loadSettings), persisted best-effort on every change (persistSettings). */
+const SETTINGS_DEFAULTS = { preset: "balanced", reducedMotion: false, uiScale: 100 };
+
+function osReducedMotion() {
+  return window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+}
+
+function loadSettings() {
+  // Defensive read (welcome-card pattern): try/catch around getItem AND
+  // around the JSON decode; every field validated against its enum/range —
+  // any violation falls back to THAT field's default. Storage-denied →
+  // defaults + sessionOnly (nothing persists this session).
+  S.settings = { ...SETTINGS_DEFAULTS, sessionOnly: false };
+  let raw = null;
+  try { raw = window.localStorage.getItem("vl1.settings.v1"); }
+  catch (e) { S.settings.sessionOnly = true; return; }
+  if (raw === null) return;  // first visit — defaults, storage works
+  let data = null;
+  try { data = JSON.parse(raw); } catch (e) { data = null; }
+  if (!data || typeof data !== "object" || Array.isArray(data)) return;
+  if (["high", "balanced", "low-mobile"].includes(data.preset)) {
+    S.settings.preset = data.preset;
+  }
+  if (typeof data.reducedMotion === "boolean") {
+    S.settings.reducedMotion = data.reducedMotion;
+  }
+  if (typeof data.uiScale === "number" && Number.isInteger(data.uiScale)
+    && data.uiScale >= 80 && data.uiScale <= 120 && data.uiScale % 10 === 0) {
+    S.settings.uiScale = data.uiScale;
+  }
+}
+
+function persistSettings() {
+  // Best-effort write on EVERY change; a denied write flips sessionOnly so
+  // the Сохранение section can say so honestly.
+  if (S.settings.sessionOnly) return;
+  try {
+    window.localStorage.setItem("vl1.settings.v1", JSON.stringify({
+      preset: S.settings.preset,
+      reducedMotion: S.settings.reducedMotion,
+      uiScale: S.settings.uiScale,
+    }));
+  } catch (e) { S.settings.sessionOnly = true; }
+}
+
+function applyReducedMotionClass() {
+  // The documentElement class is the single CSS hook for reduced motion.
+  document.documentElement.classList.toggle("settings-reduced-motion",
+    S.mapReducedMotion);
+}
+
+function applyUiScale() {
+  // zoom on the root element; 100 means no inline style at all.
+  if (S.settings.uiScale === 100) {
+    document.documentElement.style.removeProperty("zoom");
+  } else {
+    document.documentElement.style.zoom = String(S.settings.uiScale / 100);
+  }
+}
+
+function applyStoredSettings() {
+  // Runs ONCE at boot, BEFORE the first render: the stored preset replaces
+  // the hardcoded mapQuality default, the effective-motion class lands on
+  // documentElement, the UI-scale zoom applies.
+  S.mapQuality = S.settings.preset;
+  S.mapReducedMotion = osReducedMotion() || S.settings.reducedMotion;
+  applyReducedMotionClass();
+  applyUiScale();
+}
+
+function setReducedMotionPref(enabled) {
+  // The SINGLE motion path — the map toolbar toggle and the settings
+  // screen's toggle both land here. Sets the USER pref, recomputes the
+  // EFFECTIVE flag (OS OR user), re-applies the class, persists, rerenders.
+  // The OS sample itself is never persisted.
+  S.settings.reducedMotion = !!enabled;
+  S.mapReducedMotion = osReducedMotion() || !!enabled;
+  applyReducedMotionClass();
+  persistSettings();
+  rerenderLivingMap();
+}
+
+function setUiScale(pct) {
+  // 80–120%, step 10 — anything else is ignored, never clamped.
+  if (typeof pct !== "number" || !Number.isInteger(pct)
+    || pct < 80 || pct > 120 || pct % 10 !== 0) return;
+  S.settings.uiScale = pct;
+  applyUiScale();
+  persistSettings();
+}
+
+function resetSettings() {
+  // Back to the defaults a first visit would compute; re-applies everything
+  // and rerenders the open surfaces. sessionOnly survives (the storage
+  // capability did not change).
+  S.settings = { ...SETTINGS_DEFAULTS, sessionOnly: S.settings.sessionOnly };
+  applyStoredSettings();
+  persistSettings();
+  rerenderLivingMap();
+  if (location.hash === "#/settings") viewSettings();
+}
+
+/* #79: stale-render guard — the m238–m242 subordinate-family counter. The
+   screen is fully client-side (no fetch, no failure state, hence NO
+   loadRetryNode surface): the guard drops a render that is no longer the
+   latest invocation or no longer on #/settings. */
+let settingsLoadSeq = 0;
+
+function viewSettings() {
+  const viewHash = "#/settings";
+  // Settings is reached FROM the profile — the same session/character guard
+  // family as viewProfile's #128 null-guard (worded differently: that exact
+  // guard string is pinned ==1 on the profile site). route() already
+  // short-circuits every non-#/profile hash to the creator pre-character;
+  // this mirror keeps direct calls honest too.
+  if (!S.user || !S.character) { viewCreateCharacter(); return; }
+  const seq = ++settingsLoadSeq;
+  if (seq !== settingsLoadSeq || location.hash !== viewHash) return;
+  renderSettings();
+}
+
+function renderSettings() {
+  const st = S.settings;
+
+  // Графика: the preset control shares ONE setter with the map toolbar's
+  // quality buttons (setMapQuality) — no second contradictory quality system.
+  const presetGroup = el("fieldset", { class: "settings-preset-group" },
+    el("legend", {}, "Пресет графики"),
+    ...[
+      ["high", "High", "Полная яркость ночных огней и погодных эффектов карты"],
+      ["balanced", "Balanced", "Приглушённые огни и погода — рекомендуемый баланс нагрузки"],
+      ["low-mobile", "Low-Mobile",
+        "Без фоновых анимаций; меньше маркеров, огней и событий — для слабых устройств"],
+    ].map(([value, label, note]) => el("label", { class: "settings-preset-option" },
+      el("input", {
+        type: "radio", name: "settings-preset", value,
+        ...(st.preset === value ? { checked: "checked" } : {}),
+        onchange: () => setMapQuality(value),
+      }),
+      el("span", { class: "settings-preset-name" }, label,
+        value === "balanced"
+          ? el("span", { class: "settings-preset-mark" }, "рекомендуется") : null),
+      el("span", { class: "muted settings-preset-note" }, note))));
+  const secGraphics = el("section", { class: "panel", tabindex: "-1" },
+    el("h2", {}, "Графика"),
+    presetGroup,
+    el("p", { class: "muted settings-note" },
+      "Пресет влияет только на карту и анимации — на события мира он не влияет."),
+    el("div", { class: "settings-honest" },
+      el("div", {}, "Качество генерации изображений — недоступно для настройки"),
+      el("div", { class: "muted settings-note" },
+        "Генерация изображений идёт на сервере без параметра качества")));
+
+  // Интерфейс: the scale applies immediately via setUiScale; the label
+  // carries the live value.
+  const scaleText = el("span", {}, `Масштаб интерфейса: ${st.uiScale}%`);
+  const secInterface = el("section", { class: "panel", tabindex: "-1" },
+    el("h2", {}, "Интерфейс"),
+    el("label", { class: "settings-field", for: "settings-ui-scale" },
+      scaleText,
+      el("input", {
+        id: "settings-ui-scale", type: "range", min: "80", max: "120", step: "10",
+        value: String(st.uiScale),
+        oninput: (ev) => {
+          setUiScale(Number(ev.target.value));
+          scaleText.textContent = `Масштаб интерфейса: ${S.settings.uiScale}%`;
+        },
+      })),
+    el("p", { class: "muted settings-note" }, "Применяется ко всему интерфейсу сразу"));
+
+  // Специальные возможности: ONE motion toggle — the mockup's «Animation and
+  // Transitions» is merged into it (two motion toggles would be fake
+  // granularity). The toggle reflects the USER pref; the effective flag is
+  // OS OR user, so the status line explains why motion can stay reduced
+  // when the toggle is off.
+  const secMotion = el("section", { class: "panel", tabindex: "-1" },
+    el("h2", {}, "Специальные возможности"),
+    el("label", { class: "settings-toggle" },
+      el("input", {
+        type: "checkbox",
+        ...(st.reducedMotion ? { checked: "checked" } : {}),
+        onchange: (ev) => setReducedMotionPref(ev.target.checked),
+      }),
+      el("span", {}, "Уменьшенное движение")),
+    el("p", { class: "muted settings-note" },
+      "Отключает плавную прокрутку и фоновые анимации"),
+    osReducedMotion() ? el("p", { class: "muted settings-note" },
+      "Также включено системными настройками устройства") : null);
+
+  // Звук: honest row — no sound engine exists anywhere in the backend.
+  const secSound = el("section", { class: "panel", tabindex: "-1" },
+    el("h2", {}, "Звук"),
+    el("div", { class: "settings-honest" },
+      el("div", {}, "Звук — недоступен"),
+      el("div", { class: "muted settings-note" }, "В игре пока нет звукового движка")));
+
+  // Сохранение: what persists (settings, this browser) and what does not
+  // (game progress — server; cross-device sync — nothing).
+  const secStorage = el("section", { class: "panel", tabindex: "-1" },
+    el("h2", {}, "Сохранение"),
+    el("div", {}, "Настройки сохраняются автоматически в этом браузере"),
+    el("div", { class: "muted settings-note" },
+      "Это не сохранение игры — прогресс хранится на сервере"),
+    el("div", { class: "muted settings-note" }, "Синхронизация между устройствами — недоступна"),
+    st.sessionOnly ? el("div", { class: "muted settings-note" },
+      "Применено только в этой сессии — браузер не дал сохранить настройки") : null,
+    el("div", { class: "settings-actions" },
+      el("button", { type: "button", onclick: () => resetSettings() }, "Сбросить")));
+
+  // Numbered section guide — the creator-guide pattern (#78): scrollIntoView
+  // + focus, NO hash assignment (the m120/m162 hash counts stay put), and
+  // the scroll honours the effective-motion policy.
+  const guideEntry = (section, label) => el("button", {
+    type: "button", class: "settings-guide-link",
+    onclick: () => {
+      section.scrollIntoView({ behavior: S.mapReducedMotion ? "auto" : "smooth", block: "start" });
+      section.focus({ preventScroll: true });
+    },
+  }, label);
+  const sectionGuide = el("div", { class: "settings-guide" },
+    el("div", { class: "muted settings-eyebrow" }, "Разделы настроек"),
+    el("div", { class: "settings-guide-row" },
+      guideEntry(secGraphics, "1. Графика"),
+      guideEntry(secInterface, "2. Интерфейс"),
+      guideEntry(secMotion, "3. Специальные возможности"),
+      guideEntry(secSound, "4. Звук"),
+      guideEntry(secStorage, "5. Сохранение")));
+
+  // Single stacked page, NO nav-rail (the mockup's rail hides sections —
+  // every section stays visible on one page). Highlights «Профиль».
+  app.replaceChildren(topbar("#/profile"),
+    el("main", { class: "settings-shell" },
+      el("section", { class: "panel settings-hero" },
+        el("div", { class: "muted settings-eyebrow" }, "ВЛ1: Рейнеке"),
+        el("h1", {}, "Настройки"),
+        el("p", { class: "settings-intro" },
+          "Графика, масштаб интерфейса и движение — всё применяется сразу."),
+        sectionGuide),
+      secGraphics,
+      secInterface,
+      secMotion,
+      secSound,
+      secStorage));
+}
+
 /* ---------- profile (§77; #67 increment 1 — read-model hero + cards) ---------- */
 
 /* #67: trait chips are read-only display labels; the authoritative keys are
@@ -4631,7 +4898,10 @@ function renderProfile(modeSel) {
       // #75: standing link to the Career screen (no topbar tab — the
       // screen is reached from here; the profile keeps its ONE roles
       // fetch — the career screen fetches its own).
-      el("a", { href: "#/career", class: "muted" }, "Развитие →"));
+      el("a", { href: "#/career", class: "muted" }, "Развитие →"),
+      // #79: standing link to the Settings screen (no topbar tab — the
+      // screen is reached from here and highlights «Профиль»).
+      el("a", { href: "#/settings", class: "muted" }, "Настройки →"));
   })();
 
   // «Основное» — label+bar+value rows in the existing .need markup style;
@@ -5038,6 +5308,23 @@ async function adminAction(path, body = {}) {
 }
 
 /* ---------- boot ---------- */
+
+// #79: stored user settings apply BEFORE the first render — the stored
+// preset replaces the hardcoded mapQuality default, the effective-motion
+// class lands on documentElement, the UI-scale zoom applies. The OS motion
+// setting can also change mid-session: the listener recomputes the
+// EFFECTIVE flag (OS OR user pref), re-applies the class and rerenders the
+// surfaces that read it. The OS sample is never persisted.
+loadSettings();
+applyStoredSettings();
+const motionQuery = window.matchMedia("(prefers-reduced-motion: reduce)");
+motionQuery.addEventListener("change", () => {
+  S.mapReducedMotion = motionQuery.matches
+    || !!(S.settings && S.settings.reducedMotion);
+  applyReducedMotionClass();
+  rerenderLivingMap();
+  if (location.hash === "#/settings") viewSettings();
+});
 
 window.addEventListener("hashchange", route);
 route();

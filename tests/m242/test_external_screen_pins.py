@@ -152,8 +152,9 @@ def test_external_hash_guard_total_pin():
     js = _read(APP_JS)
     # 10 pre-#77 (place ×2 + home ×2 + career ×2 + events ×2 + … the m238
     # total) + 2 external guards (fetch-error + apply) = 12 (m238 records
-    # the same total).
-    assert js.count("location.hash !== viewHash") == 12
+    # the same total). #79: +1 — the settings screen's sync stale-guard
+    # (viewSettings) joins the same house shape → 13 file-wide.
+    assert js.count("location.hash !== viewHash") == 13
 
 
 # ---------- d: heading ----------
@@ -253,8 +254,10 @@ def test_external_quantity_pins():
     # The raw-JSON cart is GONE: no JSON.parse in the external body; the
     # file-wide count dropped 2→1 (only the WS message parse remains —
     # no test pinned the old count; reconciled in the docstring).
+    # #79: 1→2 — the settings screen's defensive localStorage read decodes
+    # the stored settings JSON (try/catch + per-field validation, contract §A).
     assert body.count("JSON.parse") == 0
-    assert js.count("JSON.parse") == 1
+    assert js.count("JSON.parse") == 2
 
 
 # ---------- i: navigation ----------

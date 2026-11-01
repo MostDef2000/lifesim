@@ -28,7 +28,8 @@ Covers:
   in-progress typed input, and leaves the previous screen state rendered
   (byte-pins; the chat draft pattern from m156 stays intact).
 - Low graphics + reduced motion smoke (byte-pins): S.mapReducedMotion is
-  initialised from prefers-reduced-motion, both scroll behaviours honour it,
+  initialised from prefers-reduced-motion, the scroll behaviours honour it
+  (3 map/scene sites + the #78/#79 section-guide scrolls),
   and the mapQuality "low-mobile" paths exist (NPC clustering + bounded
   event markers) with the scene fallback usable. NOTE: the BROWSER-side
   smoke (real prefers-reduced-motion emulation, rendered low-mobile map,
@@ -440,8 +441,10 @@ def test_ui_low_graphics_and_reduced_motion_pins():
     the rendered low-mobile map, and the click-through of the master
     journey — is the ORCHESTRATOR's pass (worker runs no browsers). Here we
     pin the deterministic code paths that make those modes usable:
-    - S.mapReducedMotion is initialised from prefers-reduced-motion and both
-      programmatic scrolls honour it (auto vs smooth);
+    - S.mapReducedMotion is initialised from prefers-reduced-motion and the
+      programmatic scrolls honour it (auto vs smooth) — 3 map/scene sites
+      plus the #78 creator and #79 settings section-guide scrolls (5 total;
+      #79 intent update: the guides are no longer unconditionally smooth);
     - the mapQuality "low-mobile" paths exist (clustered NPC markers +
       bounded event markers) so weak devices get a cheaper map;
     - the scene fallback path (Flux down) renders usable data.
@@ -450,7 +453,9 @@ def test_ui_low_graphics_and_reduced_motion_pins():
     assert js.count(
         'mapReducedMotion: window.matchMedia("(prefers-reduced-motion: reduce)")'
         '.matches') == 1
-    assert js.count('S.mapReducedMotion ? "auto" : "smooth"') == 3
+    # #79: 3→5 — the creator-guide and settings-guide scrollIntoView calls
+    # join the effective-motion policy (the ternary literal is unchanged).
+    assert js.count('S.mapReducedMotion ? "auto" : "smooth"') == 5
     assert js.count('mapQuality: "balanced"') == 1
     # Four low-graphics paths: NPC clustering, bounded event markers,
     # night-light limit, marker-budget label.

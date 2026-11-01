@@ -97,9 +97,10 @@ def test_events_route_registry_pins():
     routes_def = js.index("const routes = {")
     routes_end = js.index("};", routes_def)
     assert routes_def < js.index('"#/events": viewEvents,') < routes_end
-    # The registry comment records the honest row count (15→16 with #76)
-    # and keeps the #74/#75 notes intact.
-    assert js.count("16 rows total") == 1
+    # The registry comment records the honest row count (15→16 with #76,
+    # 16→17 with #79) and keeps the #74/#75/#76 notes intact.
+    assert js.count("17 rows total") == 1
+    assert js.count("16 rows total") == 0
     assert js.count("15 rows total") == 0
     assert js.count("14 rows total") == 0
 
@@ -224,7 +225,9 @@ def test_events_hash_guard_total_pin():
     # events guards (fetch-error + apply) = 10 (m238 records the same).
     # #77: +2 — the external-trip screen's guards (fetch-error + apply)
     # against externalLoadSeq join the same house shape → 12 file-wide.
-    assert js.count("location.hash !== viewHash") == 12
+    # #79: +1 — the settings screen's sync stale-guard (viewSettings) joins
+    # the same house shape → 13 file-wide.
+    assert js.count("location.hash !== viewHash") == 13
 
 
 # ---------- i: placement ----------
