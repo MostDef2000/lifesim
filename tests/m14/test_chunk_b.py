@@ -70,10 +70,14 @@ class TestPortraitFlow:
 
     def test_portrait_canonicalization(self):
         # Generated portrait is pinned canonical so it persists across
-        # reloads and feeds scene references; "заново" unpins first.
+        # reloads and feeds scene references. #119 wave 4: force-regen
+        # sends regenerate=true — the server chains the canonical as the
+        # generation reference (identity continuity); the client never
+        # demotes, so a failed regen no longer loses the pin.
         js = load_js()
         assert "body: { canonical: true }" in js
-        assert "body: { canonical: false }" in js
+        assert "body.regenerate = true" in js
+        assert "canonical: false" not in js
         assert "S.canonicalPortraitId" in js
 
 
