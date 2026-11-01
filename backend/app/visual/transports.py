@@ -18,13 +18,22 @@ prompt+seed+size).
 """
 from __future__ import annotations
 
+import errno
 import hashlib
 import json
+import logging
+import socket
 import struct
 import zlib
 from typing import Protocol
 
 from app.config.config import VisualConfig
+
+# #119 wave 3: same logger namespace as visual_routes.py — bounded transport
+# lifecycle events (retry/recovered/exhausted) with attempt counts and error
+# classification only; never prompt, reference bytes, request body, or
+# credentials.
+_LOGGER = logging.getLogger("vl1.visual")
 
 
 class FluxTransport(Protocol):
@@ -95,6 +104,44 @@ class StubFluxTransport:
         return _render_placeholder_png(prompt, seed, size)
 
 
+def _failure_class(exc: BaseException) -> str:
+    """#119 wave 3: bounded failure classification for the retry decision
+    and the lifecycle logs.
+
+    Only connection-refused is retryable (a refused connect never reached
+    the GPU server, so one immediate retry cannot duplicate render work).
+    The returned tag is a fixed vocabulary string — it never carries prompt,
+    payload, or credential material.
+    """
+    import urllib.error
+
+    # HTTP errors first: HTTPError is a URLError subclass and must never
+    # retry regardless of what its .reason holds.
+    if isinstance(exc, urllib.error.HTTPError):
+        return "http_error"
+    # URLError wraps the low-level cause in .reason; bare OSErrors arrive
+    # unwrapped. String-valued reasons classify as their own (non-retryable)
+    # class instead of blowing up the isinstance chain.
+    reason = getattr(exc, "reason", None)
+    target = exc if reason is None else reason
+    if isinstance(target, str):
+        return "url_error_string_reason"
+    if isinstance(target, ConnectionRefusedError) or (
+            isinstance(target, OSError) and target.errno == errno.ECONNREFUSED):
+        return "connect_refused"
+    if isinstance(target, ConnectionResetError) or (
+            isinstance(target, OSError) and target.errno == errno.ECONNRESET):
+        return "connection_reset"
+    if isinstance(target, TimeoutError) or (
+            isinstance(target, OSError) and target.errno == errno.ETIMEDOUT):
+        return "timeout"
+    if isinstance(target, socket.gaierror):
+        return "dns_error"
+    if isinstance(target, OSError):
+        return "os_error"
+    return "other"
+
+
 class HttpFluxTransport:
     """Client of the external Flux+LoRA server (§15). Never makes game decisions."""
 
@@ -128,11 +175,51 @@ class HttpFluxTransport:
             data=json.dumps(payload).encode(),
             headers={"Content-Type": "application/json"},
         )
-        try:
-            with urllib.request.urlopen(request, timeout=self._config.timeout_sec) as response:
-                return response.read()
-        except (urllib.error.URLError, TimeoutError, OSError) as exc:
-            raise ValueError(f"flux unavailable: {exc}") from exc
+        # #119 wave 3: exactly ONE immediate retry of the SAME serialized
+        # request (same bytes, same timeout), ONLY for connect-refused
+        # failures — a refused connect never reached the server, so the
+        # retry cannot duplicate GPU work. Resets (post-transmission
+        # duplication risk), timeouts (would double the worst-case wait),
+        # HTTP/DNS/other errors and response-read failures stay single-shot.
+        # The retry lives entirely inside this one logical generate() call:
+        # single-flight and negative-cache semantics upstream are untouched
+        # (only the final failure propagates to the negative cache).
+        for attempt in (1, 2):
+            try:
+                response = urllib.request.urlopen(
+                    request, timeout=self._config.timeout_sec)
+            except (urllib.error.URLError, TimeoutError, OSError) as exc:
+                failure = _failure_class(exc)
+                if failure == "connect_refused":
+                    if attempt == 1:
+                        _LOGGER.warning(
+                            "flux connect refused (attempt %d/2, class=%s); "
+                            "retrying once", attempt, failure)
+                        continue
+                    _LOGGER.error(
+                        "flux unavailable: connect refused on both attempts "
+                        "(attempts=%d, class=%s)", attempt, failure)
+                else:
+                    _LOGGER.error(
+                        "flux unavailable (attempts=%d, class=%s)",
+                        attempt, failure)
+                raise ValueError(f"flux unavailable: {exc}") from exc
+            # Response-body reading stays OUTSIDE the retryable open branch:
+            # a read failure means the request was already served — never
+            # retried, still converted for the route's 502 mapping.
+            try:
+                with response:
+                    body = response.read()
+            except (urllib.error.URLError, TimeoutError, OSError) as exc:
+                _LOGGER.error(
+                    "flux response read failed (attempts=%d, class=%s)",
+                    attempt, _failure_class(exc))
+                raise ValueError(f"flux unavailable: {exc}") from exc
+            # "recovered" fires only after the body read SUCCEEDED (about to
+            # return) — a read failure must not log a recovery it never had.
+            if attempt == 2:
+                _LOGGER.info("flux retry recovered (attempt 2/2)")
+            return body
 
 
 def build_transport(config: VisualConfig) -> FluxTransport:
