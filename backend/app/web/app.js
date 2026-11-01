@@ -716,17 +716,17 @@ async function generatePortrait(container, force) {
     if (refSel && refSel.value) body.reference_id = Number(refSel.value);
     if (styleSel && styleSel.value) body.style = styleSel.value;
     if (nudeToggle && nudeToggle.checked) body.nude = true;
-    // Force-regenerate: unpin the current canonical so a fresh asset is created.
-    // 020 P3 stage 2: the nude toggle is read BEFORE any demotion — nude
-    // renders skip the auto-pin below, so demoting here would leave the
-    // canonical empty with nothing to re-pin; a nude render must not touch
-    // the existing canonical at all. Non-nude keeps the historical
-    // demote-then-regenerate-then-repin semantics byte-identical.
-    if (force && !body.nude && S.canonicalPortraitId) {
-      try {
-        await api(`/visual/assets/${S.canonicalPortraitId}/canonical`,
-          { method: "POST", body: { canonical: false } });
-      } catch (e) { /* best effort */ }
+    // Force-regenerate (#119 wave 4, owner decision 2026-11-01): the POST
+    // carries regenerate=true — the server chains the character's OWN
+    // canonical portrait as the generation reference (identity continuity:
+    // the face persists across regens). This replaces the old
+    // demote-then-regenerate-then-repin dance: the canonical is never
+    // demoted here, so a FAILED regen no longer loses the pinned face (the
+    // old best-effort demote committed even when the generation then
+    // failed). Applies to nude renders too — the nude auto-pin skip below
+    // is unchanged (the nude policy governs pinning, not referencing).
+    if (force) {
+      body.regenerate = true;
     }
     const r = await api(`/visual/portraits/${S.character.id}`,
       Object.keys(body).length ? { method: "POST", body } : { method: "POST" });

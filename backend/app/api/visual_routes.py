@@ -393,10 +393,16 @@ def register_visual_routes(app, settings: Settings, session_factory: sessionmake
         #   server-side preset PREFIX on the positive prompt; anything
         #   else is a 422 before generation (validated in the route);
         # - nude: replaces every clothing/outerwear fragment with the
-        #   NUDE_FRAMING constant (descriptor nude_framing hook).
+        #   NUDE_FRAMING constant (descriptor nude_framing hook);
+        # - regenerate (#119 wave 4, owner decision 2026-11-01 "лицо
+        #   прикрепляется к персонажу"): chains the character's OWN
+        #   canonical portrait as the generation reference (identity
+        #   continuity) and always generates. Absent/false = byte-identical
+        #   legacy behavior.
         reference_id: int | None = None
         style: str = ""
         nude: bool = False
+        regenerate: bool = False
 
     # 020 P3 stage 2: style presets accepted on portraits (422 otherwise).
     _PORTRAIT_STYLES = ("", "oil", "watercolor")
@@ -438,12 +444,49 @@ def register_visual_routes(app, settings: Settings, session_factory: sessionmake
         if body.reference_id is not None:
             reference_b64 = _reference_b64_or_404(
                 session, request_user, body.reference_id)
+        elif body.regenerate:
+            # 119 wave 4 (owner decision 2026-11-01, "лицо прикрепляется к
+            # персонажу"): a regen chains the character's OWN canonical
+            # portrait as the generation reference — identity continuity.
+            # The route is owner-scoped (_owned_character_for_portrait
+            # above), so the consumed canonical is always the requester's
+            # own character's; #219 privacy holds with no new checks.
+            # Explicit fail: a canonical ROW whose file is unreadable is a
+            # 404 — the face must persist or the regen must not happen
+            # (never a silent reference-less generation). No canonical row
+            # -> legacy reference-less payload (key absent). The canonical
+            # is NOT demoted anywhere in this path: it stays pinned during
+            # generation, so a transport failure is the existing 502 with
+            # zero writes and the canonical intact. nude + regenerate is
+            # ALLOWED — the reference is the character's own canonical; the
+            # nude policy governs PINNING (the UI-side auto-pin skip), not
+            # referencing (explicit reference_id + nude already works).
+            canonical_ref = (
+                session.query(VisualAsset)
+                .filter_by(
+                    world_id=settings.world.world_id, asset_type="portrait",
+                    character_id=cid, canonical=True,
+                )
+                .first()
+            )
+            if canonical_ref is not None:
+                try:
+                    canonical_bytes = store.read(canonical_ref.storage_path)
+                except (OSError, ValueError):
+                    raise HTTPException(
+                        status_code=404,
+                        detail="canonical portrait file missing")
+                reference_b64 = base64.b64encode(canonical_bytes).decode(
+                    "ascii")
         # §70 reuse: existing canonical portrait -> return it, no generation.
         # 020 P3 stage 2: a customized request (reference/style/nude) would
         # render DIFFERENT output than the stored canonical — it always
         # generates; the reuse fast-path stays for plain requests only.
+        # 119 wave 4: regenerate is customized by definition — a regen
+        # always generates (it bypasses the reuse fast-path).
         customized = (
-            body.reference_id is not None or body.style or body.nude
+            body.regenerate or body.reference_id is not None
+            or body.style or body.nude
         )
         canonical = None
         if not customized:
