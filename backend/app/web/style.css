@@ -2009,9 +2009,10 @@ button.danger:hover { background: #93301f; }
    definition — the pinned token count stays 4, and the :root fallback
    (#172) carries the IDENTICAL value, so var(--w-line) resolves to the
    same color inside .creator-shell. Single centered onboarding column:
-   hero band on top, stacked panels (кто вы / образ / одежда / биография /
-   подтверждение); the appearance grid collapses 3→2→1 columns at 1100px /
-   640px (profile-shell collapse precedent). Every new selector is scoped
+   hero band on top, stacked panels in #78 guided order (кто вы / образ /
+   биография / одежда / предпросмотр / подтверждение); the appearance
+   grid collapses 3→2→1 columns at 1100px / 640px (profile-shell collapse
+   precedent). Every new selector is scoped
    under .creator-shell (specificity lesson: shell-scoped overrides must
    beat the flat globals — input/select/textarea, button.primary, .panel). */
 .creator-shell {
