@@ -164,6 +164,10 @@ def test_chat_draft_survival_pins():
     # exactly two post-POST clears, one error-path restore.
     assert js.count("input.value = \"\";") == 2
     assert js.count("input.value = draft;") == 1
+    # #256: a suggestion-chip click also syncs the draft — the chip fills the
+    # input programmatically (no input event fires), so without this the chip
+    # text would be lost on the next composer re-render.
+    assert js.count("S.chatDraft = s;") == 1
 
 
 def test_scene_act_draft_oninput_pins():
