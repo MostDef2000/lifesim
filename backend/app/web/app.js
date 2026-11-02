@@ -965,7 +965,9 @@ function fillScenePanel(box) {
   // of EVERY scene panel state (idle/loading/ready/fallback) — the issue
   // requires the input to be always visible in Scene.
   kids.push(sceneActBar(), sceneActResultNode());
-  box.replaceChildren(el("h2", {}, "Сцена"), ...kids);
+  // #253: raw replaceChildren stringifies null args (unlike el()/appendKids),
+  // so a null kid (sceneActResultNode's "nothing to show") must never reach it.
+  box.replaceChildren(el("h2", {}, "Сцена"), ...kids.filter(Boolean));
 }
 
 function renderScenePanel() {

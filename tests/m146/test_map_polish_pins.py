@@ -90,3 +90,16 @@ def test_map_polish_lane_a_pins():
         check=False,
     )
     assert result.returncode == 0, result.stderr
+
+
+def test_scene_panel_null_guard_pin():
+    """#253: a null kid reached the scene panel's raw replaceChildren and was
+    stringified into a literal "null" text node at the bottom of the card
+    (reproduced live on prod 2026-11-01). sceneActResultNode() legitimately
+    returns null when no scene action has been submitted — the established
+    "nothing to show" convention that el()/appendKids consumers skip — so the
+    raw spread must filter null kids before the DOM call."""  # noqa: E501
+    js = _read(APP_JS)
+    assert "kids.filter(Boolean)" in js
+    # the buggy unguarded spread shape must stay gone
+    assert "...kids);" not in js
