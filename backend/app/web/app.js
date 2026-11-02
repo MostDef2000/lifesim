@@ -14,7 +14,7 @@ const S = { user: null, character: null, world: null, ws: null, wsTries: 0,
   // setReducedMotionPref() and the matchMedia change listener at boot.
   mapReducedMotion: window.matchMedia("(prefers-reduced-motion: reduce)").matches,
   mapFocusLocationId: null, mapLocations: [], travel: null, scene: null, sceneAct: null,
-  sceneActDraft: null, pollBusy: false,
+  sceneActDraft: null, pollBusy: false, invSellPrice: {},  // #256: typed sell price survives row re-renders
   wsCursorSent: false, feedFetched: false,  // #179: WS cursor handshake state (see sendWsCursor)
   shopConfirm: null, chatDraft: "",
   bootCursor: Infinity };  // #177: replay gate — set once from the first REST history fill; Infinity = "no live events until proven"
@@ -3091,6 +3091,7 @@ function renderChat(session, locName) {
       el("span", { class: "sugg", onclick: () => {
         const inp = document.getElementById("chat-msg-input");
         if (inp) { inp.value = s; inp.focus(); }
+        S.chatDraft = s;  // #256: chip fills the input programmatically (no input event) — sync the draft so the text survives re-renders
       } }, s)));
   }
   const lastNpc = [...(curSession ? curSession.messages : [])]
@@ -3273,6 +3274,11 @@ async function wearToggle(objectId) {
 
 function invSellRow(objectId) {
   const price = el("input", { type: "number", min: "1", step: "1", placeholder: "Цена, ₽" });
+  // #256: the typed price survives row expand/collapse re-renders — seeded
+  // from the draft map (!= null, not ||: a typed "0" must survive) and kept
+  // in sync on every keystroke.
+  price.value = S.invSellPrice[objectId] != null ? S.invSellPrice[objectId] : "";
+  price.addEventListener("input", () => { S.invSellPrice[objectId] = price.value; });
   const go = el("button", {
     id: "inv-sell", type: "button",
     onclick: async () => {
@@ -3284,6 +3290,7 @@ function invSellRow(objectId) {
       try {
         await api("/market/offers", { method: "POST", body: { object_id: objectId, price: p } });
         toast("Предмет выставлен на рынок");
+        delete S.invSellPrice[objectId];  // #256: the offer is live — the draft price is consumed
         viewInventory();  // refresh state after the authoritative action
       } catch (e) { toast(e.message, true); }  // errors keep the screen state
     },

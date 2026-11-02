@@ -629,6 +629,15 @@ def test_ui_inventory_screen_pins():
     assert js.count('"Выпить"') == 0
     assert js.count('"Использовать"') == 0
     assert js.count('"Выбросить"') == 0
+    # #256: the typed sell price survives row expand/collapse re-renders —
+    # seeded from the draft map (!= null, not ||: a typed "0" survives), kept
+    # in sync on every keystroke, consumed (deleted) only on sell success.
+    assert js.count(
+        "price.value = S.invSellPrice[objectId] != null ? S.invSellPrice[objectId] : \"\";") == 1
+    assert js.count(
+        "price.addEventListener(\"input\", () => "
+        "{ S.invSellPrice[objectId] = price.value; });") == 1
+    assert js.count("delete S.invSellPrice[objectId];") == 1
 
 
 def test_ui_profile_desire_pins():
