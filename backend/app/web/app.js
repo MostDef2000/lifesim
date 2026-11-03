@@ -16,8 +16,13 @@ const S = { user: null, character: null, world: null, ws: null, wsTries: 0,
   mapFocusLocationId: null, mapLocations: [], travel: null, scene: null, sceneAct: null,
   sceneActDraft: null, pollBusy: false, invSellPrice: {},  // #256: typed sell price survives row re-renders
   wsCursorSent: false, feedFetched: false,  // #179: WS cursor handshake state (see sendWsCursor)
+  // #258: page-lifetime feed-init state — "pending" until the WS hello
+  // (snapshot tail) or a completed REST events fill defines the start
+  // position; NEVER reset by navigation/reconnect. helloDeadline holds the
+  // 5s hello-wait timer id (null = none armed).
+  feedInit: "pending", helloDeadline: null,
   shopConfirm: null, chatDraft: "",
-  bootCursor: Infinity };  // #177: replay gate — set once from the first REST history fill; Infinity = "no live events until proven"
+  bootCursor: Infinity };  // #177: replay gate — set once from the first history fill (WS hello OR REST); Infinity = "no live events until proven"
 
 /* ---------- helpers ---------- */
 
@@ -2639,6 +2644,7 @@ function startFeed() {
 
 function stopFeed() {
   if (S.pollTimer) { clearInterval(S.pollTimer); S.pollTimer = null; }
+  if (S.helloDeadline) { clearTimeout(S.helloDeadline); S.helloDeadline = null; }  // #258: a stopped feed's hello deadline must never fire
   if (S.ws) {
     const w = S.ws;
     S.ws = null;
@@ -2646,6 +2652,29 @@ function stopFeed() {
     S.wsCursorSent = false;  // #179: the #161 detach means onclose never fires for this socket — re-arm the handshake flag here so the next connection re-declares its cursor
     try { w.close(); } catch (e) { /* already closed */ }
   }
+}
+
+// #258: the 5s hello window — a fresh page session waits for the WS hello
+// (snapshot tail) before trusting the socket; if it never arrives, the
+// hello-less socket is retired FIRST and the REST fallback takes over for
+// the rest of the page session. The timer is socket-scoped: the callback
+// re-checks socket identity, so a stale timer can never close/clear a
+// replacement socket or resurrect a stopped feed.
+function armHelloDeadline(ws) {
+  if (S.feedInit !== "pending") return;  // init settled — no deadline needed
+  if (S.helloDeadline) clearTimeout(S.helloDeadline);
+  S.helloDeadline = setTimeout(() => {
+    S.helloDeadline = null;
+    if (S.feedInit !== "pending" || S.ws !== ws) return;  // stale timer or init settled elsewhere
+    // Retire the hello-less socket FIRST (detach before close, mirroring
+    // stopFeed — its async onclose must not fire or schedule a reconnect),
+    // then enable the REST fallback.
+    ws.onclose = null; ws.onmessage = null; ws.onopen = null;
+    if (S.ws === ws) S.ws = null;
+    S.wsCursorSent = false;  // detached socket: onclose will not re-arm — do it here (same as stopFeed)
+    try { ws.close(); } catch (e) { /* already closed */ }
+    S.feedInit = "rest";  // permanent for this page session
+  }, 5000);
 }
 
 async function pollEvents() {
@@ -2743,11 +2772,18 @@ async function pollEvents() {
 // The A2 world-state refresh above keeps running on every tick either way —
 // only the events fetch is skipped while the socket is the live channel.
 async function pollEventsFeed() {
+  // #258: while the page session waits for the WS hello, suppress ONLY the
+  // events REST fetch — the world/map/task refresh in pollEvents keeps
+  // running every tick, and hello is never awaited here. The deadline in
+  // armHelloDeadline settles the init (hello -> "done", expiry -> "rest").
+  if (S.feedInit === "pending") return;
   if (S.ws && S.ws.readyState === 1) return;
-  const data = await api(`/world/events?since=${S.cursor}`);
+  const requested = S.cursor;  // #258: snapshot the requested position — a WS batch may advance S.cursor while this fetch is in flight
+  const data = await api(`/world/events?since=${requested}`);
   const events = Array.isArray(data) ? data : (data.events || []);
   if (events.length) {
-    S.cursor = events[events.length - 1].id;
+    // #258: never lower a cursor the WS already advanced while we awaited.
+    S.cursor = Math.max(S.cursor, events[events.length - 1].id);
     // #139: the REST cursor path can re-fetch on a missed ack — push and
     // render only events not already buffered (dedup by id).
     const seen = new Set(S.feed.map(e => e.id));
@@ -2777,14 +2813,17 @@ async function pollEventsFeed() {
   }
   // #179: a completed REST fetch proves S.cursor is defined — arm the WS
   // cursor handshake (one per connection; re-armed in ws.onclose).
+  // #258: a successful REST fill is ONE init source, not the only one —
+  // the hello path (feedInit "done") settles the init before this runs.
   S.feedFetched = true;
   sendWsCursor();
 }
 
-// #179: tell the server where our event stream should start — right after
-// hello it replays from 0 unless the client declares its cursor. One
-// handshake per connection: re-armed in ws.onclose, armed once the first
-// REST events fetch has defined S.cursor (boot boundary).
+// #179/#258: tell the server where our event stream should start — the
+// hello already gives a fresh boot a bounded window at the snapshot tail
+// (tail-100); this declaration re-anchors RECONNECTS at the live cursor.
+// One handshake per connection: re-armed in ws.onclose, armed once init
+// has defined S.cursor (hello tail or first REST events fetch).
 function sendWsCursor() {
   if (!S.feedFetched || S.wsCursorSent) return;
   if (!S.ws || S.ws.readyState !== 1) return;
@@ -2798,6 +2837,20 @@ function connectWs() {
   ws.onmessage = (msg) => {
     try {
       const data = JSON.parse(msg.data);
+      // #258: the hello carries the per-world snapshot tail — handle it
+      // BEFORE any events frame, only while init is still pending. The
+      // stream starts 100 events below the tail; the boot replay marker is
+      // the TAIL itself. A late hello (init already settled) or one with a
+      // garbage cursor is ignored — reconnect handshake semantics (#179).
+      if (data.type === "hello" && S.feedInit === "pending"
+          && Number.isSafeInteger(data.cursor) && data.cursor >= 0) {
+        S.cursor = Math.max(0, data.cursor - 100);
+        S.bootCursor = data.cursor;  // the TAIL, not the window start
+        S.feedFetched = true;
+        S.feedInit = "done";
+        if (S.helloDeadline) { clearTimeout(S.helloDeadline); S.helloDeadline = null; }
+        sendWsCursor();
+      }
       if (data.type === "events" && data.events) {
         for (const ev of data.events) {
           if (ev.id > S.cursor) S.cursor = ev.id;
@@ -2819,11 +2872,12 @@ function connectWs() {
           // when the world view is actually on screen (never hijack
           // #/profile or #/chat); viewWorld() only reads state, so no
           // event/POST feedback loop is possible.
-          // #177: the WS replays the whole backlog from cursor 0 on every
-          // (re)connect; a replayed CONTROL_CHANGED must not reload the
-          // world view. React only to LIVE events: id beyond the boot
+          // #177/#258: a (re)connect can replay a bounded history window
+          // (hello tail-100) — or a larger backlog via an explicit/legacy
+          // cursor declaration; a replayed CONTROL_CHANGED must not reload
+          // the world view. React only to LIVE events: id beyond the boot
           // replay marker and logged within a small window of the current
-          // game time (covers backlogs larger than the REST fetch window).
+          // game time (covers backlogs larger than the fetch window).
           if (fresh.some((e) => e.event_type === "CONTROL_CHANGED"
               && e.id > S.bootCursor
               && S.world && typeof e.game_timestamp === "number"
@@ -2847,11 +2901,24 @@ function connectWs() {
     S.wsTries += 1;
     if (S.ws === ws) S.ws = null;  // #161: only clear the reference while this socket is still the current one (no stomp)
     S.wsCursorSent = false;  // #179: the next connection re-handshakes with the current S.cursor
+    // #258: socket-scoped deadline cleanup — this socket died without a
+    // hello, so its deadline timer is dead weight. Clearing the slot is
+    // safe: a replacement socket can only exist after this handler (or
+    // stopFeed) removed THIS one, and the deadline callback re-checks
+    // socket identity anyway — a stale timer never closes/clears a
+    // replacement socket.
+    if (S.helloDeadline) { clearTimeout(S.helloDeadline); S.helloDeadline = null; }
+    if (S.feedInit === "pending") {
+      // #258: connect failure before hello — the REST fallback is
+      // permanent for this page session (never reset by navigation).
+      S.feedInit = "rest";
+    }
     if (S.wsTries <= 3) setTimeout(connectWs, 2000 * S.wsTries);
     /* иначе остаётся polling */
   };
   ws.onopen = () => { S.wsTries = 0; sendWsCursor(); };
   S.ws = ws;
+  armHelloDeadline(ws);  // #258: the 5s hello window starts when the connect is initiated
 }
 
 /* ---------- chat (§77, #88 Dialogue alpha) ---------- */

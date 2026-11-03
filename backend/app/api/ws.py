@@ -6,9 +6,14 @@ server sends {type:'hello', cursor}, then polls world_events (id > cursor)
 and batches them as {type:'events', events:[...]}.
 #179: right after hello the client may declare its poll START position with
 {type:'cursor', id} — the server honors it (bounded handshake window, see
-WS_CURSOR_HANDSHAKE_TIMEOUT_S) and polls world_events from that cursor;
-on handshake timeout, disconnect, or any non-cursor/garbage message the
-server falls back to the legacy full replay from cursor 0.
+WS_CURSOR_HANDSHAKE_TIMEOUT_S) and polls world_events from that cursor.
+#258: hello carries the per-world snapshot tail (MAX(WorldEvent.id)) and
+that tail is the DEFAULT start position — a silent client (handshake
+timeout, malformed or non-cursor first frame) streams only events beyond
+the tail instead of the legacy full replay from cursor 0; an explicit
+{type:'cursor', id} overrides the tail (garbage/overflow id clamps to 0,
+so the full replay survives only as an explicit recovery path). Disconnect
+is cleanup (connection-counter decrement), never a replay fallback.
 Read-only: no mutations over WS (MVP).
 NOTE: no `from __future__ import annotations` — FastAPI must resolve the
 WebSocket annotation at route-add time.
@@ -18,6 +23,7 @@ import asyncio
 import json
 from typing import Any, Dict, List
 
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 # #179: seconds to wait for the client's cursor declaration right after hello
@@ -106,23 +112,38 @@ def register_ws_route(app, settings, session_factory) -> None:
         await websocket.accept()
         # M8 (§89): live connection counter for /admin/overview
         app.state.ws_connections = getattr(app.state, "ws_connections", 0) + 1
-        cursor = 0
-        await websocket.send_json({"type": "hello", "cursor": cursor})
-
         interval = settings.api.ws_interval_s
         # #179: cursor handshake — right after hello the client may declare
         # the START of its event stream ({type:'cursor', id}), so a
-        # reconnecting client no longer pays for a full backlog replay from 0.
+        # reconnecting client no longer pays for a full backlog replay.
         # One message is honored per connection; handshake timeout, garbage
-        # or any non-cursor frame keeps cursor = 0 (legacy full-replay
-        # fallback). WebSocketDisconnect propagates to the outer handler
-        # below — exactly the main loop's disconnect path.
+        # or any non-cursor frame keeps the snapshot tail below as the start
+        # position (#258) — an explicit cursor declaration is the only way
+        # back to a full replay from 0. WebSocketDisconnect propagates to
+        # the outer handler below — exactly the main loop's disconnect path.
         handshake_timeout = (
             max(2.0, 2 * interval)
             if WS_CURSOR_HANDSHAKE_TIMEOUT_S is None
             else WS_CURSOR_HANDSHAKE_TIMEOUT_S
         )
         try:
+            # #258: snapshot the per-world event tail (MAX(WorldEvent.id)) as
+            # this connection's default start position — a silent client
+            # streams only NEW events, not the legacy full replay from 0.
+            # Inside the cleanup boundary: a DB failure here must run the
+            # same disconnect cleanup as the main loop, never leak the
+            # connection counter.
+            from app.db.models import WorldEvent
+
+            with session_factory() as session:
+                tail = (
+                    session.query(func.max(WorldEvent.id))
+                    .filter_by(world_id=settings.world.world_id)
+                    .scalar()
+                )
+            cursor = tail if tail is not None else 0  # empty world -> 0
+            await websocket.send_json({"type": "hello", "cursor": cursor})
+
             try:
                 msg = await asyncio.wait_for(
                     websocket.receive_json(), timeout=handshake_timeout
@@ -130,7 +151,7 @@ def register_ws_route(app, settings, session_factory) -> None:
             except WebSocketDisconnect:
                 raise  # outer handler mirrors the main loop's disconnect path
             except Exception:
-                msg = None  # timeout or unparsable frame -> legacy fallback
+                msg = None  # timeout or unparsable frame -> start from the snapshot tail (#258)
             if isinstance(msg, dict) and msg.get("type") == "cursor":
                 try:
                     v = int(msg.get("id", 0))

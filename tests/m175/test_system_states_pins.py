@@ -230,8 +230,11 @@ def test_hygiene_and_neighbour_pins_untouched():
     # single-dispatch contract; `location.hash = "#/world";` stays at 4.)
     assert js.count('location.hash = "#/world";') == 4
     assert js.count("gotoWorld();") == 5
-    assert js.count("S.ws = null;") <= 2
-    assert js.count("if (S.ws === ws) S.ws = null;") == 1
+    # #258: the hello-deadline retire adds a third S.ws = null; site
+    # (stopFeed detach, deadline-retire, guarded onclose) and a second
+    # identity-guarded site (same #161 pattern as the onclose cleanup).
+    assert js.count("S.ws = null;") <= 3
+    assert js.count("if (S.ws === ws) S.ws = null;") == 2
     # m156/m162 negative guards: no new occurrences of the pinned singletons.
     assert js.count('location.hash === "#/world"') == 1
     assert js.count(

@@ -23,10 +23,11 @@ JS = ""
 WS_PY_TEXT = ""
 
 HELPER_DEF = (
-    "// #179: tell the server where our event stream should start — right after\n"
-    "// hello it replays from 0 unless the client declares its cursor. One\n"
-    "// handshake per connection: re-armed in ws.onclose, armed once the first\n"
-    "// REST events fetch has defined S.cursor (boot boundary).\n"
+    "// #179/#258: tell the server where our event stream should start — the\n"
+    "// hello already gives a fresh boot a bounded window at the snapshot tail\n"
+    "// (tail-100); this declaration re-anchors RECONNECTS at the live cursor.\n"
+    "// One handshake per connection: re-armed in ws.onclose, armed once init\n"
+    "// has defined S.cursor (hello tail or first REST events fetch).\n"
     "function sendWsCursor() {"
 )
 
@@ -71,11 +72,12 @@ def test_send_ws_cursor_helper_pins():
     assert JS.count("if (!S.ws || S.ws.readyState !== 1) return;") == 1
 
 
-# ---------- exactly two call sites ----------
+# ---------- exactly three call sites ----------
 
 def test_handshake_call_sites():
-    # one in ws.onopen, one at the end of the pollEventsFeed success path
-    assert JS.count("sendWsCursor();") == 2
+    # one in ws.onopen, one at the end of the pollEventsFeed success path,
+    # one in the #258 hello handler (fresh boot declares the tail-100 window)
+    assert JS.count("sendWsCursor();") == 3
     assert JS.count(ONOPEN_LINE) == 1
     # the pollEventsFeed tail runs on EVERY successful fetch completion:
     # it sits after the #177 boot capture, at the end of the function body
@@ -85,7 +87,10 @@ def test_handshake_call_sites():
     feed_fetched = JS.index("S.feedFetched = true;")
     connect_ws = JS.index("function connectWs() {")
     assert poll_def < capture < feed_fetched < connect_ws
-    assert JS.count("S.feedFetched = true;") == 1
+    # #258: the hello handler also sets feedFetched (a second init source),
+    # so the whole-file census is 2 — but the pollEventsFeed adjacency
+    # (feedFetched immediately followed by sendWsCursor) stays unique.
+    assert JS.count("S.feedFetched = true;") == 2
     assert JS.count("S.feedFetched = true;\n  sendWsCursor();") == 1
 
 
@@ -97,11 +102,13 @@ def test_ws_cursor_state_and_rearm_pins():
     # m173/m175/m176 — m175/m176 frozen) keeps bootCursor as the LAST property.
     assert JS.count("wsCursorSent: false") == 1
     assert JS.count("feedFetched: false") == 1
-    # the re-arm occurs EXACTLY twice, once per close path:
+    # the re-arm occurs EXACTLY three times, once per close/retire path:
     #   (a) stopFeed() — the #161 detach (w.onclose = null BEFORE close) means
     #       onclose never fires for detached sockets, so the flag re-arms there;
-    #   (b) ws.onclose — regular remote closes / reconnect churn.
-    assert JS.count("S.wsCursorSent = false;") == 2
+    #   (b) ws.onclose — regular remote closes / reconnect churn;
+    #   (c) #258 hello-deadline retire — a hello-less socket is detached
+    #       (onclose nulled) before close, so the flag re-arms there too.
+    assert JS.count("S.wsCursorSent = false;") == 3
     # (a) stopFeed: inside the `if (S.ws)` branch, strictly BETWEEN the #161
     # detach line and the close call (detach order itself untouched).
     sf_start = JS.index("function stopFeed() {")
@@ -136,9 +143,10 @@ def test_179_ws_py_handshake_pins():
 # ---------- #177/#178 defense-in-depth literals unchanged ----------
 
 def test_178_defense_in_depth_literals_unchanged():
-    # bootCursor census identical to m176: 1 init field + 5 S. sites
-    assert JS.count("bootCursor") == 6
-    assert JS.count("S.bootCursor") == 5
+    # bootCursor census identical to m176: 1 init field + 6 S. sites
+    # (#258 adds the hello-handler assign S.bootCursor = data.cursor)
+    assert JS.count("bootCursor") == 7
+    assert JS.count("S.bootCursor") == 6
     assert JS.count("bootCursor: Infinity") == 1
     # the CONTROL_CHANGED liveness gate keeps its exact bytes (m176 owns it)
     assert JS.count(CONTROL_CHANGED_GATE_BLOCK) == 1
