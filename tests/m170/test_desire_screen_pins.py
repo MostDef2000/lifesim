@@ -202,9 +202,73 @@ def test_desire_css_pins():
     assert css.count(".desire-shell .panel {") == 1
     assert css.count("border-left: 3px solid var(--w-accent);") == 1
     # Review F4: the scoped chip reset turns real buttons back into the
-    # .sugg look.
+    # .sugg look. Issue #59 PR #1: the chip text now reads the shell's dim
+    # token explicitly (the warm palette made the inherited color
+    # unreadable on the cream background).
     assert css.count(".desire-chips .sugg { margin: 0; background: "
-                     "transparent; font: inherit; }") == 1
+                     "transparent; font: inherit; color: var(--w-dim); }") == 1
+    # Issue #59 PR #1: the warm-palette rework — the shell carries
+    # provisional warm cream/beige tokens (VISUAL-BIBLE §48) instead of
+    # mirroring world-shell's dark values. Region-scoped to the
+    # .desire-shell rule: the old dark values still live in the other
+    # shells (world/shop/chat/profile/...), so file-wide counts would
+    # over-count.
+    shell = css[css.index(".desire-shell {"):
+                css.index("}", css.index(".desire-shell {")) + 1]
+    for token in ("--w-bg: #f3ecdf;",
+                  "--w-panel: rgba(255, 250, 242, 0.78);",
+                  "--w-panel-deep: rgba(236, 224, 204, 0.7);",
+                  "--w-line: rgba(120, 96, 64, 0.22);",
+                  "--w-text: #2a2118;",
+                  "--w-dim: #6e5f4e;",
+                  "--w-accent: #c98a2e;"):
+        assert shell.count(token) == 1, token
+    # The provisional-token comment names the §48 provenance exactly once.
+    assert css.count("/* provisional warm tokens — VISUAL-BIBLE §48: "
+                     "final color tokens not fixed */") == 1
+    # The old dark mirror values are ABSENT from the desire block (they
+    # remain in the other shells — pinned == 0 here so the mirror cannot
+    # silently return).
+    for old in ("--w-bg: #0a1016;",
+                "--w-panel: rgba(23, 33, 42, 0.72);",
+                "--w-panel-deep: rgba(12, 19, 25, 0.6);",
+                "--w-line: rgba(148, 178, 205, 0.16);",
+                "--w-text: #dde5ec;",
+                "--w-dim: #8fa1b1;",
+                "--w-accent: #e2b45a;"):
+        assert shell.count(old) == 0, old
+    # The warm rework also widens the free-text field and reserves room
+    # for a two-line pre-line status.
+    assert css.count("#desire-input { min-height: 120px; resize: vertical; }") == 1
+    assert css.count(".desire-status { margin-top: 6px; white-space: pre-line; "
+                     "min-height: 2.4em; }") == 1
+    # Issue #59 PR #1 review: container paint — the shell remaps the
+    # global muted token for its scope (h2/label/.sugg inks) and paints
+    # the container flat so --w-bg/--w-text are live (no gradient stack —
+    # that is world-shell's own look). Region-scoped: "color:
+    # var(--w-text);" appears 37 times file-wide.
+    for paint in ("--dim: var(--w-dim);",
+                  "background: var(--w-bg);",
+                  "color: var(--w-text);"):
+        assert shell.count(paint) == 1, paint
+    # The inherited global inks (a → cool blue, .desire-drop → yellow
+    # --warn) are unreadable on cream — warm dark inks instead, and the
+    # drop button goes ghost (chips precedent).
+    assert css.count(".desire-shell a { color: #8a5a16; }") == 1
+    assert css.count(".desire-shell .desire-drop { color: #93301f; "
+                     "background: transparent; }") == 1
+    assert css.count(".desire-shell .desire-drop:hover { border-color: "
+                     "#93301f; }") == 1
+    # The old accent-ink hover is GONE (pinned == 0 so the unreadable ink
+    # cannot silently return); the warm dark ink replaces it.
+    assert css.count(".desire-shell .sugg:hover { color: var(--w-accent); "
+                     "border-color: var(--w-accent); }") == 0
+    assert css.count(".desire-shell .sugg:hover { color: #8a5a16; "
+                     "border-color: #8a5a16; }") == 1
+    # The appearance link's accent ink is replaced the same way (pinning
+    # the new literal implies the old var(--w-accent) one is gone).
+    assert css.count(".desire-appear-link a { color: #8a5a16; "
+                     "font-weight: 600; }") == 1
 
 
 def test_root_wline_fallback_pin():
