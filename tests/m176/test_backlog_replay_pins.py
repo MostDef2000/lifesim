@@ -115,12 +115,13 @@ def test_boot_cursor_init_pin():
     assert JS.count("bootCursor: Infinity") == 1
     assert JS.count(BOOT_CURSOR_INIT_TAIL) == 1
     # Whole-file occurrence census (round-2 recount): 1 init field (no S.
-    # prefix) + 5 S. sites (REST capture guard, REST capture assign,
-    # zero-events fallback assign, CONTROL_CHANGED gate, own-arrival gate)
-    # => 6 total, 5 S.-prefixed. There is no separate fallback guard — the
+    # prefix) + 6 S. sites (REST capture guard, REST capture assign,
+    # zero-events fallback assign, #258 hello-handler assign,
+    # CONTROL_CHANGED gate, own-arrival gate)
+    # => 7 total, 6 S.-prefixed. There is no separate fallback guard — the
     # fallback is `} else if (S.cursor === 0) {` + a bare assign.
-    assert JS.count("bootCursor") == 6
-    assert JS.count("S.bootCursor") == 5
+    assert JS.count("bootCursor") == 7
+    assert JS.count("S.bootCursor") == 6
 
 
 # ---------- (b) the boot cursor is captured from the first REST fill ----------

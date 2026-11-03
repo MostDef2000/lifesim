@@ -146,10 +146,12 @@ def test_stopfeed_detaches_socket_handlers():
     assert JS.count("S.ws = null;\n    S.wsTries += 1;") == 0
     # #161 (round 2): pin the guarded onclose cleanup that round 1 added but
     # never pinned — a stale socket may only clear S.ws while it is still
-    # the current one.
-    assert JS.count("if (S.ws === ws) S.ws = null;") == 1
-    # Whole-file occurrences: stopFeed's detach + the guarded onclose cleanup.
-    assert JS.count("S.ws = null;") <= 2
+    # the current one. #258 adds a second site: the hello-deadline retire
+    # path reuses the same #161 identity-guard pattern.
+    assert JS.count("if (S.ws === ws) S.ws = null;") == 2
+    # Whole-file occurrences: stopFeed's detach + the #258 hello-deadline
+    # retire + the guarded onclose cleanup.
+    assert JS.count("S.ws = null;") <= 3
 
 
 # ---------- 3. no explicit double-dispatch navigation (round 2) ----------
