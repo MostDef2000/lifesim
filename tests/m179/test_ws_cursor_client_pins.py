@@ -33,14 +33,21 @@ HELPER_DEF = (
 
 ONOPEN_LINE = "ws.onopen = () => { S.wsTries = 0; sendWsCursor(); };"
 
-# Mirrored verbatim from tests/m176 (frozen): the #178 CONTROL_CHANGED
-# liveness gate must survive this lane byte-identically.
+# Mirrored verbatim from tests/m176 (#262 updated the shape): the #178
+# CONTROL_CHANGED liveness gate — now one OR-clause inside the #262 combined
+# gate — must survive this lane byte-identically.
 CONTROL_CHANGED_GATE_BLOCK = (
-    '          if (fresh.some((e) => e.event_type === "CONTROL_CHANGED"\n'
-    "              && e.id > S.bootCursor\n"
-    '              && S.world && typeof e.game_timestamp === "number"\n'
-    "              && e.game_timestamp >= S.world.game_timestamp - 15)\n"
-    '            && location.hash === "#/world") {\n'
+    "          if (fresh.some((e) =>\n"
+    '              (e.event_type === "CONTROL_CHANGED"\n'
+    "                && e.id > S.bootCursor\n"
+    '                && S.world && typeof e.game_timestamp === "number"\n'
+    "                && e.game_timestamp >= S.world.game_timestamp - 15)\n"
+    "              || (S.character && e.actor_id === S.character.id\n"
+    "                && e.id > S.bootCursor\n"
+    '                && ["TASK_COMPLETED", "ITEM_CONSUMED", "CHARACTER_MOVED"]\n'
+    "                  .includes(e.event_type)))\n"
+    '            && location.hash === "#/world"\n'
+    "            && !liveOwnArrival) {\n"
     "            viewWorld();\n"
     "          }"
 )
@@ -143,12 +150,15 @@ def test_179_ws_py_handshake_pins():
 # ---------- #177/#178 defense-in-depth literals unchanged ----------
 
 def test_178_defense_in_depth_literals_unchanged():
-    # bootCursor census identical to m176: 1 init field + 6 S. sites
-    # (#258 adds the hello-handler assign S.bootCursor = data.cursor)
-    assert JS.count("bootCursor") == 7
-    assert JS.count("S.bootCursor") == 6
+    # bootCursor census identical to m176 (#262 recount): 1 init field
+    # + 7 S. sites (#258 adds the hello-handler assign S.bootCursor =
+    # data.cursor; #262 splits the old own-arrival gate site into
+    # liveOwnArrival + the own-actor completion clause)
+    assert JS.count("bootCursor") == 8
+    assert JS.count("S.bootCursor") == 7
     assert JS.count("bootCursor: Infinity") == 1
-    # the CONTROL_CHANGED liveness gate keeps its exact bytes (m176 owns it)
+    # the CONTROL_CHANGED liveness gate keeps its exact bytes inside the
+    # #262 combined gate (m176 owns it)
     assert JS.count(CONTROL_CHANGED_GATE_BLOCK) == 1
     assert JS.count('e.event_type === "CONTROL_CHANGED"') == 1
     assert JS.count('location.hash === "#/world"') == 1

@@ -2878,21 +2878,35 @@ function connectWs() {
           // the world view. React only to LIVE events: id beyond the boot
           // replay marker and logged within a small window of the current
           // game time (covers backlogs larger than the fetch window).
-          if (fresh.some((e) => e.event_type === "CONTROL_CHANGED"
+          // #262: own-character completion events (TASK_COMPLETED,
+          // ITEM_CONSUMED, own CHARACTER_MOVED) must refresh the needs panel
+          // too — the own-actor branch gates on ID freshness ONLY (no
+          // game_timestamp window: backdated DIRECT completions, #261, would
+          // fail a 15-minute liveness check). liveOwnArrival is computed once
+          // per frame: when it fires, the general refresh is suppressed and
+          // onOwnArrival() still runs (max one full render per WS frame).
+          const liveOwnArrival = fresh.some((e) => isOwnMoveEvent(e)
               && e.id > S.bootCursor
               && S.world && typeof e.game_timestamp === "number"
-              && e.game_timestamp >= S.world.game_timestamp - 15)
-            && location.hash === "#/world") {
+              && e.game_timestamp >= S.world.game_timestamp - 15);
+          if (fresh.some((e) =>
+              (e.event_type === "CONTROL_CHANGED"
+                && e.id > S.bootCursor
+                && S.world && typeof e.game_timestamp === "number"
+                && e.game_timestamp >= S.world.game_timestamp - 15)
+              || (S.character && e.actor_id === S.character.id
+                && e.id > S.bootCursor
+                && ["TASK_COMPLETED", "ITEM_CONSUMED", "CHARACTER_MOVED"]
+                  .includes(e.event_type)))
+            && location.hash === "#/world"
+            && !liveOwnArrival) {
             viewWorld();
           }
           // #82 (A3): own arrival completes the travel state machine
           // (travelling → arrived) and re-renders the map. #177: the
-          // liveness gate below keeps historical own-MOVE replay from
+          // liveness gate above keeps historical own-MOVE replay from
           // churning the map.
-          if (fresh.some((e) => isOwnMoveEvent(e)
-              && e.id > S.bootCursor
-              && S.world && typeof e.game_timestamp === "number"
-              && e.game_timestamp >= S.world.game_timestamp - 15)) onOwnArrival();
+          if (liveOwnArrival) onOwnArrival();
         }
       }
     } catch (e) { /* ignore malformed */ }
