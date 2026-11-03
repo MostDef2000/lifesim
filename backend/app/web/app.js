@@ -3113,7 +3113,10 @@ function renderChat(session, locName) {
   const visual = el("div", { class: "chat-hero", id: "chat-visual" });
   visual.append(el("div", { class: "portrait-status muted" }, "Портрет…"));
   const visualOn = !S.visualDisabled;
-  if (visualOn) {
+  // #260: empty npcSel (no NPCs on the location) — no doomed //portrait
+  // fetch; the fallback branch below renders the shared fallback directly
+  // (same path as S.visualDisabled; the #132 flag itself stays unset).
+  if (visualOn && npcSel.value) {
     (async () => {
       try {
         const asset = await api(`/visual/characters/${npcSel.value}/portrait`);
