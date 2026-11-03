@@ -593,6 +593,12 @@ class DialogueMessage(Base):
     content = Column(Text, nullable=False)
     suggested_responses = Column(JSON, nullable=True)
     game_timestamp = Column(Integer, nullable=False)
+    # #196: per-row reply provenance — user|llm|fallback. Nullable=False BY
+    # DESIGN: the ALTER in ensure_dialogue_source_column back-fills DEFAULT
+    # 'fallback' onto pre-#196 rows (then rewrites legacy user rows to
+    # 'user' — sender is authoritative for them). New ORM rows default to
+    # "fallback" here; the insert seam records the resolved source.
+    source = Column(String, nullable=False, default="fallback")
 
 class VisualAsset(Base):
     """M6 (SPEC §68): generated visual asset. scene_descriptor is structured (§67)."""
@@ -736,6 +742,40 @@ def ensure_outfit_column(bind) -> None:
             return
         conn.execute(text(
             "ALTER TABLE characters ADD COLUMN outfit VARCHAR DEFAULT 'auto'"))
+
+    if isinstance(bind, Engine):
+        with bind.begin() as conn:
+            _run(conn)
+    else:
+        _run(bind)
+
+
+def ensure_dialogue_source_column(bind) -> None:
+    """#196 additive schema self-heal (same discipline as the #205
+    characters.outfit heal in create_app._lifespan): a pre-#196 dev/prod DB
+    has a `dialogue_messages` table without the `source` column, and
+    create_all is additive-only for TABLES — it never alters existing ones.
+    Idempotent: a PRAGMA table_info check gates the ALTER. SQLite back-fills
+    the non-NULL DEFAULT 'fallback' onto existing rows when the column is
+    added; one UPDATE then rewrites legacy user rows to 'user' — the sender
+    column is authoritative for them. Legacy NPC rows keep 'fallback' (the
+    conservative unknown-provenance default: their true origin — llm or
+    fallback template — is not recoverable). Accepts an Engine or a
+    Connection (SQLAlchemy 2.0 removed Engine.execute)."""
+    from sqlalchemy import Engine, text
+
+    def _run(conn):
+        rows = conn.execute(text("PRAGMA table_info(dialogue_messages)")).fetchall()
+        if not rows:
+            # No dialogue_messages table yet — create_all creates it with the column.
+            return
+        if any(row[1] == "source" for row in rows):
+            return
+        conn.execute(text(
+            "ALTER TABLE dialogue_messages ADD COLUMN source TEXT NOT NULL DEFAULT 'fallback'"))
+        # Sender-aware backfill (#196): legacy user rows read 'user'.
+        conn.execute(text(
+            "UPDATE dialogue_messages SET source = 'user' WHERE sender = 'user'"))
 
     if isinstance(bind, Engine):
         with bind.begin() as conn:

@@ -142,6 +142,12 @@ def create_app(settings, session_factory: sessionmaker):
         from app.db.models import ensure_outfit_column
 
         ensure_outfit_column(session_factory.kw["bind"])
+        # #196: same seam for the new dialogue_messages.source column —
+        # ADD COLUMN DEFAULT 'fallback' + sender-aware backfill of legacy
+        # rows (user → 'user', NPC stays 'fallback').
+        from app.db.models import ensure_dialogue_source_column
+
+        ensure_dialogue_source_column(session_factory.kw["bind"])
         tick_task = None
         if settings.world.live_tick_enabled:
             from app.api.ticker import start_tick_driver
@@ -2091,7 +2097,8 @@ def create_app(settings, session_factory: sessionmaker):
         now_ts = _world_now(session)
         session.add(DialogueMessage(
             session_id=row.id, sender="user", content=content,
-            game_timestamp=now_ts,
+            # #196: provenance is recorded per row at insert time.
+            source="user", game_timestamp=now_ts,
         ))
         session.flush()
 
@@ -2129,7 +2136,10 @@ def create_app(settings, session_factory: sessionmaker):
 
         session.add(DialogueMessage(
             session_id=row.id, sender="npc", content=reply,
-            suggested_responses=suggestions, game_timestamp=now_ts,
+            suggested_responses=suggestions,
+            # #196: the resolved 'llm'/'fallback' lands on the row —
+            # history reads it back per row (GET /dialogue/{sid}).
+            source=source, game_timestamp=now_ts,
         ))
         session.commit()
         return {
@@ -2169,6 +2179,9 @@ def create_app(settings, session_factory: sessionmaker):
                     "sender": m.sender, "content": m.content,
                     "suggested_responses": m.suggested_responses,
                     "game_timestamp": m.game_timestamp,
+                    # #196: per-row provenance (backward-compatible
+                    # addition — pre-#196 keys stay intact).
+                    "source": m.source,
                 }
                 for m in messages
             ],

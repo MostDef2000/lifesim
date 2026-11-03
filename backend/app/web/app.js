@@ -3162,6 +3162,12 @@ function renderChat(session, locName) {
       el("div", { class: `chatmsg ${m.sender === "npc" ? "npc" : ""}` },
         el("span", { class: "who" }, m.sender === "npc" ? "NPC" : "Вы"),
         m.content,
+        // #196: honest provenance on history NPC bubbles — a row the LLM
+        // seam did not produce carries a small muted label (same honesty
+        // as the #88 POST flag / the visual fallback note above).
+        ...(m.source === "fallback"
+          ? [el("span", { class: "muted" }, "LLM недоступен — fallback")]
+          : []),
         el("span", { class: "muted chat-when" },
           " " + dayTime(m.game_timestamp)))));
   }
