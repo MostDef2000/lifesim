@@ -47,14 +47,22 @@ MOVE_GATE_BLOCK = (
 )
 
 # #177 amended this block (liveness gate: backlog replay from cursor 0 on
-# every (re)connect must not reload the world view) — the literal below is
-# the new truthful bytes; the count/ordering assertions are unchanged.
+# every (re)connect must not reload the world view); #262 widened it into the
+# combined gate (OR-branch for own-character completion events) — the literal
+# below is the current truthful bytes; the count/ordering assertions are
+# unchanged.
 CONTROL_CHANGED_BLOCK = (
-    '          if (fresh.some((e) => e.event_type === "CONTROL_CHANGED"\n'
-    '              && e.id > S.bootCursor\n'
-    '              && S.world && typeof e.game_timestamp === "number"\n'
-    '              && e.game_timestamp >= S.world.game_timestamp - 15)\n'
-    '            && location.hash === "#/world") {\n'
+    "          if (fresh.some((e) =>\n"
+    '              (e.event_type === "CONTROL_CHANGED"\n'
+    "                && e.id > S.bootCursor\n"
+    '                && S.world && typeof e.game_timestamp === "number"\n'
+    "                && e.game_timestamp >= S.world.game_timestamp - 15)\n"
+    "              || (S.character && e.actor_id === S.character.id\n"
+    "                && e.id > S.bootCursor\n"
+    '                && ["TASK_COMPLETED", "ITEM_CONSUMED", "CHARACTER_MOVED"]\n'
+    "                  .includes(e.event_type)))\n"
+    '            && location.hash === "#/world"\n'
+    "            && !liveOwnArrival) {\n"
     "            viewWorld();\n"
     "          }"
 )

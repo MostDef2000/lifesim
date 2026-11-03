@@ -30,6 +30,13 @@ Fix (all in backend/app/web/app.js, liveness gate = #177):
    keeps its ungated hook (it cannot fire while the socket is live — the
    early-return guard below is pinned intact).
 
+#262 amendment: the refresh gate grew an OR-branch — own-character completion
+events (TASK_COMPLETED, ITEM_CONSUMED, CHARACTER_MOVED via actor_id) also
+refresh the world view, gated on ID freshness ONLY (no timestamp window:
+backdated DIRECT completions must refresh). The own-MOVE liveness gate moved
+into a shared liveOwnArrival declaration; when it fires, the general refresh
+is suppressed and onOwnArrival() still runs (one render per WS frame).
+
 Pin tests (this file, following the m162 house style): exact literal counts,
 never weakened; the OLD unconditional refresh shape is pinned == 0 so the
 backlog-reload bug cannot silently return.
@@ -69,14 +76,21 @@ FALLBACK_BLOCK = (
     "  }"
 )
 
-# (c) the amended CONTROL_CHANGED refresh: live-only (id gate + timestamp
-# window), still hash-gated to #/world (10-space if-line, 14-space continuations).
+# (c) the amended CONTROL_CHANGED refresh (#262 widened it with an OR-branch
+# for own-character completion events; the CONTROL_CHANGED predicate keeps its
+# #177 bytes inside the OR — 10-space if-line, 14/16/18-space continuations).
 CONTROL_CHANGED_GATE_BLOCK = (
-    '          if (fresh.some((e) => e.event_type === "CONTROL_CHANGED"\n'
-    "              && e.id > S.bootCursor\n"
-    '              && S.world && typeof e.game_timestamp === "number"\n'
-    "              && e.game_timestamp >= S.world.game_timestamp - 15)\n"
-    '            && location.hash === "#/world") {\n'
+    "          if (fresh.some((e) =>\n"
+    '              (e.event_type === "CONTROL_CHANGED"\n'
+    "                && e.id > S.bootCursor\n"
+    '                && S.world && typeof e.game_timestamp === "number"\n'
+    "                && e.game_timestamp >= S.world.game_timestamp - 15)\n"
+    "              || (S.character && e.actor_id === S.character.id\n"
+    "                && e.id > S.bootCursor\n"
+    '                && ["TASK_COMPLETED", "ITEM_CONSUMED", "CHARACTER_MOVED"]\n'
+    "                  .includes(e.event_type)))\n"
+    '            && location.hash === "#/world"\n'
+    "            && !liveOwnArrival) {\n"
     "            viewWorld();\n"
     "          }"
 )
@@ -89,12 +103,11 @@ OLD_UNCONDITIONAL_BLOCK = (
     "            viewWorld();"
 )
 
-# (e) the onOwnArrival WS hook carries the same liveness gate (single line).
+# (e) the onOwnArrival WS hook (#262: the liveness gate moved into the
+# liveOwnArrival declaration shared with the refresh gate above — the hook
+# itself is now the one-line guarded call).
 OWN_ARRIVAL_GATE_BLOCK = (
-    "          if (fresh.some((e) => isOwnMoveEvent(e)\n"
-    "              && e.id > S.bootCursor\n"
-    '              && S.world && typeof e.game_timestamp === "number"\n'
-    "              && e.game_timestamp >= S.world.game_timestamp - 15)) onOwnArrival();"
+    "          if (liveOwnArrival) onOwnArrival();"
 )
 
 # (f) the early-return WS guard in pollEventsFeed — must not be weakened.
@@ -114,14 +127,14 @@ def test_boot_cursor_init_pin():
     # #175 chatDraft tail — same single-line tail convention).
     assert JS.count("bootCursor: Infinity") == 1
     assert JS.count(BOOT_CURSOR_INIT_TAIL) == 1
-    # Whole-file occurrence census (round-2 recount): 1 init field (no S.
-    # prefix) + 6 S. sites (REST capture guard, REST capture assign,
+    # Whole-file occurrence census (recounted for #262): 1 init field (no S.
+    # prefix) + 7 S. sites (REST capture guard, REST capture assign,
     # zero-events fallback assign, #258 hello-handler assign,
-    # CONTROL_CHANGED gate, own-arrival gate)
-    # => 7 total, 6 S.-prefixed. There is no separate fallback guard — the
-    # fallback is `} else if (S.cursor === 0) {` + a bare assign.
-    assert JS.count("bootCursor") == 7
-    assert JS.count("S.bootCursor") == 6
+    # CONTROL_CHANGED gate, #262 own-actor completion gate, liveOwnArrival
+    # gate) => 8 total, 7 S.-prefixed. There is no separate fallback guard —
+    # the fallback is `} else if (S.cursor === 0) {` + a bare assign.
+    assert JS.count("bootCursor") == 8
+    assert JS.count("S.bootCursor") == 7
 
 
 # ---------- (b) the boot cursor is captured from the first REST fill ----------
@@ -165,6 +178,11 @@ def test_boot_capture_in_poll_events_feed():
 
 def test_control_changed_liveness_gate():
     # The amended block exists exactly once (m147 pins the same bytes).
+    # #262 widened it: the CONTROL_CHANGED predicate keeps its #177 liveness
+    # clauses byte-identically inside the OR; the added own-actor branch
+    # (needs-panel refresh on own TASK_COMPLETED/ITEM_CONSUMED/CHARACTER_MOVED)
+    # gates on ID freshness ONLY — no game_timestamp window (backdated DIRECT
+    # completions, #261, must still refresh).
     assert JS.count(CONTROL_CHANGED_GATE_BLOCK) == 1
     block = JS[JS.index(CONTROL_CHANGED_GATE_BLOCK):]
     # All three gate clauses ride inside the condition.
@@ -184,7 +202,9 @@ def test_control_changed_liveness_gate():
 # ---------- (e) own-MOVE replay cannot churn the map ----------
 
 def test_own_arrival_liveness_gate():
-    # The WS hook is gated identically to the CONTROL_CHANGED refresh.
+    # The WS hook reuses the liveOwnArrival gate (#262: computed once, shared
+    # with the refresh condition — arrival suppresses the general refresh but
+    # still runs the hook).
     assert JS.count(OWN_ARRIVAL_GATE_BLOCK) == 1
     connect_ws = JS.index("function connectWs() {")
     cc_gate = JS.index(CONTROL_CHANGED_GATE_BLOCK)
