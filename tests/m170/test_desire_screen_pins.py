@@ -269,6 +269,21 @@ def test_desire_css_pins():
     # the new literal implies the old var(--w-accent) one is gone).
     assert css.count(".desire-appear-link a { color: #8a5a16; "
                      "font-weight: 600; }") == 1
+    # Issue #59 acceptance: the panel cards must read against the warm
+    # ground, not blend into it — lighter fill + stronger warm edge
+    # (provisional, §48). Region-scoped to the .desire-shell .panel rule:
+    # the old var(--w-panel)/var(--w-line) body is shared verbatim by the
+    # other shells (shop/chat/profile/people/creator), so file-wide
+    # counts would over-count.
+    panel = css[css.index(".desire-shell .panel {"):
+                css.index("}", css.index(".desire-shell .panel {")) + 1]
+    assert panel.count("background: rgba(255, 253, 248, 0.92);") == 1
+    assert panel.count("border-color: rgba(120, 96, 64, 0.35);") == 1
+    # The old token-based body is ABSENT from the desire panel (it stays
+    # in the other shells — pinned == 0 here so it cannot silently
+    # return).
+    assert panel.count("background: var(--w-panel);") == 0
+    assert panel.count("border-color: var(--w-line);") == 0
 
 
 def test_root_wline_fallback_pin():

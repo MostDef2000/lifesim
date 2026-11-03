@@ -1398,8 +1398,10 @@ button.danger:hover { background: #93301f; }
 .desire-shell .desire-drop { color: #93301f; background: transparent; }
 .desire-shell .desire-drop:hover { border-color: #93301f; }
 .desire-shell .panel {
-  background: var(--w-panel);
-  border-color: var(--w-line);
+  /* #59 acceptance: cards must read against the warm ground, not blend
+     into it — lighter fill + stronger warm edge (provisional, §48). */
+  background: rgba(255, 253, 248, 0.92);
+  border-color: rgba(120, 96, 64, 0.35);
 }
 .desire-shell .muted { color: var(--w-dim); }
 .desire-shell button.primary {
