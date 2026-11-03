@@ -220,6 +220,16 @@ def _chat63_section(css):
         "/* #175: connection banner", 1)[0]
 
 
+def _chat63_block(css):
+    """The TRUE #63 chat block: from the #63 header comment to the #67
+    profile-screen marker. The wide _chat63_section slice also contains
+    the later profile/shop shells, which deliberately keep the old dark
+    values until their own #59 PRs — old-value-ABSENCE pins must not see
+    them, so they scope to this tighter block."""
+    return css.split("issue #63: chat screen warm-family rework", 1)[1].split(
+        "issue #67: profile screen", 1)[0]
+
+
 def test_chat_shell_css_pins():
     css = _read(APP_CSS)
     # One shell definition, one section.
@@ -268,6 +278,71 @@ def test_chat_shell_css_pins():
     assert ".chat-shell .sugg" in sec
     # The appended-only tail convention (m175) is respected.
     assert css.rstrip().endswith(".conn-banner.hidden { display: none; }")
+
+
+def test_chat_warm_cream_pins():
+    """#59 PR #2: the chat shell joins the provisional warm cream/beige
+    token family (VISUAL-BIBLE §48) — the same family .desire-shell has
+    carried since PR #1. Value pins are region-scoped (m170 technique):
+    the cream tokens also live in .desire-shell (file-wide counts would
+    over-count), and the old dark values still live in the later shells
+    (profile/shop/...) which get their own #59 PRs."""
+    css = _read(APP_CSS)
+    block = _chat63_block(css)
+    # The .chat-shell rule region: the tokens + container paint are
+    # defined here and nowhere else in the block.
+    shell = css[css.index(".chat-shell {"):
+                css.index("}", css.index(".chat-shell {")) + 1]
+    # (1) The 8 provisional cream token values, each exactly once.
+    for token in ("--w-bg: #f3ecdf;",
+                  "--w-panel: rgba(255, 253, 248, 0.92);",
+                  "--w-panel-deep: rgba(236, 224, 204, 0.7);",
+                  "--w-text: #2a2118;",
+                  "--w-dim: #6e5f4e;",
+                  "--w-accent: #c98a2e;",
+                  "--w-rel-fill: rgba(180, 83, 127, 0.9);",
+                  "--w-rel-hostile: #b84a4a;"):
+        assert shell.count(token) == 1, token
+    # (2) Container paint (the desire lesson): the global muted token is
+    # remapped for this scope and the container is painted flat so
+    # --w-bg/--w-text are live.
+    for paint in ("--dim: var(--w-dim);",
+                  "background: var(--w-bg);",
+                  "color: var(--w-text);"):
+        assert shell.count(paint) == 1, paint
+    # (4) Accent-as-text fails on cream — the warm dark-gold ink #8a5a16
+    # replaces it exactly 3× in the chat block (#chat-rel-note,
+    # .chatmsg .who, .sugg:hover — the latter's border-color stays
+    # var(--w-accent)).
+    assert block.count("#8a5a16") == 3
+    # (3) All five former var(--w-line) consumers now use the explicit
+    # warm literal (panel/select/hero/rel-seg/chatmsg borders); the
+    # --w-line token itself is still NOT defined here (count stays 4,
+    # pinned in test_chat_shell_css_pins).
+    assert block.count("rgba(120, 96, 64, 0.35)") == 5
+    # Old dark values are ABSENT from the true chat block (they remain in
+    # the later shells — pinned == 0 here so the dark mirror cannot
+    # silently return to chat).
+    for old in ("#0a1016", "#dde5ec", "#8fa1b1", "#e2b45a",
+                "rgba(217, 119, 168", "#e07070",
+                "rgba(23, 33, 42", "rgba(12, 19, 25", "#14181d"):
+        assert block.count(old) == 0, old
+    # (5) The hero band is flat panel-deep — the old dark gradient stack
+    # is gone from the chat block.
+    hero = css[css.index(".chat-shell .chat-hero {"):
+               css.index("}", css.index(".chat-shell .chat-hero {")) + 1]
+    assert hero.count("background: var(--w-panel-deep);") == 1
+    assert block.count("radial-gradient(640px 240px") == 0
+    # (6) #268 card pattern: the panel is fill + warm border only — no
+    # glass blur, no shadow.
+    panel = css[css.index(".chat-shell .panel {"):
+                css.index("}", css.index(".chat-shell .panel {")) + 1]
+    assert panel.count("backdrop-filter") == 0
+    assert panel.count("box-shadow") == 0
+    # (7) The partner button ink is the warm dark ink (was #14181d).
+    assert css.count("color: #1d1506;") == 1
+    # (8) The header comment carries the PROVISIONAL §48 marker.
+    assert css.count("PROVISIONAL per VISUAL-BIBLE §48") == 1
 
 
 def test_root_block_byte_untouched():

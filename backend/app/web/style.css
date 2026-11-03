@@ -1490,38 +1490,45 @@ button.danger:hover { background: #93301f; }
 
 /* ---------- issue #63: chat screen warm-family rework ----------
    The chat screen renders outside .world-shell, so the cool :root tokens
-   would leak in; mirror the warm custom properties (same values as
-   .desire-shell/.shop-shell). Scope rides on the .grid element (class
-   "grid chat-shell"), same as those shells. Tasks/inventory stay cool —
-   untouched. No new assets/fonts. The EMPTY visual state is the normal
-   state: a warm hero band with centered muted fallback text, styled to
-   look intentional.
-   DELIBERATE deviation from the .desire-shell mirror: NO --w-line
-   definition here — m170/m173/m175 pin the --w-line token count at 4,
-   and the :root fallback (#172 note at the top of this file) carries the
-   IDENTICAL value rgba(148, 178, 205, 0.16), so var(--w-line) resolves
-   to the same color inside .chat-shell anyway. */
+   would leak in; the shell carries the provisional warm cream/beige token
+   family (#59 PR #2 — the same family .desire-shell has carried since
+   PR #1). Scope rides on the .grid element (class "grid chat-shell"),
+   same as those shells. Tasks/inventory stay cool — untouched. No new
+   assets/fonts. The EMPTY visual state is the normal state: a warm hero
+   band with centered muted fallback text, styled to look intentional.
+   Borders inside the shell are EXPLICIT warm literals rgba(120, 96, 64,
+   0.35): the :root fallback is still the OLD cool value, and m170/m173/
+   m175 pin the --w-line token count at 4 — a fifth definition here is
+   forbidden, so the token is NOT introduced. New hex values are
+   PROVISIONAL per VISUAL-BIBLE §48 (final color tokens not fixed). */
 .chat-shell {
-  --w-bg: #0a1016;
-  --w-panel: rgba(23, 33, 42, 0.72);
-  --w-panel-deep: rgba(12, 19, 25, 0.6);
-  --w-text: #dde5ec;
-  --w-dim: #8fa1b1;
-  --w-accent: #e2b45a;
+  /* #59 PR #2: provisional cream tokens (VISUAL-BIBLE §48 — final colors
+     not fixed); rel accents darkened for cream readability. */
+  --w-bg: #f3ecdf;
+  --w-panel: rgba(255, 253, 248, 0.92);
+  --w-panel-deep: rgba(236, 224, 204, 0.7);
+  --w-text: #2a2118;
+  --w-dim: #6e5f4e;
+  --w-accent: #c98a2e;
   --w-warm: rgba(226, 180, 90, 0.15);
   --w-warm-line: rgba(226, 180, 90, 0.4);
   --w-warm-ink: #1d1506;
   /* #63 chat-only accents: warm pink/magenta for the relationship scale
      fill, hostile red for its first band (no cool --ok green anywhere). */
-  --w-rel-fill: rgba(217, 119, 168, 0.85);
-  --w-rel-hostile: #e07070;
+  --w-rel-fill: rgba(180, 83, 127, 0.9);
+  --w-rel-hostile: #b84a4a;
+  /* #59 PR #2 (desire lesson): remap the global muted token for this
+     scope and paint the container flat so --w-bg/--w-text are live. */
+  --dim: var(--w-dim);
+  background: var(--w-bg);
+  color: var(--w-text);
 }
 .chat-shell .panel {
+  /* #268 card pattern: lighter fill + visible warm edge on the cream
+     ground (the dark-theme glass blur/shadow is gone). */
   background: var(--w-panel);
-  border-color: var(--w-line);
+  border-color: rgba(120, 96, 64, 0.35);
   border-radius: 14px;
-  backdrop-filter: blur(10px);
-  box-shadow: 0 12px 30px rgba(2, 8, 14, 0.35);
 }
 .chat-shell .muted { color: var(--w-dim); }
 .chat-shell button.primary {
@@ -1533,7 +1540,7 @@ button.danger:hover { background: #93301f; }
 .chat-shell select {
   background: var(--w-panel-deep);
   color: var(--w-text);
-  border: 1px solid var(--w-line);
+  border: 1px solid rgba(120, 96, 64, 0.35);
   border-radius: 10px;
 }
 
@@ -1543,12 +1550,10 @@ button.danger:hover { background: #93301f; }
 .chat-shell .chat-hero {
   width: 100%;
   aspect-ratio: 16 / 9;
-  border: 1px solid var(--w-line);
+  border: 1px solid rgba(120, 96, 64, 0.35);
   border-radius: 14px;
   overflow: hidden;
-  background:
-    radial-gradient(640px 240px at 18% 0%, rgba(226, 180, 90, 0.10), transparent 62%),
-    linear-gradient(180deg, rgba(23, 33, 42, 0.55), var(--w-panel-deep));
+  background: var(--w-panel-deep);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -1590,7 +1595,7 @@ button.danger:hover { background: #93301f; }
   height: 8px;
   border-radius: 4px;
   background: var(--w-panel-deep);
-  border: 1px solid var(--w-line);
+  border: 1px solid rgba(120, 96, 64, 0.35);
 }
 .rel-seg.on { background: var(--w-rel-fill); border-color: var(--w-rel-fill); }
 .rel-seg.on.rel-hostile {
@@ -1605,21 +1610,22 @@ button.danger:hover { background: #93301f; }
    relationship_effect.applied is true (the shared SOCIALIZE rule applied
    once per cooldown window), and hides/clears it otherwise. */
 .chat-shell #chat-rel-note {
-  color: var(--w-accent);
+  color: #8a5a16;
   font-size: 12px;
 }
 
 /* #63: message bubbles — translucent warm cards; the sender label is the
-   warm accent (NOT the cool --ok green). */
+   warm dark-gold ink (NOT the cool --ok green; accent-as-text fails on
+   cream — #59 PR #2). */
 .chat-shell .chatmsg {
   background: var(--w-panel-deep);
-  border: 1px solid var(--w-line);
+  border: 1px solid rgba(120, 96, 64, 0.35);
   border-radius: 12px;
   padding: 10px 14px;
   max-width: 70%;
   margin: 6px 0;
 }
-.chat-shell .chatmsg .who { color: var(--w-accent); }
+.chat-shell .chatmsg .who { color: #8a5a16; }
 
 /* #63: typing bubble — three bouncing dots inside the chatlog; static dots
    under prefers-reduced-motion. */
@@ -1680,7 +1686,7 @@ button.danger:hover { background: #93301f; }
   border-color: var(--w-warm-line);
   padding: 8px 12px;
 }
-.chat-shell .sugg:hover { color: var(--w-accent); border-color: var(--w-accent); }
+.chat-shell .sugg:hover { color: #8a5a16; border-color: var(--w-accent); }
 
 /* issue #182: partnership proposal — small warm button near the suggestion
    chips. Hidden by default (hidden attribute); app.js reveals it only for
@@ -1688,7 +1694,7 @@ button.danger:hover { background: #93301f; }
 .chat-shell #chat-partner-btn {
   margin-top: 8px;
   background: var(--w-accent);
-  color: #14181d;
+  color: #1d1506;
   border: 1px solid var(--w-accent);
   padding: 6px 14px;
   cursor: pointer;
