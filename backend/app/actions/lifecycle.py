@@ -797,7 +797,9 @@ def _advance_character(
     Task chaining: tasks completed inside the past window finish AT their
     own ends_at, and their successors start at that completion time (not at
     `now`) — so a 1440-minute step advances the character's whole daily
-    schedule back-to-back instead of one small task per step.
+    schedule back-to-back instead of one small task per step. Exception:
+    owned DIRECT characters start new tasks at max(start_at, now) (see the
+    clamp below).
     """
 
     # Completion time of the most recent boundary processed in this catch-up
@@ -880,6 +882,11 @@ def _advance_character(
                 .scalar()
             )
             start_at = last_end if last_end is not None else 0
+        # DIRECT players are the exception to historical chaining: a command
+        # issued at world time `now` must never produce events dated before
+        # it (#261), so their new tasks start at max(start_at, now).
+        if getattr(char, "user_id", None) is not None and char.control_mode == "DIRECT":
+            start_at = max(start_at, now)
         activated = activate(session, char, start_at, settings)
         if activated:
             continue

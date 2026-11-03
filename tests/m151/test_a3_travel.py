@@ -136,8 +136,19 @@ def test_move_task_completes_with_arrival_and_event(world):
     task_id = r.json()["task_id"]
 
     # Run the engine the way the tick loop does: activate + complete.
+    # #261 two-phase tick: activation tick, then completion tick past the
+    # task's ends_at — one large tick no longer completes a DIRECT MOVE
+    # retroactively (owned DIRECT tasks start at max(start_at, now)).
     with factory() as session:
         progress_tick(session, wid, 10_000, settings)
+        session.commit()
+        move_task = session.get(CharacterTask, int(task_id))
+        assert move_task.status == "active", (
+            "activation tick must activate the MOVE, not complete it"
+        )
+        ends_at = move_task.ends_at
+    with factory() as session:
+        progress_tick(session, wid, ends_at + 10, settings)
         session.commit()
 
     with factory() as session:

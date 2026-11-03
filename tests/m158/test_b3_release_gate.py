@@ -136,8 +136,19 @@ def _travel_to_npc(client, factory, settings, cid):
     })
     assert r.status_code == 201, r.text
     task_id = r.json()["task_id"]
+    # #261 two-phase tick: activation tick, then completion tick past the
+    # task's ends_at — one large tick no longer completes a DIRECT MOVE
+    # retroactively (owned DIRECT tasks start at max(start_at, now)).
     with factory() as session:
         progress_tick(session, wid, 10_000, settings)
+        session.commit()
+        move_task = session.get(CharacterTask, int(task_id))
+        assert move_task.status == "active", (
+            "activation tick must activate the MOVE, not complete it"
+        )
+        ends_at = move_task.ends_at
+    with factory() as session:
+        progress_tick(session, wid, ends_at + 10, settings)
         session.commit()
     me = client.get(f"/characters/{cid}").json()
     assert me["location_id"] == target["id"], "MOVE must relocate the character"
