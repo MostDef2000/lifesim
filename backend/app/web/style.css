@@ -1510,6 +1510,61 @@ button.danger:hover { background: #93301f; }
   font: inherit;
 }
 
+/* ---------- #59 PR #4: Дела (#/tasks) + Инвентарь (#/inventory) —
+   provisional warm cream family ----------
+   Both screens render outside .world-shell, so the cool :root tokens
+   would leak in. The shell classes carry the shared cream token set —
+   NO --w-line definition: m170/m173/m175 pin the file-wide token count
+   at 4, and the :root fallback stays the OLD cool value (byte-pinned),
+   so the base .task-row/.opp/.inv-item divider rules keep var(--w-line)
+   and are recolored here with scoped border-color overrides only (the
+   base rules stay byte-untouched). The page ground around .inv-shell
+   stays near-black (family-consistent; §48 debt). New hex values are
+   PROVISIONAL per VISUAL-BIBLE §48 (final color tokens not fixed). */
+.tasks-shell, .inv-shell {
+  --w-bg: #f3ecdf;
+  --w-panel: rgba(255, 253, 248, 0.92);
+  --w-panel-deep: rgba(236, 224, 204, 0.7);
+  --w-text: #2a2118;
+  --w-dim: #6e5f4e;
+  --w-accent: #c98a2e;
+  --w-warm: rgba(226, 180, 90, 0.15);
+  --w-warm-line: rgba(226, 180, 90, 0.4);
+  --w-warm-ink: #1d1506;
+  --dim: var(--w-dim);
+  color: var(--w-text);
+}
+/* Ground vs card: .tasks-shell is the grid ground; .inv-shell IS the
+   panel (no grid wrapper — the panel carries the shell class), so it
+   paints the card fill and keeps its global .panel border shape,
+   recolored warm. */
+.tasks-shell { background: var(--w-bg); }
+.inv-shell { background: var(--w-panel); border-color: rgba(120, 96, 64, 0.35); }
+.tasks-shell .panel { background: var(--w-panel); border-color: rgba(120, 96, 64, 0.35); }
+.tasks-shell h2, .inv-shell h2 { color: var(--w-text); }
+.tasks-shell .muted, .inv-shell .muted { color: var(--w-dim); }
+.tasks-shell a, .inv-shell a { color: #8a5a16; }
+/* Dividers: scoped recolor — the base .task-row/.opp/.inv-item rules
+   (with their var(--w-line) shorthand) stay byte-untouched. */
+.tasks-shell .task-row, .tasks-shell .opp, .inv-shell .inv-item { border-color: rgba(120, 96, 64, 0.35); }
+/* Both screens have only secondary buttons (mapLink, invDetail wear/sell,
+   invSellRow go — none .primary): warm fields instead of the global
+   dark-cool box. */
+.tasks-shell button, .inv-shell button {
+  background: var(--w-panel-deep);
+  color: var(--w-text);
+  border-color: rgba(120, 96, 64, 0.35);
+}
+.tasks-shell button:hover, .inv-shell button:hover { border-color: var(--w-accent); }
+/* Inventory specifics: group headings, row hover tint, sell-row field. */
+.inv-shell .inv-group h3 { color: var(--w-text); }
+.inv-shell .inv-item:hover { background: rgba(120, 96, 64, 0.06); }
+.inv-shell .inv-sell-row input {
+  background: var(--w-panel-deep);
+  color: var(--w-text);
+  border-color: rgba(120, 96, 64, 0.35);
+}
+
 /* ---------- issue #63: chat screen warm-family rework ----------
    The chat screen renders outside .world-shell, so the cool :root tokens
    would leak in; the shell carries the provisional warm cream/beige token

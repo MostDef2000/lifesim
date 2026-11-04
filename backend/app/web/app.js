@@ -3444,7 +3444,7 @@ function renderInventory(items, listed) {
             ...rows.map((it) => invItemRow(it, listed)))))
     : el("div", { class: "muted" }, "Пусто — купите что-нибудь во Владивостоке");
   app.replaceChildren(topbar("#/inventory"),
-    el("div", { class: "panel" },
+    el("div", { class: "panel inv-shell" },
       el("h2", {}, "Инвентарь"),
       body,
       el("p", { class: "muted" },
@@ -4158,7 +4158,7 @@ function renderTasks(tasks, goals, opps, desire) {
       : el("div", { class: "muted" }, "Ближняя цель не задана"));
 
   app.replaceChildren(topbar("#/tasks"),
-    el("div", { class: "grid" }, activeBox, goalBox, oppsBox, historyBox));
+    el("div", { class: "grid tasks-shell" }, activeBox, goalBox, oppsBox, historyBox));
 }
 
 
