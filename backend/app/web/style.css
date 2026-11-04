@@ -1780,11 +1780,15 @@ button.danger:hover { background: #93301f; }
 
 /* ---------- issue #67: profile screen read-model redesign ----------
    #/profile renders outside .world-shell, so the cool :root tokens would
-   leak in; mirror the warm custom properties (same values as
-   .desire-shell/.shop-shell). Same deliberate deviation as .chat-shell:
-   NO --w-line definition here — m170/m173/m175 pin the --w-line token
-   count at 4, and the :root fallback (#172) carries the IDENTICAL value,
-   so var(--w-line) resolves to the same color inside .profile-shell.
+   leak in; the shell carries the provisional warm cream/beige token
+   family (#59 PR #5 — same family as .desire-shell/.chat-shell/
+   .shop-shell). Same mechanism as chat: NO --w-line definition here —
+   m170/m173/m175 pin the file-wide token count at 4, and the :root
+   fallback stays the OLD cool value (byte-pinned), so the line consumers
+   inside .profile-shell name the warm card-line literal
+   rgba(120, 96, 64, 0.35) explicitly. Panels are flat warm fills (no
+   backdrop-filter / box-shadow — #268 panel discipline). New hex values
+   are PROVISIONAL per VISUAL-BIBLE §48 (final color tokens not fixed).
    Layout: hero (edge-to-edge portrait + identity) in the left column, the
    card stack (Основное / Черты / Ситуация / Желание / Роли / Режим /
    Аккаунт) in the right column; ≤1100px collapses to one column with the
@@ -1792,40 +1796,63 @@ button.danger:hover { background: #93301f; }
    reuse the existing .need markup — only the fill recolors to the single
    warm token inside the shell. */
 .profile-shell {
-  --w-bg: #0a1016;
-  --w-panel: rgba(23, 33, 42, 0.72);
-  --w-panel-deep: rgba(12, 19, 25, 0.6);
-  --w-text: #dde5ec;
-  --w-dim: #8fa1b1;
-  --w-accent: #e2b45a;
+  /* #59 PR #5: provisional cream tokens (VISUAL-BIBLE §48 — final colors
+     not fixed); line consumers use the warm literal (see above). */
+  --w-bg: #f3ecdf;
+  --w-panel: rgba(255, 253, 248, 0.92);
+  --w-panel-deep: rgba(236, 224, 204, 0.7);
+  --w-text: #2a2118;
+  --w-dim: #6e5f4e;
+  --w-accent: #c98a2e;
   --w-warm: rgba(226, 180, 90, 0.15);
   --w-warm-line: rgba(226, 180, 90, 0.4);
   --w-warm-ink: #1d1506;
+  /* #59 PR #5 (desire lesson): remap the global muted token for this
+     scope and paint the container flat so --w-bg/--w-text are live. */
+  background: var(--w-bg);
+  color: var(--w-text);
+  --dim: var(--w-dim);
   grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr);
   gap: 14px;
   align-items: start;
 }
 .profile-shell .panel {
   background: var(--w-panel);
-  border-color: var(--w-line);
+  border-color: rgba(120, 96, 64, 0.35);
   border-radius: 14px;
-  backdrop-filter: blur(10px);
-  box-shadow: 0 12px 30px rgba(2, 8, 14, 0.35);
 }
 .profile-shell .panel + .panel { margin-top: 0; }
 .profile-shell .muted { color: var(--w-dim); }
-.profile-shell h2 { color: var(--w-dim); }
+.profile-shell h2 { color: var(--w-text); }
+/* #59 PR #5: inherited global inks fail on cream — warm dark-gold link
+   (desire/shop precedent); secondary buttons go warm instead of the
+   global dark-cool box (accent buttons keep the rules below). */
+.profile-shell a { color: #8a5a16; }
 .profile-shell button.primary {
   background: var(--w-accent);
   color: var(--w-warm-ink);
 }
 .profile-shell button.primary:hover { border-color: var(--w-warm-ink); }
 .profile-shell button:hover { border-color: var(--w-accent); }
+.profile-shell button:not(.primary) {
+  background: var(--w-panel-deep);
+  color: var(--w-text);
+  border-color: rgba(120, 96, 64, 0.35);
+}
+/* #59 PR #5: the destructive affordance keeps its global red inside the
+   shell — button:not(.primary) above would otherwise repaint «Удалить
+   аккаунт» as a warm secondary (same specificity, later source wins).
+   Values are the global button.danger bytes, not new §48 tokens. */
+.profile-shell button.danger {
+  background: #b3402e;
+  color: #fff;
+}
+.profile-shell button.danger:hover { background: #93301f; }
 .profile-shell input,
 .profile-shell select {
   background: var(--w-panel-deep);
   color: var(--w-text);
-  border: 1px solid var(--w-line);
+  border: 1px solid rgba(120, 96, 64, 0.35);
   border-radius: 10px;
 }
 
@@ -1837,7 +1864,7 @@ button.danger:hover { background: #93301f; }
   overflow: hidden;
   background:
     radial-gradient(640px 240px at 18% 0%, rgba(226, 180, 90, 0.10), transparent 62%),
-    linear-gradient(180deg, rgba(23, 33, 42, 0.55), var(--w-panel-deep));
+    linear-gradient(180deg, rgba(255, 253, 248, 0.9), var(--w-panel-deep));
 }
 .profile-shell .profile-hero .portrait {
   display: flex;
@@ -1896,14 +1923,14 @@ button.danger:hover { background: #93301f; }
   align-items: baseline;
   gap: 6px;
   padding: 3px 10px;
-  border: 1px solid var(--w-line);
+  border: 1px solid rgba(120, 96, 64, 0.35);
   border-radius: 999px;
   background: var(--w-panel-deep);
   font-size: 12px;
 }
 .profile-shell .profile-chip-k { color: var(--w-dim); }
 .profile-shell .profile-chip-v { color: var(--w-text); font-weight: 600; }
-.profile-shell .profile-trait .profile-chip-v { color: var(--w-accent); }
+.profile-shell .profile-trait .profile-chip-v { color: #8a5a16; }
 
 /* right column: the card stack (world-secondary precedent) */
 .profile-shell .profile-side {
@@ -1926,7 +1953,7 @@ button.danger:hover { background: #93301f; }
   justify-content: space-between;
   gap: 12px;
   font-size: 13px;
-  border-bottom: 1px dashed var(--w-line);
+  border-bottom: 1px dashed rgba(120, 96, 64, 0.35);
   padding-bottom: 6px;
 }
 .profile-shell .profile-row:last-child {
@@ -1943,7 +1970,7 @@ button.danger:hover { background: #93301f; }
   flex-direction: column;
   gap: 2px;
   padding: 7px 10px;
-  border: 1px solid var(--w-line);
+  border: 1px solid rgba(120, 96, 64, 0.35);
   border-radius: 10px;
   background: var(--w-panel-deep);
 }
