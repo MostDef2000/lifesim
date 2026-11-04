@@ -3847,9 +3847,9 @@ function renderShop(offers, me, items) {
   const balance = me && me.balance != null ? me.balance : null;
   const status = el("div", { class: "muted shop-status", role: "status" });
 
-  // Warm family: the shop grid mirrors the world-shell token set
-  // (.shop-shell, same values as .desire-shell — the screen renders
-  // outside .world-shell); compose() is the single re-render factor.
+  // Warm family: the shop grid carries the provisional warm cream tokens
+  // (.shop-shell, #59 PR #3 — same family as .desire-shell; the screen
+  // renders outside .world-shell); compose() is the single re-render factor.
   function compose(...panels) {
     app.replaceChildren(topbar("#/shop"),
       el("div", { class: "grid shop-shell" }, ...panels));
