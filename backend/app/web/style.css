@@ -1430,22 +1430,33 @@ button.danger:hover { background: #93301f; }
 .desire-appear-note { font-size: 0.9em; }
 
 /* #173: Рынок (#/shop) — the screen renders outside .world-shell, so the
-   cool :root tokens would leak in; mirror ONLY the warm custom properties
-   (self-contained on purpose — see the #170/#172 notes above). Since
-   #59 PR #1 .desire-shell carries provisional warm tokens, so the values
-   below are the OLD pre-#59 dark desire mirror; shop is queued for its
-   own warm pass later in the #59 series. */
+   cool :root tokens would leak in; the shell carries the provisional warm
+   cream/beige token family (#59 PR #3 — the same family .desire-shell has
+   carried since PR #1). Shop KEEPS its own --w-line token (unlike chat's
+   explicit literals): its VALUE migrates in place to the warm card-line
+   strength rgba(120, 96, 64, 0.35), because m170/m173/m175 pin the
+   file-wide --w-line count at 4 — a fifth definition is forbidden — and
+   every shop line is a card line (panel/offer-row/form-field). New hex
+   values are PROVISIONAL per VISUAL-BIBLE §48 (final color tokens not
+   fixed). */
 .shop-shell {
-  --w-bg: #0a1016;
-  --w-panel: rgba(23, 33, 42, 0.72);
-  --w-panel-deep: rgba(12, 19, 25, 0.6);
-  --w-line: rgba(148, 178, 205, 0.16);
-  --w-text: #dde5ec;
-  --w-dim: #8fa1b1;
-  --w-accent: #e2b45a;
+  /* #59 PR #3: provisional cream tokens (VISUAL-BIBLE §48 — final colors
+     not fixed); --w-line migrates in place to the warm card-line value. */
+  --w-bg: #f3ecdf;
+  --w-panel: rgba(255, 253, 248, 0.92);
+  --w-panel-deep: rgba(236, 224, 204, 0.7);
+  --w-line: rgba(120, 96, 64, 0.35);
+  --w-text: #2a2118;
+  --w-dim: #6e5f4e;
+  --w-accent: #c98a2e;
   --w-warm: rgba(226, 180, 90, 0.15);
   --w-warm-line: rgba(226, 180, 90, 0.4);
   --w-warm-ink: #1d1506;
+  /* #59 PR #3 (desire lesson): remap the global muted token for this
+     scope and paint the container flat so --w-bg/--w-text are live. */
+  --dim: var(--w-dim);
+  background: var(--w-bg);
+  color: var(--w-text);
 }
 .shop-shell .panel {
   background: var(--w-panel);
@@ -1457,6 +1468,17 @@ button.danger:hover { background: #93301f; }
   color: var(--w-warm-ink);
 }
 .shop-shell button.primary:hover { border-color: var(--w-warm-ink); }
+/* #59 PR #3: inherited global inks fail on cream — warm dark-gold link
+   and money ink (desire precedent); secondary buttons go warm instead of
+   the global dark-cool box (accent buttons keep the rule above). */
+.shop-shell a { color: #8a5a16; }
+.shop-shell .world-money { color: #8a5a16; }
+.shop-shell button:not(.primary) {
+  background: var(--w-panel-deep);
+  color: var(--w-text);
+  border-color: var(--w-line);
+}
+.shop-shell button:not(.primary):hover { border-color: var(--w-accent); }
 
 /* #173: offer rows — item / price / seller on one line, wrapping on narrow
    screens; dividers and prices carry the warm tokens (var(--w-line) has the

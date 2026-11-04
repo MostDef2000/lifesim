@@ -341,8 +341,10 @@ def test_chat_warm_cream_pins():
     assert panel.count("box-shadow") == 0
     # (7) The partner button ink is the warm dark ink (was #14181d).
     assert css.count("color: #1d1506;") == 1
-    # (8) The header comment carries the PROVISIONAL §48 marker.
-    assert css.count("PROVISIONAL per VISUAL-BIBLE §48") == 1
+    # (8) The header comment carries the PROVISIONAL §48 marker — pinned
+    # within the chat block (each #59 warm-pass screen carries its own §48
+    # marker, so the count is block-scoped, not file-wide).
+    assert block.count("PROVISIONAL per VISUAL-BIBLE §48") == 1
 
 
 def test_root_block_byte_untouched():
