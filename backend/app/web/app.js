@@ -75,15 +75,43 @@ function hideConnBanner() {
 }
 
 async function api(path, opts = {}) {
+  // #269: private routing metadata — never forwarded to fetch.
+  const { worldBootstrap: bootstrapFlight, ...fetchOpts } = opts;
+  // #269: /world GETs join the pending cold-entry bootstrap flight for the
+  // SAME session context (one GET during a route handoff, S17/S18); with no
+  // bootstrap in flight every caller still fetches fresh (existing loader
+  // and poll refreshes unchanged). Only the bootstrap's own flight is
+  // joinable — a loader re-dispatch keeps its historical fresh fetch.
+  const worldRead = path === "/world" && !fetchOpts.method && !fetchOpts.body;
+  if (worldRead && !bootstrapFlight) {
+    const user = S.user;
+    const charId = S.character ? S.character.id : null;
+    if (worldGet && worldGet.user === user && worldGet.charId === charId) {
+      return worldGet.promise;
+    }
+  }
   const res = await fetch(path, {
     credentials: "same-origin",
-    headers: opts.body ? { "content-type": "application/json" } : {},
-    ...opts,
-    body: opts.body ? JSON.stringify(opts.body) : undefined,
+    headers: fetchOpts.body ? { "content-type": "application/json" } : {},
+    ...fetchOpts,
+    body: fetchOpts.body ? JSON.stringify(fetchOpts.body) : undefined,
   });
   if (res.status === 401) {
-    S.user = null;
-    if (path !== "/auth/me") route();
+    // #269: a STALE world-bootstrap GET is dropped BEFORE the global
+    // fail-closed mutation — it must not deauthenticate the CURRENT session.
+    // Stale = the session/character changed while it flew, OR the flight
+    // lost the slot to a newer bootstrap (identities may match again — the
+    // superseded flight is still not the current one). A CURRENT 401
+    // (bootstrap included) and every other caller keep the global
+    // fail-closed deauth + reroute.
+    const stale = bootstrapFlight && (S.user !== bootstrapFlight.user
+      || !S.character || S.character.id !== bootstrapFlight.charId
+      || worldGet !== bootstrapFlight);
+    if (!stale) {
+      S.user = null;
+      S.world = null;  // the cached world belonged to the dead session
+      if (path !== "/auth/me") route();
+    }
     throw new Error("unauthorized");
   }
   let data = null;
@@ -94,6 +122,14 @@ async function api(path, opts = {}) {
     // .detail alone would strand the options list server-side.
     throw Object.assign(new Error(String(detail)),
       { status: res.status, detail, data });
+  }
+  // #269: validate the world body BEFORE any publication — an empty or
+  // malformed 200 is a failure (honest «н/д»), never a cached fake or a
+  // NaN clock (S19/S20).
+  if (worldRead && (!data || typeof data !== "object" || Array.isArray(data)
+    || typeof data.game_timestamp !== "number"
+    || !Number.isFinite(data.game_timestamp) || data.game_timestamp < 0)) {
+    throw new Error("некорректный ответ мира");
   }
   return data;
 }
@@ -179,6 +215,15 @@ async function route() {
   // still no topbar tab for any of them: the Place and Events screens
   // highlight «Мир», the Home, Career and Settings screens «Профиль»).
   const placeMatch = hash.match(/^#\/location\/(\d+)$/);
+  // #269: a cold direct entry to a non-world route never passes viewWorld/
+  // viewLocation (the only /world loaders), so the topbar clock would sit
+  // on «…» for the whole session. Bootstrap ONLY when the dispatch target
+  // is a registry view that does not load /world itself: #/world AND the
+  // unknown-hash fallback dispatch viewWorld (own /world fetch), and
+  // #/location/* fetches its own — no duplicate /world during route races.
+  if (S.character && !S.world && routes[hash] && routes[hash] !== viewWorld) {
+    hydrateWorldClock();
+  }
   if (placeMatch) return viewLocation(Number(placeMatch[1]));
   (routes[hash] || viewWorld)();
 }
@@ -1127,7 +1172,8 @@ function topbar(active) {
     : null;
   return el("div", { class: "topbar" },
     el("h1", {}, "ВЛ1: Рейнеке"),
-    el("span", { id: "clock", class: "muted" }, S.world ? dayTime(S.world.game_timestamp) : "…"),
+    el("span", { id: "clock", class: "muted" },
+      S.world ? dayTime(S.world.game_timestamp) : clockPendingLabel()),
     weatherSpan,
     el("span", { class: "spacer" }),
     el("div", { class: "tabs" },
@@ -1135,6 +1181,81 @@ function topbar(active) {
         class: h === active ? "active" : "", onclick: () => { location.hash = h; },
       }, label))),
   );
+}
+
+/* #269: cold-entry world bootstrap for the topbar clock. One fire-and-
+   forget /world fetch per navigation while world data is missing — coalesced
+   within the SAME session context, never a poll, never blocking the
+   requested screen, never starting feed/WS. Session context = S.user
+   REFERENCE (a fresh object after login/logout/account deletion, so a
+   same-id relogin is still a new session) + character ID (screen refreshes
+   replace the S.character object on every /characters read; the id
+   distinguishes a real character change from a same-character refresh).
+   Stale results AND stale failures are dropped; a newer authoritative
+   S.world is never overwritten. A failure records an honest unavailable
+   mark that survives topbar re-renders for that context; the next route()/
+   reload may retry once (no polling loop). The in-flight bootstrap owns the
+   joinable /world GET slot (worldGet) that api() hands world/location reads
+   to. */
+let worldGet = null;           // { user, charId, promise } of the joinable bootstrap flight
+let worldFailure = null;       // { user, charId } of the last failed attempt
+
+/* Pure read for topbar(): what #clock shows while S.world is still null. */
+function clockPendingLabel() {
+  const user = S.user;
+  const charId = S.character ? S.character.id : null;
+  if (worldFailure && worldFailure.user === user && worldFailure.charId === charId) {
+    return "н/д";  // this session's bootstrap failed — honest, not loading
+  }
+  return "…";
+}
+
+function hydrateWorldClock() {
+  const user = S.user;
+  const charId = S.character ? S.character.id : null;
+  // Single-flight WITHIN the current context only: a pending request from a
+  // previous session must not block this session's bootstrap.
+  if (worldGet && worldGet.user === user && worldGet.charId === charId) return;
+  const flight = { user, charId };
+  worldGet = flight;
+  worldFailure = null;  // a new attempt supersedes the unavailable mark
+  const request = api("/world", { worldBootstrap: flight });
+  // The joinable promise exposes the body ONLY while this flight still owns
+  // the slot AND the session context is unchanged (S21/S22): a stale
+  // completion resolves to null — each consumer drops null at its own
+  // boundary (before its extra awaits and shared writes), and no stale
+  // rejection ever paints retry/toast/failure UI. Current failures
+  // still reject so joiners handle them normally.
+  flight.promise = request.then(
+    (world) => (worldGet === flight && S.user === user && S.character
+      && S.character.id === charId) ? world : null,
+    (e) => (worldGet === flight && S.user === user && S.character
+      && S.character.id === charId) ? Promise.reject(e) : null);
+  flight.promise.then((world) => {
+    // Ownership FIRST as an EARLY RETURN: a flight that lost the slot to a
+    // newer bootstrap never releases the slot, publishes or marks — including
+    // when ownership is lost in the microtask gap between the wrapper's gate
+    // and this handler (S21). A conditional release is not an ownership guard.
+    if (worldGet !== flight) return;
+    worldGet = null;  // only the owner releases the slot
+    // A stale completion resolved to null; a real loader/poll publication
+    // is never overwritten with this (older) snapshot. Re-check the context:
+    // a 401 from another in-flight request can land in the microtask hop
+    // between the wrapper's gate and this handler.
+    if (!world || S.world || S.user !== user || !S.character
+      || S.character.id !== charId) return;
+    S.world = world;
+    const clock = document.getElementById("clock");
+    if (clock) clock.textContent = dayTime(world.game_timestamp);
+  }, () => {
+    if (worldGet !== flight) return;
+    worldGet = null;
+    if (S.world || S.user !== user || !S.character
+      || S.character.id !== charId) return;
+    worldFailure = flight;
+    const clock = document.getElementById("clock");
+    if (clock) clock.textContent = "н/д";
+  });
 }
 
 /* ---------- world view (§78) ---------- */
@@ -1187,23 +1308,45 @@ async function viewWorld() {
   location.hash = "#/world";
   const loading = el("div", { class: "muted" }, "Загрузка…");
   app.replaceChildren(topbar("#/world"), loading);
+  // #269: session-context identity for the async continuation — a logout/
+  // relogin or character change while the loads fly must not publish the
+  // older world/character over the new session's state. World and weather
+  // are staged LOCALLY; null (stale joined bootstrap) and a dead context
+  // bail immediately after the joined /world, and the actual-context guard
+  // runs again before any shared write (S22) — freshness guarded too (S23).
+  const ctxUser = S.user;
+  const ctxCharId = S.character.id;
   try {
-    S.world = await api("/world");
-    try { S.weather = await api("/weather"); } catch { S.weather = null; }
-    const me = await api(`/characters/${S.character.id}`);
-    S.character = { ...S.character, ...me };
+    const world = await api("/world");
+    // #269: null = the joined bootstrap lost ownership (stale, S22) — and
+    // the context may have died while the load flew. Bail BEFORE the extra
+    // awaits: no further requests, no catch-side retry/toast for a dead
+    // context. Rechecked below before any shared write (S23).
+    if (!world || S.user !== ctxUser || !S.character
+      || S.character.id !== ctxCharId) return;
+    let weather = null;
+    try { weather = await api("/weather"); } catch { weather = null; }
+    const me = await api(`/characters/${ctxCharId}`);
     const locs = await api("/locations");
-    
+
     // Fetch tasks if owner
     let tasksData = null;
     if (me.is_owner) {
       try {
-        tasksData = await api(`/characters/${S.character.id}/tasks`);
+        tasksData = await api(`/characters/${ctxCharId}/tasks`);
       } catch (e) {
         console.error("Tasks fetch failed", e);
       }
     }
-    
+    if (S.user !== ctxUser || !S.character || S.character.id !== ctxCharId) return;
+    // #269 S23: freshness, not just context — an out-of-order OLDER
+    // same-context load must not republish its world/weather over an
+    // already-newer snapshot; it still renders (with the newer shared world).
+    if (!S.world || S.world.game_timestamp <= world.game_timestamp) {
+      S.world = world;
+      S.weather = weather;
+    }
+    S.character = { ...S.character, ...me };
     renderWorld(locs, tasksData);
     startFeed();
   } catch (e) {
@@ -2221,6 +2364,11 @@ async function viewLocation(locId) {
   let weather = null;
   try {
     world = await api("/world");
+    // #269: null = the joined bootstrap lost ownership (stale, S22) — and
+    // the load may already be superseded. Bail BEFORE the extra awaits (no
+    // further requests for a dropped load); rechecked below before any
+    // shared write.
+    if (!world || seq !== placeLoadSeq) return;
     try { weather = await api("/weather"); } catch (e) { weather = null; }
     // ONE /locations fetch resolves the requested place — the world-scoped
     // catalog already carries occupants; no /locations/{id} detail call.
@@ -2240,8 +2388,14 @@ async function viewLocation(locId) {
     || !S.user || !S.character) return;
   // Guard passed — only now do the fresh reads become shared state
   // (topbar clock, map ambience and the overview lines read them).
-  S.world = world;
-  S.weather = weather;
+  // #269 S23: freshness, not just context — an out-of-order OLDER
+  // same-context load must not republish its world/weather over an
+  // already-newer snapshot; the screen still renders (with the newer
+  // shared world).
+  if (!S.world || S.world.game_timestamp <= world.game_timestamp) {
+    S.world = world;
+    S.weather = weather;
+  }
   const place = locs.find((l) => l.id === locId);
   if (!place) {
     // #72: honest missing-place state — the catalog has no such id.
@@ -2687,6 +2841,12 @@ async function pollEvents() {
     const previousDay = S.world ? S.world.day : null;
     const character = await api(`/characters/${S.character.id}`);
     const world = await api("/world");
+    // #269: null = the joined bootstrap lost ownership (stale) — the tick is
+    // stale: drop it silently BEFORE the extra awaits (no .day dereference,
+    // no shared write, no poll-failure mark); a newer load owns the shared
+    // state (S22). S.character re-checked: a dead context must not drive
+    // the rest of the tick.
+    if (!world || !S.character) return;
     const locs = await api("/locations");
     if (previousDay !== world.day) {
       try { S.weather = await api("/weather"); } catch { /* keep last readable weather */ }
@@ -2702,10 +2862,15 @@ async function pollEvents() {
       S.mapFocusManual = false;
     }
     if (!S.mapFocusManual && character.location_id != null) S.mapFocusLocationId = character.location_id;
-    S.world = world;
     S.mapLocations = locs;
-    const clock = document.getElementById("clock");
-    if (clock) clock.textContent = dayTime(world.game_timestamp);
+    // #269 S23: a stale tick's OLDER world must not republish over an
+    // already-newer snapshot (viewWorld/viewLocation publications) — the
+    // clock keeps the newer time too.
+    if (!S.world || world.game_timestamp >= S.world.game_timestamp) {
+      S.world = world;
+      const clock = document.getElementById("clock");
+      if (clock) clock.textContent = dayTime(world.game_timestamp);
+    }
     rerenderLivingMap();
 
     const marker = document.getElementById("player-marker");
@@ -5108,6 +5273,7 @@ function renderProfile(modeSel) {
         el("button", { onclick: async () => {
           await api("/auth/logout", { method: "POST", body: {} });
           S.user = null; S.character = null;
+          S.world = null;  // #269: the cached world must not survive the session
           S.authProbed = false;
           creatorResetDraft();  // W118-RV1 F1: logout clears the creator draft
           appearanceResetDraft();  // #65: logout clears the outfit prompt draft
@@ -5125,6 +5291,7 @@ function renderProfile(modeSel) {
           try {
             await api("/auth/account/delete", { method: "POST", body: { confirm: S.confirmDelete || "" } });
             S.user = null; S.character = null;
+            S.world = null;  // #269: the cached world must not survive the session
             creatorResetDraft();  // W118-RV1 F1: deletion clears the creator draft
             appearanceResetDraft();  // #65: deletion clears the outfit prompt draft
             desireResetDraft();  // #66: deletion drops the pending interpret request

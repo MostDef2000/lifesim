@@ -26,7 +26,12 @@ label { display: block; margin: 8px 0 2px; color: var(--dim); }
 .topbar { display: flex; gap: 10px; align-items: center; flex-wrap: wrap;
   border-bottom: 1px solid var(--line); padding-bottom: 8px; margin-bottom: 10px; }
 .topbar .spacer { flex: 1; }
-.tabs { display: flex; gap: 6px; }
+/* #269: the tab row must wrap natively like the topbar — without wrap its
+   min-content width is the whole single-row strip, so at phone widths the
+   right-side tabs overflow the viewport and become unreachable. Wrapping is
+   inert wherever the labels already fit (no desktop drift); no overflow-x
+   hiding, no menu framework — labels/order/active state unchanged. */
+.tabs { display: flex; gap: 6px; flex-wrap: wrap; }
 .tabs button.active { border-color: var(--accent); color: var(--accent); }
 
 .grid { display: grid; grid-template-columns: 1fr 1.4fr; gap: 10px; }
@@ -1410,6 +1415,19 @@ button.danger:hover { background: #93301f; }
 }
 .desire-shell button.primary:hover { border-color: var(--w-warm-ink); }
 .desire-shell .sugg:hover { color: #8a5a16; border-color: #8a5a16; }
+/* #269: the free-text desire field inherits the global dark control rule
+   (input/select/textarea → #0c1014 bg) and reads as a dark hole on the
+   cream shell. Scoped cream treatment on the same provisional tokens as
+   the shell (VISUAL-BIBLE §48 — final colors not fixed); sizing/behavior
+   untouched (the #desire-input sizing rule stays), the global control rule
+   itself is untouched. */
+.desire-shell textarea {
+  background: var(--w-panel-deep);
+  color: var(--w-text);
+  border: 1px solid rgba(120, 96, 64, 0.35);
+}
+.desire-shell textarea::placeholder { color: var(--w-dim); }
+.desire-shell textarea:focus { border-color: var(--w-accent); }
 
 /* #66 (Free Requests): the pre-confirmation interpretation step is NAMED —
    a small muted h3 above the free-text field, distinct from the active
@@ -1729,9 +1747,12 @@ button.danger:hover { background: #93301f; }
 .settings-reduced-motion .typing-dots i { animation: none; opacity: 1; }
 
 /* #63: inline error row in the chatlog (reuses the warm --warn signal;
-   the toast and the assistive status line stay). */
+   the toast and the assistive status line stay). #269: warn-gold TEXT on
+   the cream shell is ~1.7:1 — the text moves to the warm dark error ink
+   (#93301f, the .desire-drop precedent, ≈7.6:1 on the chat panel); the
+   border keeps var(--warn) so the warning signal and the m63 pin stay. */
 .chat-error {
-  color: var(--warn);
+  color: #93301f;
   border: 1px solid var(--warn);
   border-radius: 10px;
   padding: 8px 12px;
