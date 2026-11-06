@@ -1283,19 +1283,22 @@ function welcomeCard() {
   try { seen = window.localStorage.getItem("vl1.welcome.done") === "1"; } catch (e) { seen = true; }
   if (seen) return null;
   const node = el("section", { class: "panel welcome-card" },
-    el("div", { class: "welcome-photos" },
-      el("img", { src: "/static/static/landing/concierge-cat-ref-face-tail.jpg",
-        alt: "Кошка-консьержка — справочная фотография" }),
-      el("img", { src: "/static/static/landing/concierge-cat-ref-loaf.jpg",
-        alt: "Кошка-консьержка — поза отдыхающей кошки" })),
     el("h2", {}, "Кошка-консьержка"),
     el("p", { class: "welcome-copy" },
       "Добро пожаловать на Рейнеке. Остров живёт своей жизнью — а я подскажу, с чего начать."),
-    el("div", { class: "welcome-tips" },
-      el("div", { class: "welcome-tip" }, "„Мир“ покажет, где ты, и что вокруг."),
-      el("div", { class: "welcome-tip" }, "„Люди“ — кто тебя знает и как к тебе относится."),
-      el("div", { class: "welcome-tip" }, "„Дела“ — работа и поручения: кормят и знакомят.")),
-    el("p", { class: "welcome-close muted" }, "Если потеряешься — просто найди меня."),
+    /* World-first-view: photos/tips/closing live in a native disclosure, closed by default; toggling it writes nothing. */
+    el("details", { class: "welcome-details" },
+      el("summary", { class: "welcome-summary" }, "Советы и фотографии"),
+      el("div", { class: "welcome-photos" },
+        el("img", { src: "/static/static/landing/concierge-cat-ref-face-tail.jpg",
+          alt: "Кошка-консьержка — справочная фотография" }),
+        el("img", { src: "/static/static/landing/concierge-cat-ref-loaf.jpg",
+          alt: "Кошка-консьержка — поза отдыхающей кошки" })),
+      el("div", { class: "welcome-tips" },
+        el("div", { class: "welcome-tip" }, "„Мир“ покажет, где ты, и что вокруг."),
+        el("div", { class: "welcome-tip" }, "„Люди“ — кто тебя знает и как к тебе относится."),
+        el("div", { class: "welcome-tip" }, "„Дела“ — работа и поручения: кормят и знакомят.")),
+      el("p", { class: "welcome-close muted" }, "Если потеряешься — просто найди меня.")),
     el("button", { type: "button", onclick: () => {
       S.welcomeDismissed = true; // write-denied storage (private mode): stays dismissed until reload
       try { window.localStorage.setItem("vl1.welcome.done", "1"); } catch (e) { /* best-effort persist */ }
