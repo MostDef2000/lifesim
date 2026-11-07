@@ -2014,43 +2014,65 @@ button.danger:hover { background: #93301f; }
 
 /* ---------- issue #69: people screen ----------
    #/people renders outside .world-shell, so the cool :root tokens would
-   leak in; mirror the warm custom properties (same values as
-   .profile-shell/.desire-shell/.shop-shell). Same deliberate deviation:
+   leak in; the shell carries the provisional warm cream/beige token family
+   (#59 wave 023 — profile-equivalent values, VISUAL-BIBLE §48; the final
+   palette is issue #55, NOT this change). Same deliberate deviation:
    NO --w-line definition here — the pinned token count stays 4, and the
-   :root fallback (#172) carries the IDENTICAL value, so var(--w-line)
-   resolves to the same color inside .people-shell. Layout per the #69
-   reference: hero portrait of the selected person on the left (spans both
-   rows), the detail card (meters) and «Как мир тебя видит» stacked on the
-   right, the horizontal people strip full-width below; ≤1100px collapses
-   to one column (profile-shell precedent). Relationship meters are SIGNED
-   (-100..100): the fill grows from the center tick — accent rightward for
-   positive, muted hostile red leftward for negative. */
+   :root fallback (#172) carries the value var(--w-line) resolves to inside
+   .people-shell; line consumers name the warm card-line literal
+   rgba(120, 96, 64, 0.35) explicitly. Panels are flat warm fills (no
+   backdrop-filter / box-shadow — #268 panel discipline). The hero gradient
+   is scoped .people-shell .people-hero: the unscoped selector lost its
+   background to the .people-shell .panel shorthand (0,2,0 vs 0,1,0), so
+   the warm light linear only renders scoped (same specificity, later
+   source wins). Layout per the #69 reference: hero portrait of the
+   selected person on the left (spans both rows), the detail card (meters)
+   and «Как мир тебя видит» stacked on the right, the horizontal people
+   strip full-width below; ≤1100px collapses to one column (profile-shell
+   precedent). Relationship meters are SIGNED (-100..100): the fill grows
+   from the center tick — accent rightward for positive, muted hostile red
+   leftward for negative. */
 .people-shell {
-  --w-bg: #0a1016;
-  --w-panel: rgba(23, 33, 42, 0.72);
-  --w-panel-deep: rgba(12, 19, 25, 0.6);
-  --w-text: #dde5ec;
-  --w-dim: #8fa1b1;
-  --w-accent: #e2b45a;
+  /* #59 wave 023: provisional cream tokens (VISUAL-BIBLE §48 — final
+     colors not fixed); profile-equivalent values. */
+  --w-bg: #f3ecdf;
+  --w-panel: rgba(255, 253, 248, 0.92);
+  --w-panel-deep: rgba(236, 224, 204, 0.7);
+  --w-text: #2a2118;
+  --w-dim: #6e5f4e;
+  --w-accent: #c98a2e;
   --w-warm: rgba(226, 180, 90, 0.15);
   --w-warm-line: rgba(226, 180, 90, 0.4);
   --w-warm-ink: #1d1506;
   /* #69: hostile red mirror — the token is chat-shell-scoped (line ~1376),
      without this mirror var(--w-rel-hostile) resolves to transparent here. */
   --w-rel-hostile: #e07070;
+  /* #59 wave 023 (desire lesson): remap the global muted token for this
+     scope and paint the container flat so --w-bg/--w-text are live. */
+  background: var(--w-bg);
+  color: var(--w-text);
+  --dim: var(--w-dim);
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   gap: 14px;
   align-items: start;
 }
 .people-shell .panel {
   background: var(--w-panel);
-  border-color: var(--w-line);
+  border-color: rgba(120, 96, 64, 0.35);
   border-radius: 14px;
-  backdrop-filter: blur(10px);
-  box-shadow: 0 12px 30px rgba(2, 8, 14, 0.35);
 }
 .people-shell .muted { color: var(--w-dim); }
-.people-shell h2 { color: var(--w-dim); }
+.people-shell h2 { color: var(--w-text); }
+/* #59 wave 023: inherited global inks fail on cream — warm dark-gold link
+   (profile precedent); secondary buttons (the strip cards are buttons)
+   go warm instead of the global dark-cool box. */
+.people-shell a { color: #8a5a16; }
+.people-shell button:not(.primary) {
+  background: var(--w-panel-deep);
+  color: var(--w-text);
+  border-color: rgba(120, 96, 64, 0.35);
+}
 .people-shell button:hover { border-color: var(--w-accent); }
 .people-shell .people-card:hover { border-color: var(--w-accent); }
 
@@ -2060,13 +2082,16 @@ button.danger:hover { background: #93301f; }
   gap: 14px;
   align-items: start;
 }
-.people-hero {
+/* scoped: the unscoped selector lost the background to the
+   .people-shell .panel shorthand (0,2,0 vs 0,1,0) — same specificity as
+   the panel rule, later source wins, so the warm light linear renders. */
+.people-shell .people-hero {
   grid-row: span 2;
   padding: 0;
   overflow: hidden;
   background:
     radial-gradient(640px 240px at 18% 0%, rgba(226, 180, 90, 0.10), transparent 62%),
-    linear-gradient(180deg, rgba(23, 33, 42, 0.55), var(--w-panel-deep));
+    linear-gradient(180deg, rgba(255, 253, 248, 0.9), var(--w-panel-deep));
 }
 .people-portrait { min-height: 220px; display: grid; align-content: center; }
 .people-portrait .portrait-img {
@@ -2108,7 +2133,9 @@ button.danger:hover { background: #93301f; }
   min-width: 150px; text-align: left; display: grid; gap: 6px;
   align-content: start; padding: 10px 12px; border-radius: 10px;
 }
-.people-card.sel { border-color: var(--w-accent); color: var(--w-text); }
+/* scoped (0,3,0): keeps the accent border/text over the secondary-button
+   paint above (0,2,1) — the selected card stays the accent-marked one. */
+.people-shell .people-card.sel { border-color: var(--w-accent); color: var(--w-text); }
 .people-card-name { font-weight: 600; }
 .people-card-status { font-size: 12px; }
 .people-warmth { height: 6px; position: relative; margin-top: 2px; }
@@ -2117,7 +2144,9 @@ button.danger:hover { background: #93301f; }
 
 @media (max-width: 1100px) {
   .people-main { grid-template-columns: 1fr; }
-  .people-hero { grid-row: auto; }
+  /* scoped to keep beating the (0,2,0) main rule above inside the media
+     query — same rendered collapse as before, only specificity matched. */
+  .people-shell .people-hero { grid-row: auto; }
 }
 
 /* #107: first-visit concierge welcome card — rendered as the FIRST child of
