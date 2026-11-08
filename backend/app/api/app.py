@@ -2136,16 +2136,21 @@ def create_app(settings, session_factory: sessionmaker):
         # (app.social.affection), affection-only. Runs AFTER the reply
         # source is resolved (LLM and fallback get identical behavior —
         # parity by construction) and BEFORE the single commit below, so
-        # journal + effect + event land atomically. #195: when the delta
+        # journal + effect + events land atomically. #195: when the delta
         # CREATES the canonical Relationship row, the hook also emits
         # exactly one RELATIONSHIP_FORMED WorldEvent and returns its
-        # payload as the second tuple element (None on a cooldown-skip or
-        # a pre-existing row — band events stay with SOCIALIZE/lifecycle).
+        # payload as the second tuple element. #195 slice 2: the hook
+        # returns a 3-tuple — the third element is the RELATIONSHIP_CHANGED
+        # payload when the encounter moved a PRE-EXISTING row across a
+        # band boundary (actual before/after bands differ; creation emits
+        # FORMED only — the documented asymmetry vs SOCIALIZE), else None.
         # dialogue/start deliberately does NOT apply the effect: an
         # encounter is a message exchange, not a session start.
         from app.api.dialogue import apply_dialogue_encounter
-        relationship_effect, relationship_formed = apply_dialogue_encounter(
-            session, row.world_id, row, now_ts, state["settings"]
+        relationship_effect, relationship_formed, relationship_band_changed = (
+            apply_dialogue_encounter(
+                session, row.world_id, row, now_ts, state["settings"]
+            )
         )
 
         session.add(DialogueMessage(
@@ -2173,6 +2178,13 @@ def create_app(settings, session_factory: sessionmaker):
             # "affection_delta" (RULE), "affection_after"} when this
             # encounter created the canonical Relationship row, else null.
             "relationship_formed": relationship_formed,
+            # #195 slice 2: band-crossing milestone (additive, ALWAYS
+            # present) — the RELATIONSHIP_CHANGED event payload {"band",
+            # "affection_before", "affection_after"} when this encounter
+            # moved a PRE-EXISTING row across a band boundary, else null
+            # (creation/cooldown/no-crossing → null; nothing inside
+            # relationship_effect changes).
+            "relationship_band_changed": relationship_band_changed,
         }
 
     @app.get("/dialogue/{session_id}")

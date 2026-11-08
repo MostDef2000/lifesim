@@ -1724,13 +1724,14 @@ button.danger:hover { background: #93301f; }
 }
 .chat-shell .chatmsg .who { color: #8a5a16; }
 
-/* #195: relationship milestone — one warm banner row inside the chatlog
-   («Начало отношений»), rendered only from the fresh POST response's
-   relationship_formed field (never synthesized from history). Existing
-   warm tokens only — the sugg-chip fill/border family; the text stays on
-   the shell's own dark ink var(--w-text) (readable on cream; the warm
+/* #195: relationship banners — warm banner rows inside the chatlog: the
+   formation milestone («Начало отношений») and the band-crossing banner
+   («Изменение отношений»), each rendered only from the fresh POST
+   response's own field (never synthesized from history). Existing warm
+   tokens only — the sugg-chip fill/border family; the text stays on the
+   shell's own dark ink var(--w-text) (readable on cream; the warm
    dark-gold ink literal is count-pinned at 3× in this block — m63). */
-.chat-shell .chat-milestone {
+.chat-shell .chat-milestone, .chat-shell .chat-band-change {
   color: var(--w-text);
   background: var(--w-warm);
   border: 1px solid var(--w-warm-line);

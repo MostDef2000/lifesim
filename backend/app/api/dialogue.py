@@ -7,8 +7,14 @@ at most one relationship delta per cooldown window per (character, npc)
 pair, reusing the SOCIALIZE rule affection-only (apply_dialogue_encounter
 below). #195: when that delta CREATES the canonical Relationship row, the
 hook also emits exactly one RELATIONSHIP_FORMED WorldEvent inside the
-same transaction. Everything else stays journal-only: the dialogue itself
-never mutates the world beyond the encounter affection.
+same transaction. #195 slice 2: on a PRE-EXISTING row whose encounter
+crosses a band boundary (ACTUAL before/after bands differ), the hook
+additionally emits exactly one RELATIONSHIP_CHANGED WorldEvent plus the
+linked RelationshipEvent row — mirroring the SOCIALIZE site in
+lifecycle.py; creation emits FORMED only (the documented asymmetry:
+formation and crossing are mutually exclusive by construction).
+Everything else stays journal-only: the dialogue itself never mutates
+the world beyond the encounter affection.
 """
 
 from __future__ import annotations
@@ -24,8 +30,10 @@ from app.db.models import (
     Location,
     Memory,
     Relationship,
+    RelationshipEvent,
 )
 from app.events.events import EventType, log_event
+from app.social.affection import affection_band
 
 
 def safety_check(content: str) -> Optional[str]:
@@ -46,7 +54,7 @@ DIALOGUE_ENCOUNTER_COOLDOWN_MIN = 30
 
 def apply_dialogue_encounter(
     session: Session, world_id: str, session_row, now_ts: int, settings
-) -> Tuple[Dict[str, Any], Optional[Dict[str, Any]]]:
+) -> Tuple[Dict[str, Any], Optional[Dict[str, Any]], Optional[Dict[str, Any]]]:
     """#183: one relationship delta per «encounter» (not per message).
 
     An encounter is a cluster of messages inside the cooldown window:
@@ -79,18 +87,30 @@ def apply_dialogue_encounter(
     (== the latest row of this session); the npc reply is added after
     the hook returns.
 
-    Emits NO band events (no SOCIAL_INTERACTION, no RELATIONSHIP_CHANGED
-    from dialogue — band events fire on the next SOCIALIZE mutation).
+    Emits NO band events (no SOCIAL_INTERACTION; RELATIONSHIP_CHANGED
+    from dialogue fires only per the slice-2 crossing contract below).
     #195: the ONE exception is relationship CREATION — when this call
     creates the canonical Relationship row, exactly one RELATIONSHIP_FORMED
     WorldEvent is emitted (actor = the player character, target = the npc,
     location None; payload {target_id, affection_delta (RULE),
-    affection_after}); a cooldown-skip or a pre-existing row emits
-    nothing. Atomic: runs inside the caller's single dialogue_message
-    transaction (one commit for journal + effect + event — rollback drops
-    all).
+    affection_after}). #195 slice 2: on a PRE-EXISTING row the hook
+    detects a band crossing from the ACTUAL before/after values
+    (affection_band on both — never before + rule_delta, so a clamp cannot
+    invent a crossing): when the bands differ, exactly one
+    RELATIONSHIP_CHANGED WorldEvent (actor = the player, target = the npc,
+    location None; payload {band (the AFTER band), affection_before,
+    affection_after}) plus the linked RelationshipEvent row (canonical
+    pair, event_id = the WorldEvent id, impact = the RULE delta) —
+    mirroring the SOCIALIZE site in lifecycle.py. The documented
+    asymmetry: CREATION emits FORMED only — band_changed is None even
+    when the initial affection lands in / crosses a band (formation and
+    crossing are mutually exclusive by construction; SOCIALIZE's lazy
+    creation CAN emit CHANGED — that side stays in lifecycle.py).
+    Atomic: runs inside the caller's single dialogue_message
+    transaction (one commit for journal + effect + events — rollback
+    drops all; log_event flushes, does not commit).
 
-    Returns a 2-tuple (effect, formed):
+    Returns a 3-tuple (effect, formed, band_changed):
         effect: {"applied": True, "affection_delta": <float>,
         "affection_after": <float>} or {"applied": False} (cooldown window
         not elapsed). affection_delta is the HONEST applied change (row
@@ -99,6 +119,10 @@ def apply_dialogue_encounter(
         formed: the RELATIONSHIP_FORMED payload dict when this call
         created the canonical Relationship row (EXACTLY the event
         payload), else None.
+        band_changed: the RELATIONSHIP_CHANGED payload dict when this
+        call hit a PRE-EXISTING row whose ACTUAL before/after bands
+        differ (EXACTLY the event payload), else None — always None on
+        the cooldown-skip and on creation (the asymmetry above).
     """
     from app.social.affection import apply_socialize_affection
 
@@ -122,7 +146,7 @@ def apply_dialogue_encounter(
     if latest_here is not None:
         cooling = cooling.filter(DialogueMessage.id != latest_here.id)
     if cooling.first() is not None:
-        return {"applied": False}, None
+        return {"applied": False}, None, None
 
     # The helper returns the RULE delta (+2.0/-5.0 — the SOCIAL_INTERACTION
     # contract; lifecycle parity). The RESPONSE reports the honest applied
@@ -161,15 +185,46 @@ def apply_dialogue_encounter(
     }
     if not created:
         # #195: the row already existed — an encounter on a pre-existing
-        # relationship is not a formation; no event (band events stay with
-        # SOCIALIZE/lifecycle).
-        return effect, None
+        # relationship is not a formation. #195 slice 2: the ONE band
+        # event — when the encounter's ACTUAL before/after bands differ,
+        # exactly one RELATIONSHIP_CHANGED + the linked RelationshipEvent
+        # row, mirroring the SOCIALIZE site (lifecycle.py): payload band =
+        # the AFTER band, impact = the RULE delta. Detection uses the
+        # actual values on both sides (never before + rule_delta — a
+        # clamp at ±100 cannot invent a crossing). log_event only
+        # flushes: everything shares the caller's single commit/rollback.
+        band_before = affection_band(affection_before)
+        band_after = affection_band(rel.affection)
+        if band_before != band_after:
+            changed = {
+                "band": band_after,
+                "affection_before": affection_before,
+                "affection_after": rel.affection,
+            }
+            event_id = log_event(
+                session, world_id, now_ts, EventType.RELATIONSHIP_CHANGED,
+                actor_id=session_row.character_id,
+                target_id=session_row.npc_id,
+                location_id=None, payload=dict(changed),
+            )
+            session.add(RelationshipEvent(
+                world_id=world_id, character_a=a, character_b=b,
+                event_type=EventType.RELATIONSHIP_CHANGED.value,
+                impact=rule_delta, event_id=event_id,
+                game_timestamp=now_ts,
+            ))
+            return effect, None, changed
+        return effect, None, None
     # #195: this encounter CREATED the canonical Relationship row — emit
     # exactly one RELATIONSHIP_FORMED milestone. The payload carries the
     # RULE delta (the helper's +2.0/-5.0, honest at creation except at the
     # initial_affection clamp); actor = the player character, target = the
     # npc, location None (SOCIAL_INTERACTION precedent). log_event only
     # flushes: the event shares the caller's single commit/rollback.
+    # Slice 2: band_changed is None ALWAYS on creation — even when the
+    # initial affection lands in / crosses a band (the documented
+    # asymmetry: formation and crossing are mutually exclusive by
+    # construction; SOCIALIZE's lazy creation CAN emit CHANGED).
     formed = {
         "target_id": session_row.npc_id,
         "affection_delta": rule_delta,
@@ -180,7 +235,7 @@ def apply_dialogue_encounter(
         actor_id=session_row.character_id, target_id=session_row.npc_id,
         location_id=None, payload=dict(formed),
     )
-    return effect, formed
+    return effect, formed, None
 
 
 def build_context(
