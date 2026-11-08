@@ -788,9 +788,21 @@ def create_app(settings, session_factory: sessionmaker):
         )
         if character is None:
             raise HTTPException(status_code=404, detail="character not found")
+        # m184 (D2): whitelist projection — derive_roles dicts may carry
+        # internal identity keys (source_entity_id for org roles); only the
+        # public 4-key shape ever leaves the social layer, so any internal
+        # key (present or future) cannot leak into the API response.
         return {
             "character_id": cid,
-            "roles": derive_roles(session, character.world_id, cid),
+            "roles": [
+                {
+                    "id": r["id"],
+                    "title": r["title"],
+                    "source": r["source"],
+                    "reason": r["reason"],
+                }
+                for r in derive_roles(session, character.world_id, cid)
+            ],
         }
 
     # ---------- #182: partnership (explicit mutual declaration) ----------

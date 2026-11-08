@@ -31,8 +31,13 @@ never weaken):
   pattern alone loses text to a re-inspect while typing). Travel keeps its
   by-construction survival (no draft state — out of scope).
 - E. Portrait 404: non-503 failures show the honest non-error note
-  «Портрет ещё не готов»; 503 keeps its S.visualDisabled negative cache and
-  the m132-pinned keep-button comment stays byte-exact.
+  «Портрет ещё не готов»; 503 sets its S.visualDisabled negative cache AND
+  a visible «Портрет-сервис недоступен» status (the #59 follow-up #2 quirk
+  — status used to stay empty); the m132-pinned keep-button comment stays
+  byte-exact. The fix has two halves: the FIRST 503 (catch branch) sets the
+  negative cache + the visible status; LATER mounts (cached path — the
+  visualDisabled guard's else) skip the fetch entirely and must show the
+  SAME status via the else branch instead of leaving it empty.
 - F. CSS: append-only .conn-banner at the file tail (warm-warn family on
   the dark panel bg, fixed top-center, .hidden toggle like .toast);
   --w-line token count stays == 4 (no new token mirror).
@@ -47,6 +52,7 @@ APP_CSS = os.path.join(ROOT, "backend/app/web/style.css")
 BANNER_TEXT = "Нет связи с островом — переподключение…"
 RECOVERY_TEXT = "Связь восстановлена"
 PORTRAIT_404_TEXT = "Портрет ещё не готов"
+PORTRAIT_503_TEXT = "Портрет-сервис недоступен"
 
 
 def _read(path):
@@ -192,10 +198,55 @@ def test_portrait_404_honest_note_pins():
     # cache is unchanged.
     assert js.count(PORTRAIT_404_TEXT) == 1
     assert js.count(f"else status.textContent = \"{PORTRAIT_404_TEXT}\";") == 1
-    # Order: the 503 branch, then the honest note, then the pinned comment.
-    assert js.index("if (e && e.status === 503) S.visualDisabled = true;") \
+    # 503: the negative cache AND a visible status (the #59 follow-up #2
+    # quirk — the old one-liner set only the cache and left status empty).
+    # `if (e && e.status === 503) {` is unique in app.js (verified: the
+    # portrait catch is the only 503 handler), so the head pin needs no
+    # extension.
+    # Contract correction (#59 follow-up #2, cached path): the honest 503
+    # text now appears twice — the catch's 503 branch AND the new cached-path
+    # else (the cached-path message is the same honest text by design).
+    assert js.count(PORTRAIT_503_TEXT) == 2
+    assert js.count("if (e && e.status === 503) {") == 1
+    # Same correction for the full statement: the catch 503 write + the
+    # cached-else write (the else reuses the identical honest line).
+    assert js.count(f'status.textContent = "{PORTRAIT_503_TEXT}";') == 2
+    # Order: the 503 block, then the honest note, then the pinned comment.
+    assert js.index("if (e && e.status === 503) {") \
+        < js.index(f'status.textContent = "{PORTRAIT_503_TEXT}";') \
         < js.index(f"else status.textContent = \"{PORTRAIT_404_TEXT}\";") \
         < js.index("/* no portrait yet — keep button */")
+
+
+def test_portrait_503_cached_path_pins():
+    """#59 follow-up #2, second half (cached path): after the first 503 sets
+    the S.visualDisabled negative cache, every later portraitBlock() mount
+    skips the try/catch entirely — the else on the visualDisabled guard must
+    write the same honest status instead of leaving the fresh status element
+    empty. Pinned by index ordering (robust to whitespace): guard head <
+    cached-else 503 write < generate-portrait button append."""
+    js = _read(APP_JS)
+    stmt = f'status.textContent = "{PORTRAIT_503_TEXT}";'
+    # Two writes of the honest 503 status: the catch branch + the cached else.
+    assert js.count(stmt) == 2
+    # `if (!S.visualDisabled) {` is unique in app.js (m132/m175 pin == 1);
+    # the generate-portrait button append is the FIRST `box.append(el("button",
+    # {` after the guard (the other occurrence is far later in the file).
+    guard = js.index("if (!S.visualDisabled) {")
+    second_503 = js.index(stmt, js.index(stmt) + 1)
+    button = js.index('box.append(el("button", {', guard)
+    assert guard < second_503 < button
+    # Else-adjacency guard: the cached write must be the FIRST statement of
+    # the visualDisabled guard's else body — the nearest `} else {` before it
+    # must sit directly above it (only comment/blank lines between), so a
+    # future edit cannot move the write after the whole if/else (which would
+    # run it unconditionally and clobber the success path's status).
+    else_head = js.rindex("} else {", guard, second_503)
+    body = js[else_head + len("} else {"):second_503]
+    assert all(
+        not line.strip() or line.strip().startswith("//")
+        for line in body.splitlines()
+    )
 
 
 # ---------- F: CSS + file-wide hygiene ----------
