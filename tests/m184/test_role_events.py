@@ -21,8 +21,9 @@ SocialRole store, no sync machinery). Pins:
   is not unique), other kinds by their source string — org_leader in
   TWO orgs, same name or not, yields two distinct identities; title/name
   aliasing is impossible;
-- pins: EventType count == 44 with the two role-event names present
-  (#182 added PARTNERSHIP_DECLARED on top of the D2 pair);
+- pins: EventType count == 45 with the two role-event names present
+  (#182 added PARTNERSHIP_DECLARED, #195 added RELATIONSHIP_FORMED on top
+  of the D2 pair);
 - coverage: newcomer expiry is clock-driven (no mutation site) → emits
   nothing, pinned end-to-end (fast-forward clock + all daily phases).
 """
@@ -410,7 +411,7 @@ def test_project_role_events_is_noop_without_a_diff(default_settings):
 def test_event_type_count_44_with_role_events():
     from app.events.events import EventType
 
-    assert len(EventType) == 44
+    assert len(EventType) == 45
     assert "ROLE_ACQUIRED" in EventType.__members__
     assert "ROLE_REVOKED" in EventType.__members__
 

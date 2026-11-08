@@ -25,7 +25,7 @@ Covers (binding work order):
 - non-adult target → 422 validation error (NOT a decline);
 - player target → 422 validation error (mirrors /dialogue/start);
 - idempotency: the same pair cannot declare twice (422, no new rows);
-- EventType count 44 + membership pins;
+- EventType count 45 + membership pins;
 - UI pins: button literal, accepted/declined handling, hidden when
   «Партнёр» is in the roles list, all carry-forward chat pins intact.
 """
@@ -503,8 +503,8 @@ def test_idempotency_same_pair_cannot_declare_twice(world):
 
 # ---------- 5. EventType catalog pins ----------
 
-def test_event_type_count_44_and_membership():
-    assert len(EventType) == 44
+def test_event_type_count_45_and_membership():
+    assert len(EventType) == 45
     assert "PARTNERSHIP_DECLARED" in EventType.__members__
     # #61 v2 D2 neighbors stay.
     assert "ROLE_ACQUIRED" in EventType.__members__

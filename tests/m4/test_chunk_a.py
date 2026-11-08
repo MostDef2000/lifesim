@@ -43,11 +43,12 @@ def test_schema_050_tables_created(default_settings):
     session.close()
 
 
-def test_event_type_closed_set_44():
+def test_event_type_closed_set_45():
     values = {e.value for e in EventType}
-    assert len(values) == 44
+    assert len(values) == 45
     for added in ("AI_DECISION", "MEMORY_CREATED", "MEMORY_CONSOLIDATED",
-                  "ROLE_ACQUIRED", "ROLE_REVOKED", "PARTNERSHIP_DECLARED"):
+                  "ROLE_ACQUIRED", "ROLE_REVOKED", "PARTNERSHIP_DECLARED",
+                  "RELATIONSHIP_FORMED"):
         assert added in values
 
 

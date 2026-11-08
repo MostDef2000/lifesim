@@ -61,6 +61,7 @@ from app.config.config import load_config  # noqa: E402
 from app.db.models import (  # noqa: E402
     Character,
     CharacterTask,
+    Relationship,
     WorldClock,
     WorldEvent,
     bootstrap,
@@ -263,13 +264,16 @@ def test_master_journey_api_level(world):
     assert "opportunities" in r.json() and "desire" in r.json()
 
 
-# ---------- 2. LLM-down smoke: fallback stays playable, journal-only ----------
+# ---------- 2. LLM-down smoke: fallback stays playable, one formed event ----------
 
 def test_llm_down_three_exchanges_playable_fallback(world):
     """LLM unavailable (enabled=False): a 3-exchange dialogue never dead-ends
-    — every turn answers with source="fallback", and the exchange emits zero
-    WorldEvents (#183: the encounter-affection mutation is journal-quiet —
-    it writes Relationship rows, never events)."""
+    — every turn answers with source="fallback". #195: the FIRST exchange
+    CREATES the canonical relationship and emits exactly one
+    RELATIONSHIP_FORMED (the milestone object in the response); the later
+    exchanges are cooldown-skips (null milestone, no further events). The
+    complete list of newly added world-event types across the exchanges is
+    exactly ["RELATIONSHIP_FORMED"]."""
     settings, _app, client, factory, cid, _engine = world
     wid = settings.world.world_id
 
@@ -279,11 +283,17 @@ def test_llm_down_three_exchanges_playable_fallback(world):
     assert r.status_code == 201, r.text
     sid = r.json()["session_id"]
 
+    # #195: the relationship is absent before the exchange (the player is
+    # created after seeding — no seeded row for this pair).
+    lo, hi = sorted([cid, npc_here])
     with factory() as session:
-        events_before = (
-            session.query(WorldEvent).filter_by(world_id=wid).count())
+        assert session.query(Relationship).filter_by(
+            world_id=wid, character_a=lo, character_b=hi).first() is None
+        event_ids_before = {
+            e.id for e in session.query(WorldEvent.id).filter_by(world_id=wid)}
 
     turns = ["Привет!", "Чем занимаешься?", "Пока!"]
+    bodies = []
     for content in turns:
         r = client.post(f"/dialogue/{sid}/message", json={"content": content})
         assert r.status_code == 200, r.text
@@ -292,16 +302,40 @@ def test_llm_down_three_exchanges_playable_fallback(world):
             "LLM is off — the deterministic fallback must answer")
         assert body["npc_reply"].strip(), "fallback must stay playable"
         assert body["suggested_responses"], "suggestions must still be offered"
+        bodies.append(body)
 
     hist = client.get(f"/dialogue/{sid}").json()
     msgs = hist["messages"]
     assert len(msgs) == 6, "3 user + 3 npc messages"
     assert [m["sender"] for m in msgs] == ["user", "npc"] * 3
 
+    # #195: the complete list of newly added world-event types across the
+    # exchanges is exactly ["RELATIONSHIP_FORMED"] (the first exchange
+    # creates the relationship; the later two are cooldown-skips).
     with factory() as session:
-        events_after = (
-            session.query(WorldEvent).filter_by(world_id=wid).count())
-    assert events_after == events_before, "dialogue is journal-only (no events)"
+        new_events = [
+            e for e in session.query(WorldEvent).filter_by(world_id=wid).all()
+            if e.id not in event_ids_before
+        ]
+    assert [e.event_type for e in new_events] == ["RELATIONSHIP_FORMED"]
+
+    # The first response carries the exact milestone object; the later
+    # responses are null (cooldown).
+    assert bodies[0]["relationship_formed"] == {
+        "target_id": npc_here, "affection_delta": 2.0, "affection_after": 2.0,
+    }
+    assert bodies[1]["relationship_formed"] is None
+    assert bodies[2]["relationship_formed"] is None
+
+    # actor/target/payload validated on the single emitted event.
+    ev = new_events[0]
+    assert ev.actor_id == cid, "actor is the player character"
+    assert ev.target_id == npc_here
+    assert ev.location_id is None
+    payload = json.loads(ev.payload)
+    assert set(payload.keys()) == {
+        "target_id", "affection_delta", "affection_after"}
+    assert payload["target_id"] == npc_here
 
 
 # ---------- 3. Flux-down smoke: result commits, client degrades ----------

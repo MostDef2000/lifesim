@@ -214,8 +214,10 @@ def test_settings_validation():
     assert settings.social.enabled is False
 
 def test_event_type_count():
-    # Closed-set catalog: 43 through #61 v2 D2, +1 (#182 PARTNERSHIP_DECLARED) = 44
-    assert len(EventType) == 44
+    # Closed-set catalog: 43 through #61 v2 D2, +1 (#182 PARTNERSHIP_DECLARED)
+    # = 44, +1 (#195 RELATIONSHIP_FORMED) = 45
+    assert len(EventType) == 45
     assert "SOCIAL_INTERACTION" in EventType.__members__
     assert "RELATIONSHIP_CHANGED" in EventType.__members__
     assert "CONFLICT" in EventType.__members__
+    assert "RELATIONSHIP_FORMED" in EventType.__members__

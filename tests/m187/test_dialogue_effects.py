@@ -285,8 +285,13 @@ def test_formula_edges_and_no_conflict_side_effects(tmp_path):
         )
         events_before = s.query(WorldEvent).filter_by(world_id=wid).count()
         ai_before = s.query(AiRequest).count()
-    eff = _msg(client, _start(client, npc_conf))["relationship_effect"]
+    body = _msg(client, _start(client, npc_conf))
+    eff = body["relationship_effect"]
     assert eff["affection_delta"] == -5.0 and eff["affection_after"] == -45.0
+    # #195: existing relationship → no formed milestone (strict access: the
+    # additive key must exist and be null here — the relationship already
+    # existed, so the encounter is not a creation).
+    assert body["relationship_formed"] is None
     with factory() as s:
         health_after = sorted(
             (h.character_id, h.stress)
@@ -296,7 +301,8 @@ def test_formula_edges_and_no_conflict_side_effects(tmp_path):
         events_after = s.query(WorldEvent).filter_by(world_id=wid).count()
         ai_after = s.query(AiRequest).count()
     assert health_after == health_before, "no stress from the dialogue conflict path"
-    assert events_after == events_before, "no WorldEvents from dialogue (v1)"
+    assert events_after == events_before, (
+        "existing relationship → no formed milestone, no dialogue conflict events")
     assert ai_after == ai_before, "no LLM decide enqueue from dialogue"
 
     # Clamp at +100: normal path attempted, row does not move, delta 0.

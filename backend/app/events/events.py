@@ -60,6 +60,7 @@ class EventType(Enum):
     # fact from the partnerships table, created by a deterministic NPC
     # agreement rule (no LLM). No PARTNERSHIP_* revoke event in v1: no breakup.
     PARTNERSHIP_DECLARED = "PARTNERSHIP_DECLARED"
+    RELATIONSHIP_FORMED = "RELATIONSHIP_FORMED"
 
 def log_event(
     session: Session,
