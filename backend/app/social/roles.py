@@ -167,6 +167,12 @@ def _org_roles(session: Session, char: Character) -> List[Dict[str, Any]]:
         .all()
     )
     roles: List[Dict[str, Any]] = []
+    # m184 (D2): org-derived role dicts carry an INTERNAL identity key
+    # ``source_entity_id`` — the source organization's ID. Organization.name
+    # is NOT unique (app/db/models.py), so the display name must not key the
+    # role identity. The key never leaves the social layer: event payloads
+    # (_role_payload) and the roles endpoint project explicit public fields
+    # only; the human-readable "source" string is unchanged.
     for member, org in rows:
         if member.role == "leader":
             roles.append({
@@ -175,6 +181,7 @@ def _org_roles(session: Session, char: Character) -> List[Dict[str, Any]]:
                 "source": f"организация «{org.name}»",
                 "reason": f"роль leader в организации "
                           f"(в составе с дня {int(member.joined_at) // MINUTES_PER_DAY})",
+                "source_entity_id": org.id,
             })
         else:
             roles.append({
@@ -183,6 +190,7 @@ def _org_roles(session: Session, char: Character) -> List[Dict[str, Any]]:
                 "source": f"организация «{org.name}»",
                 "reason": f"роль member в организации "
                           f"(в составе с дня {int(member.joined_at) // MINUTES_PER_DAY})",
+                "source_entity_id": org.id,
             })
     return roles
 
@@ -274,22 +282,29 @@ def derive_roles(session: Session, world_id: str, character_id: str) -> List[Dic
     return roles
 
 
-def _role_identity(role: Dict[str, Any]) -> Tuple[str, str]:
+def _role_identity(role: Dict[str, Any]) -> Tuple[str, Any]:
     """Identity of a derived role: (role kind, source entity).
 
-    The source string embeds the source ENTITY (organization name for org
-    roles; the offender/occupation/newcomer kinds are singletons per
-    character), so two roles of the same kind from different sources never
-    alias (two org_leader roles → two identities, one per organization).
+    m184 (D2 fix): org-derived roles carry an internal
+    ``source_entity_id`` — the source ORGANIZATION's ID — and are keyed by
+    it. The previous name-keyed identity was defective: Organization.name
+    is not unique, so two same-named organizations aliased to ONE identity
+    in the before/after snapshot diff, losing or spuriously revoking role
+    events (the old claim that the source string embeds the entity and
+    same-kind roles from different sources never alias was FALSE for
+    same-named organizations). Non-org kinds (newcomer, occupation,
+    offender, partner) have no ``source_entity_id`` and stay
+    singleton-per-character via their source strings — the ``or`` fallback
+    keeps their identities byte-identical.
     ``reason``/``title`` are snapshots, NOT identity: they may rephrase
     without the role itself changing.
     """
-    return (role["id"], role["source"])
+    return (role["id"], role.get("source_entity_id") or role["source"])
 
 
 def roles_snapshot(
     session: Session, world_id: str, character_id: str
-) -> Dict[Tuple[str, str], Dict[str, Any]]:
+) -> Dict[Tuple[str, Any], Dict[str, Any]]:
     """Pre-mutation snapshot: identity-keyed derived roles of one character.
 
     Pure read (same discipline as derive_roles). The caller takes this
@@ -306,7 +321,7 @@ def project_role_events(
     session: Session,
     world_id: str,
     character_id: str,
-    before: Dict[Tuple[str, str], Dict[str, Any]],
+    before: Dict[Tuple[str, Any], Dict[str, Any]],
     cause: str | None = None,
     cause_event_id: int | None = None,
 ) -> List[Tuple[EventType, Dict[str, Any]]]:

@@ -309,8 +309,12 @@ def test_roles_deterministic_same_state_same_roles(world):
     c = _roles_of(factory, wid, npc_id)
     assert a == c
     # Roles are plain data with the fixed catalog shape.
+    # m184 contract correction: org-derived roles may carry the internal
+    # identity key source_entity_id (org ID); the public 4-key shape is
+    # pinned at the endpoint (test_roles_endpoint_public_shape).
     for r in a:
-        assert set(r.keys()) == {"id", "title", "source", "reason"}
+        assert {"id", "title", "source", "reason"} <= set(r.keys())
+        assert set(r.keys()) - {"id", "title", "source", "reason"} <= {"source_entity_id"}
 
 
 def test_roles_distinct_from_internal_traits(world):

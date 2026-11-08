@@ -16,9 +16,11 @@ SocialRole store, no sync machinery). Pins:
   already-reported crime: no duplicate event; resolution: the offender
   role is RETAINED (derive grants it for reported|resolved alike) → no
   ROLE_* event;
-- identity: (role id, source) includes the source entity — org_leader
-  in TWO orgs yields two distinct identities; title-only aliasing is
-  impossible;
+- identity: (role id, source entity) — org roles key by the org's ID
+  (internal source_entity_id; m184 contract correction: Organization.name
+  is not unique), other kinds by their source string — org_leader in
+  TWO orgs, same name or not, yields two distinct identities; title/name
+  aliasing is impossible;
 - pins: EventType count == 44 with the two role-event names present
   (#182 added PARTNERSHIP_DECLARED on top of the D2 pair);
 - coverage: newcomer expiry is clock-driven (no mutation site) → emits
@@ -204,7 +206,9 @@ def test_election_new_winner_emits_acquire_and_revoke(default_settings):
         assert p["cause"] == "election"
         assert p["cause_event_id"] == e_election.id
     # The winner's acquired identity is exactly org_leader@<org>.
-    win_identity = ("org_leader", comm_source)
+    # m184 contract correction: identity keyed by org ID (source_entity_id),
+    # name-keyed pin was stale.
+    win_identity = ("org_leader", org.id)
     snap = roles_snapshot(session, world_id, winner.id)
     assert win_identity in snap
     assert snap[win_identity]["title"] == f"Глава «{org.name}»"
@@ -368,8 +372,12 @@ def test_identity_distinguishes_same_role_kind_from_two_orgs(default_settings):
     # the identity, so single-org title-only aliasing is impossible. (The
     # seeded leader may legitimately lead several config orgs beyond these
     # two — presence is asserted, not exhaustive equality.)
-    id1 = ("org_leader", f"организация «{org1.name}»")
-    id2 = ("org_leader", f"организация «{org2.name}»")
+    # m184 contract correction: identity keyed by org ID (source_entity_id),
+    # name-keyed pin was stale. The fixture orgs have different names, so
+    # the same-name aliasing case is covered separately by
+    # test_same_name_orgs_do_not_alias_role_events (section 7).
+    id1 = ("org_leader", org1.id)
+    id2 = ("org_leader", org2.id)
     assert id1 in snap
     assert id2 in snap
     assert len(set(leader_identities)) == len(leader_identities)
@@ -435,3 +443,219 @@ def test_newcomer_expiry_emits_nothing(default_settings):
     # …and nothing was emitted: no acquisition, no revocation, anywhere.
     assert role_events(session, world_id, "ROLE_ACQUIRED") == []
     assert role_events(session, world_id, "ROLE_REVOKED") == []
+
+
+# ---------- 7. Same-name orgs must not alias role identities (D2) ----------
+#
+# Organization.name is NOT unique (app/db/models.py). The D2 contract says a
+# role's identity must include the source entity's org ID, not just the
+# title/name. On base, _role_identity is (role id, source) where the org
+# source string embeds the org NAME — so two same-named orgs alias to ONE
+# identity in the before/after snapshot diff. These tests pin the contract
+# (orgs are distinct entities) and are expected to be RED on base.
+
+def _make_same_name_orgs(session, world_id, name, loc, members_by_org):
+    """Create two orgs with the IDENTICAL `name`; members_by_org maps
+    org_index (0|1) -> list of (character, role) rows. Returns (org_a, org_b)."""
+    orgs = []
+    for i in (0, 1):
+        org = Organization(
+            world_id=world_id, name=name, type="guild", location_id=loc)
+        session.add(org)
+        session.flush()
+        for char, role in members_by_org[i]:
+            session.add(OrganizationMember(
+                organization_id=org.id, character_id=char.id,
+                role=role, joined_at=0))
+        orgs.append(org)
+    session.flush()
+    return orgs[0], orgs[1]
+
+
+def test_same_name_orgs_do_not_alias_role_events(default_settings):
+    """Two orgs with the IDENTICAL name: a leader elected in org A (X), then a
+    leader elected in org B (Y). Contract: Y's leader acquisition is projected,
+    X keeps their (org A) role — NO revocation of X's org-A leadership from B's
+    election, and BOTH acquisitions appear.
+
+    On base the aliased (name-keyed) identity is expected to lose X's org-A
+    acquisition and/or X's org-B revocation — the test asserts the contract,
+    not the defect.
+    """
+    settings = make_settings(default_settings)
+    session, world_id = build_world(settings)
+    chars = sorted(
+        (c for c in session.query(Character).filter_by(world_id=world_id).all()),
+        key=lambda c: c.id)
+    X, Y, Z1, Z2, Z3 = chars[0], chars[1], chars[2], chars[3], chars[4]
+    comm = community(session, world_id)
+    name = "Община М184"  # unique: no seeded org uses this name
+
+    # Org A: X (member), Z1 (leader), Z2 (member).  Org B: X (leader),
+    # Y (member), Z3 (member).  X spans BOTH same-named orgs — the aliasing
+    # unit. X is elected into A's leadership; Y is elected into B's.
+    org_a, org_b = _make_same_name_orgs(
+        session, world_id, name, comm.location_id,
+        {0: [(X, "member"), (Z1, "leader"), (Z2, "member")],
+         1: [(X, "leader"), (Y, "member"), (Z3, "member")]})
+    org_a.leader_character_id = Z1.id
+    org_b.leader_character_id = X.id
+    session.flush()
+
+    # Deterministic winners via affection (score = Σ affection from voters):
+    #   Org A candidates {X, Z1, Z2}: X=200, Z1=100, Z2=100  -> X wins.
+    #   Org B candidates {X, Y, Z3}:  Y=200, X=100, Z3=100   -> Y wins.
+    set_mutual_affection(session, world_id, X.id, [Z1.id, Z2.id], 100.0)
+    set_mutual_affection(session, world_id, Z1.id, [Z2.id], 0.0)
+    set_mutual_affection(session, world_id, X.id, [Y.id], 100.0)
+    set_mutual_affection(session, world_id, Y.id, [Z3.id], 100.0)
+    set_mutual_affection(session, world_id, X.id, [Z3.id], 0.0)
+
+    # Both orgs hold their scheduled day-7 election in one policy pass
+    # (orgs processed by id: A first, then B).
+    run_daily_org_policies(session, world_id, settings, 7 * 1440)
+    session.flush()
+
+    # The source rows actually flipped (scenario ran as intended).
+    assert leader_of(session, org_a).character_id == X.id
+    assert leader_of(session, org_b).character_id == Y.id
+
+    source = f"организация «{name}»"
+    acquired = role_events(session, world_id, "ROLE_ACQUIRED")
+    revoked = role_events(session, world_id, "ROLE_REVOKED")
+    acq_x = [(e, p) for e, p in acquired
+             if e.actor_id == X.id and p["role"] == "org_leader"
+             and p["source"] == source]
+    acq_y = [(e, p) for e, p in acquired
+             if e.actor_id == Y.id and p["role"] == "org_leader"
+             and p["source"] == source]
+    rev_x = [(e, p) for e, p in revoked
+             if e.actor_id == X.id and p["role"] == "org_leader"
+             and p["source"] == source]
+
+    # Y's leader acquisition (org B) is projected.
+    assert len(acq_y) == 1
+    # X's leader acquisition (org A) is projected — the aliased identity must
+    # not swallow it. (RED on base: the name-keyed identity already present
+    # from org B makes the diff see no new org_leader for X.)
+    assert len(acq_x) == 1
+    # X keeps their org-A leadership: across the two elections X lost exactly
+    # ONE org_leader role (org B's, legitimately) — so exactly one org_leader
+    # revocation for X, and org A's leadership is NOT revoked. (RED on base:
+    # the aliased identity survives via org A, so the org-B revocation is
+    # lost and the count is 0.)
+    assert len(rev_x) == 1
+
+
+# ---------- 8. Rename stability: a rename is not a role-source mutation ----------
+
+def test_rename_emits_nothing_and_next_election_diffs_on_new_name(default_settings):
+    """An org with an elected leader is renamed, then a leadership transfer
+    (day-7 election) triggers the role diff in that org. Contract: the rename
+    itself emits NOTHING (it is not a wired role-source mutation), and the
+    election produces exactly one revoke (old leader) + one acquire (new
+    leader), both on the NEW name.
+
+    RED discipline: this is expected to PASS on base — the per-site snapshot is
+    taken fresh at the mutation, so a rename (which calls no
+    project_role_events) is invisible to the diff. Kept as a contract pin that
+    guards the fix (org-id-keyed identity must stay rename-stable too).
+    """
+    settings = make_settings(default_settings)
+    session, world_id = build_world(settings)
+    chars = sorted(
+        (c for c in session.query(Character).filter_by(world_id=world_id).all()),
+        key=lambda c: c.id)
+    X, Y, Z1 = chars[0], chars[1], chars[2]
+    comm = community(session, world_id)
+    old_name = "Община Ренейм"  # unique: no seeded org uses this name
+    org = Organization(
+        world_id=world_id, name=old_name, type="guild",
+        location_id=comm.location_id)
+    session.add(org)
+    session.flush()
+    session.add(OrganizationMember(
+        organization_id=org.id, character_id=X.id, role="leader", joined_at=0))
+    session.add(OrganizationMember(
+        organization_id=org.id, character_id=Y.id, role="member", joined_at=0))
+    session.add(OrganizationMember(
+        organization_id=org.id, character_id=Z1.id, role="member", joined_at=0))
+    org.leader_character_id = X.id
+    session.flush()
+
+    # Deterministic winner: Y (score 200 vs X=100, Z1=100).
+    set_mutual_affection(session, world_id, X.id, [Y.id], 100.0)
+    set_mutual_affection(session, world_id, Y.id, [Z1.id], 100.0)
+    set_mutual_affection(session, world_id, X.id, [Z1.id], 0.0)
+
+    # Rename the org — a plain attribute write, NOT a role-source mutation.
+    new_name = "Община Ренейм2"
+    org.name = new_name
+    session.flush()
+    # The rename itself emits nothing.
+    assert role_events(session, world_id, "ROLE_ACQUIRED") == []
+    assert role_events(session, world_id, "ROLE_REVOKED") == []
+
+    # The day-7 election transfers leadership X -> Y.
+    run_daily_org_policies(session, world_id, settings, 7 * 1440)
+    session.flush()
+    assert leader_of(session, org).character_id == Y.id
+
+    new_source = f"организация «{new_name}»"
+    old_source = f"организация «{old_name}»"
+    acquired = role_events(session, world_id, "ROLE_ACQUIRED")
+    revoked = role_events(session, world_id, "ROLE_REVOKED")
+    # No event references the old name: the rename emitted nothing and the
+    # election diffed on the fresh name.
+    assert all(p["source"] != old_source for e, p in acquired + revoked)
+    rev_leader = [(e, p) for e, p in revoked
+                  if p["role"] == "org_leader" and p["source"] == new_source]
+    acq_leader = [(e, p) for e, p in acquired
+                  if p["role"] == "org_leader" and p["source"] == new_source]
+    # Exactly one revoke (old leader X) + one acquire (new leader Y).
+    assert len(rev_leader) == 1 and rev_leader[0][0].actor_id == X.id
+    assert len(acq_leader) == 1 and acq_leader[0][0].actor_id == Y.id
+
+
+# ---------- 9. Non-org identity guard (must PASS on base) ----------
+
+def test_non_org_offender_identity_unchanged_by_org_fix(default_settings):
+    """Guard: the offender role is a NON-org, singleton identity
+    (role id, source) — not org-keyed. The org-identity fix (adding the source
+    entity's org id to org-derived identities) must leave non-org identities
+    byte-identical. This re-runs the covered crime-report transition and pins
+    the offender identity + event exactly as before. Must PASS on base.
+    """
+    settings = make_settings(
+        default_settings, org=False,
+        crime_updates={"enabled": True, "detection_base": 1.0})
+    session, world_id = build_world(settings)
+    chars = sorted(
+        (c for c in session.query(Character).filter_by(world_id=world_id).all()),
+        key=lambda c: c.id)
+    actor, witness = chars[0], chars[1]
+    witness.location_id = actor.location_id
+    session.flush()
+
+    log_event(session, world_id, DAY, EventType.CRIME_COMMITED,
+              actor_id=actor.id, payload={"type": "theft", "day": 1})
+    crime = Crime(
+        world_id=world_id, crime_type="theft", actor_character_id=actor.id,
+        location_id=actor.location_id, day=1, status="unreported",
+        created_at=DAY)
+    session.add(crime)
+    session.flush()
+
+    _witness_and_report(session, world_id, 1, DAY, crime, actor, settings)
+    assert crime.status == "reported"
+
+    acquired = role_events(session, world_id, "ROLE_ACQUIRED")
+    assert len(acquired) == 1
+    e, p = acquired[0]
+    assert e.actor_id == actor.id
+    assert p["role"] == "offender"
+    assert p["source"] == "зарегистрированное нарушение"
+    # The offender identity is a singleton (role id, source) — NOT org-keyed,
+    # so the org-identity fix must not change it.
+    identity = ("offender", "зарегистрированное нарушение")
+    assert identity in roles_snapshot(session, world_id, actor.id)

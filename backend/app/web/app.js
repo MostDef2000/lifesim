@@ -902,7 +902,10 @@ function portraitBlock() {
           el("img", { class: "portrait-img", src: url, alt: "Портрет" }), status);
         hasCanonical = true;
       } catch (e) {
-        if (e && e.status === 503) S.visualDisabled = true;
+        if (e && e.status === 503) {
+          S.visualDisabled = true;
+          status.textContent = "Портрет-сервис недоступен";
+        }
         else status.textContent = "Портрет ещё не готов";  // #175: 404/net — honest non-error note
         /* no portrait yet — keep button */
       }
@@ -911,6 +914,10 @@ function portraitBlock() {
       // upload-time errors surface on the upload button instead.
       try { await refreshReferenceOptions(refSel); }
       catch (e) { /* picker stays at "—" */ }
+    } else {
+      // cached 503: the negative cache skips the fetch on re-mounts —
+      // keep the status honest instead of empty (#59 follow-up #2).
+      status.textContent = "Портрет-сервис недоступен";
     }
     box.append(el("button", {
       onclick: () => generatePortrait(box, hasCanonical),
