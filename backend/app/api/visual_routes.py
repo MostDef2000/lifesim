@@ -167,8 +167,8 @@ def register_visual_routes(app, settings: Settings, session_factory: sessionmake
         - nude=True sets the descriptor nude_framing hook (dedicated
           fragment path — no clothing phrase may leak into the positive);
           nude IS content: it stays in the stored prompt;
-        - scenes carry the server-side STORYBOOK_SCENE suffix on the
-          TRANSPORT prompt only (composed here, NOT in build_prompt —
+        - scenes carry the server-side STORYBOOK_SCENE positive prefix on
+          the TRANSPORT prompt only (composed here, NOT in build_prompt —
           m6 pins build_prompt scene bytes directly, m205 pins the raw
           stored bytes);
         - reference_b64 rides the transport call when non-empty (the
@@ -247,9 +247,9 @@ def register_visual_routes(app, settings: Settings, session_factory: sessionmake
 
         prompt = build_prompt(descriptor)
         # 020 P3 stage 2 (render params): style presets and the storybook
-        # suffix are RENDER parameters — they compose onto the prompt at
-        # the TRANSPORT CALL SITE ONLY. The asset row / response keeps the
-        # RAW build_prompt bytes (m205 TestSceneRouteGuard pins
+        # positive prefix are RENDER parameters — they compose onto the
+        # prompt at the TRANSPORT CALL SITE ONLY. The asset row / response
+        # keeps the RAW build_prompt bytes (m205 TestSceneRouteGuard pins
         # scene["prompt"] == build_prompt(descriptor) byte-exact; m234
         # reads its assertions from the transport sink). The nude framing,
         # by contrast, IS content and stays inside build_prompt above.
@@ -260,7 +260,7 @@ def register_visual_routes(app, settings: Settings, session_factory: sessionmake
                 f"{prompt}"
             )
         elif asset_type == "scene":
-            transport_prompt = f"{prompt}, {STORYBOOK_SCENE}"
+            transport_prompt = f"{STORYBOOK_SCENE}, {prompt}"
 
         # #227 2b: the composed negative rides every generation — canonical
         # safety floor (when the descriptor carries a visual profile) plus

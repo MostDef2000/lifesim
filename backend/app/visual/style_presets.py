@@ -12,8 +12,9 @@ server-side (no user free-text in any of them):
   clothing terms ("wearing", "dress", "coat", "overalls") from a nude
   positive — the descriptor's own outfit_mode="nude" branch ("wearing
   nothing") is NOT usable for this.
-- STORYBOOK_SCENE — the server-side suffix appended to EVERY scene positive
-  prompt (no user-facing style parameter on scenes this wave).
+- STORYBOOK_SCENE — the server-side positive prefix prepended to EVERY
+  scene positive prompt (no user-facing style parameter on scenes this
+  wave).
 - FULL_BODY_FRAMING — appended AFTER the outfit chain for the W2 preview
   full-body modes (full_body_clothed / full_body_outfit): the framing asks
   for the whole figure in frame without touching what is worn. #237 live
@@ -40,7 +41,8 @@ OIL_PORTRAIT = "oil painting"
 WATERCOLOR_PORTRAIT = "watercolor painting"
 NUDE_FRAMING = "artistic nude figure study, tasteful, soft studio light"
 STORYBOOK_SCENE = (
-    "semi-realistic digital painting, warm palette, storybook realism"
+    "semi-realistic digital painting, warm palette, storybook realism, "
+    "hand-painted narrative illustration"
 )
 FULL_BODY_FRAMING = (
     "wide full body shot, entire figure visible head to toe, "
