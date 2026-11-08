@@ -3423,6 +3423,15 @@ function renderChat(session, locName) {
       curSession.messages = hist.messages;
       S.chatSessionId = sid;
       renderMessages(hist.messages);
+      // #195: relationship milestone — driven ONLY by the fresh POST
+      // response's relationship_formed field, and appended AFTER
+      // renderMessages (it replaceChildren's the log — an earlier
+      // insertion would be erased). Never synthesized from history.
+      if (r.relationship_formed) {
+        log.append(el("div", { class: "chat-milestone", role: "status" },
+          "Начало отношений"));
+        log.scrollTop = log.scrollHeight;
+      }
       const npcMsg = [...hist.messages].reverse().find((m) => m.sender === "npc");
       renderSugg(npcMsg && npcMsg.suggested_responses
         ? npcMsg.suggested_responses : []);

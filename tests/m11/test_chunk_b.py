@@ -123,7 +123,7 @@ class TestStructuralPins:
     def test_event_types_44(self):
         from app.events.events import EventType
 
-        assert len(EventType) == 44
+        assert len(EventType) == 45
 
     def test_fire_events_exist(self, env):
         settings, factory, client_for = env

@@ -2,16 +2,18 @@
 
 player message → safety gate → context (memories/relationship/world) →
 LLM (M4 transport) OR deterministic fallback (llm-off, П2) → npc reply
-+ 3 suggested responses. Journal-only EXCEPT one mutation (#183): the
-encounter affection — at most one relationship delta per cooldown window
-per (character, npc) pair, reusing the SOCIALIZE rule affection-only
-(apply_dialogue_encounter below). Everything else stays journal-only:
-the dialogue itself never mutates the world.
++ 3 suggested responses. One mutation (#183): the encounter affection —
+at most one relationship delta per cooldown window per (character, npc)
+pair, reusing the SOCIALIZE rule affection-only (apply_dialogue_encounter
+below). #195: when that delta CREATES the canonical Relationship row, the
+hook also emits exactly one RELATIONSHIP_FORMED WorldEvent inside the
+same transaction. Everything else stays journal-only: the dialogue itself
+never mutates the world beyond the encounter affection.
 """
 
 from __future__ import annotations
 
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 from sqlalchemy.orm import Session
 
@@ -23,6 +25,7 @@ from app.db.models import (
     Memory,
     Relationship,
 )
+from app.events.events import EventType, log_event
 
 
 def safety_check(content: str) -> Optional[str]:
@@ -43,7 +46,7 @@ DIALOGUE_ENCOUNTER_COOLDOWN_MIN = 30
 
 def apply_dialogue_encounter(
     session: Session, world_id: str, session_row, now_ts: int, settings
-) -> Dict[str, Any]:
+) -> Tuple[Dict[str, Any], Optional[Dict[str, Any]]]:
     """#183: one relationship delta per «encounter» (not per message).
 
     An encounter is a cluster of messages inside the cooldown window:
@@ -76,18 +79,26 @@ def apply_dialogue_encounter(
     (== the latest row of this session); the npc reply is added after
     the hook returns.
 
-    Emits NO WorldEvent (v1 simplification — #183: no SOCIAL_INTERACTION,
-    no RELATIONSHIP_CHANGED band-crossing from dialogue; band events fire
-    on the next SOCIALIZE mutation). Atomic: runs inside the caller's
-    single dialogue_message transaction (one commit for journal + effect
-    — rollback drops both).
+    Emits NO band events (no SOCIAL_INTERACTION, no RELATIONSHIP_CHANGED
+    from dialogue — band events fire on the next SOCIALIZE mutation).
+    #195: the ONE exception is relationship CREATION — when this call
+    creates the canonical Relationship row, exactly one RELATIONSHIP_FORMED
+    WorldEvent is emitted (actor = the player character, target = the npc,
+    location None; payload {target_id, affection_delta (RULE),
+    affection_after}); a cooldown-skip or a pre-existing row emits
+    nothing. Atomic: runs inside the caller's single dialogue_message
+    transaction (one commit for journal + effect + event — rollback drops
+    all).
 
-    Returns the response field:
-        {"applied": True, "affection_delta": <float>, "affection_after": <float>}
-        or {"applied": False} (cooldown window not elapsed). affection_delta
-        is the HONEST applied change (row after − row before; 0 at the ±100
-        clamp) — the shared helper's RULE delta (+2.0/-5.0) equals it
-        everywhere except at the clamp.
+    Returns a 2-tuple (effect, formed):
+        effect: {"applied": True, "affection_delta": <float>,
+        "affection_after": <float>} or {"applied": False} (cooldown window
+        not elapsed). affection_delta is the HONEST applied change (row
+        after − row before; 0 at the ±100 clamp) — the shared helper's
+        RULE delta (+2.0/-5.0) equals it everywhere except at the clamp.
+        formed: the RELATIONSHIP_FORMED payload dict when this call
+        created the canonical Relationship row (EXACTLY the event
+        payload), else None.
     """
     from app.social.affection import apply_socialize_affection
 
@@ -111,7 +122,7 @@ def apply_dialogue_encounter(
     if latest_here is not None:
         cooling = cooling.filter(DialogueMessage.id != latest_here.id)
     if cooling.first() is not None:
-        return {"applied": False}
+        return {"applied": False}, None
 
     # The helper returns the RULE delta (+2.0/-5.0 — the SOCIAL_INTERACTION
     # contract; lifecycle parity). The RESPONSE reports the honest applied
@@ -124,13 +135,17 @@ def apply_dialogue_encounter(
         .filter_by(world_id=world_id, character_a=a, character_b=b)
         .first()
     )
+    # #195: creation flag captured from the SAME pre-helper read (no extra
+    # query) — the canonical row is absent exactly when this encounter is
+    # the one creating it.
+    created = rel is None
     affection_before = (
         rel.affection if rel is not None
         else settings.social.initial_affection
     )
     # The helper's RULE delta feeds the lifecycle/SOCIALIZE contract; the
     # response reports the honest post-clamp change computed below.
-    apply_socialize_affection(
+    rule_delta = apply_socialize_affection(
         session, world_id, session_row.character_id, session_row.npc_id,
         now_ts, settings,
     )
@@ -139,11 +154,33 @@ def apply_dialogue_encounter(
         .filter_by(world_id=world_id, character_a=a, character_b=b)
         .first()
     )
-    return {
+    effect = {
         "applied": True,
         "affection_delta": rel.affection - affection_before,
         "affection_after": rel.affection if rel is not None else None,
     }
+    if not created:
+        # #195: the row already existed — an encounter on a pre-existing
+        # relationship is not a formation; no event (band events stay with
+        # SOCIALIZE/lifecycle).
+        return effect, None
+    # #195: this encounter CREATED the canonical Relationship row — emit
+    # exactly one RELATIONSHIP_FORMED milestone. The payload carries the
+    # RULE delta (the helper's +2.0/-5.0, honest at creation except at the
+    # initial_affection clamp); actor = the player character, target = the
+    # npc, location None (SOCIAL_INTERACTION precedent). log_event only
+    # flushes: the event shares the caller's single commit/rollback.
+    formed = {
+        "target_id": session_row.npc_id,
+        "affection_delta": rule_delta,
+        "affection_after": rel.affection if rel is not None else None,
+    }
+    log_event(
+        session, world_id, now_ts, EventType.RELATIONSHIP_FORMED,
+        actor_id=session_row.character_id, target_id=session_row.npc_id,
+        location_id=None, payload=dict(formed),
+    )
+    return effect, formed
 
 
 def build_context(
