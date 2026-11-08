@@ -27,8 +27,9 @@ Included (Phase 1, repo-only):
 
 Excluded:
 - Per-character LoRA use (Phase 2; VRAM on the 12GB box already peaks
-  ~93.5% with base flux — KB 1489-1491; FLUX LoRA training on this stack is
-  recorded non-viable — KB 1611-1616).
+  ~93.5% with flux + the uncensored LoRA active (adapter activation
+  2026-10-23) — the figure is NOT bare flux — KB 1489-1491; FLUX LoRA
+  training on this stack is recorded non-viable — KB 1611-1616).
 - `CharacterVisualProfile` table (Phase 2, together with #118 editing).
 - Negative-prompt transport contract — LANDED as Phase 2b (#227), delivered
   split: lane A (app + repo adapter copy, backward-compatible — pre-update
@@ -38,7 +39,10 @@ Excluded:
   `backend/app/visual/descriptor.py` — canonical safety negative first,
   composition second ("bare midriff, exposed stomach, navel"), appended to
   (never replaces) the adapter technical floor; payload key "negative"
-  always present, empty-able.
+  always present, empty-able. Effectiveness note (#227 final): negatives
+  were proven NOISE on flux at CFG 1 — the contract is transport plumbing
+  (bytes ride every generation), NOT a live quality lever; negative-prompt
+  tuning is not a lever on this stack.
 - Any network dependency on 3d.mostdef.ru from prod; any A1111/Forge
   compat layer; any new auth surface; sizes above 512x512.
 
@@ -69,6 +73,16 @@ imported from owner tooling in Phase 1.
   guardrail, sex-label mapping, no network (stub path stays deterministic).
 - R6 privacy/ownership unchanged (player visual identity rules from #193 R1
   are not touched).
+
+## Hardware-constrained baseline (512×512 fp8)
+
+flux1-dev-fp8 at 512×512 is the HARDWARE-CONSTRAINED baseline of this
+issue: VRAM peak 93.5% (11,428/12,227 MiB) measured WITH the uncensored
+LoRA active (historical measurement, 2026-10-20 JOURNAL — not bare flux).
+The resolution uplift and the full-body quality class are CLOSED AS
+HARDWARE-CONSTRAINED (never "passed"): no GPU upgrade is planned for this
+issue, and any future uplift REOPENS this spec with new hardware evidence.
+This section is consistent with the >512x512 exclusion in Scope above.
 
 ## Acceptance evidence
 
