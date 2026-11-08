@@ -30,8 +30,9 @@ Pinned here (the approved design contract — do not redesign):
 - existing relationship: an eligible encounter still applies affection,
   emits nothing, null milestone;
 - creation is not band crossing: a pre-existing relationship whose
-  encounter crosses/touches a band boundary (+10 / +50 / −30) → no
-  dialogue event (band events belong to SOCIALIZE/lifecycle only);
+  encounter crosses a band boundary emits RELATIONSHIP_CHANGED (slice 2
+  — the crossing/touch vectors moved to
+  tests/m195/test_relationship_band_changed.py as emission tests);
 - RULE-vs-actual delta: a creation case where the helper clamps
   (initial_affection=100.0) → the milestone payload/response carry the
   RULE delta while ``relationship_effect`` carries the honest
@@ -402,35 +403,7 @@ def test_existing_relationship_applies_affection_emits_nothing(tmp_path):
     assert _get_rel(factory, wid, cid, npc)["affection"] == 62.0
 
 
-# ---------- f. Creation is not band crossing ----------
-
-@pytest.mark.parametrize(
-    "start_aff", [8.0, 48.0, -30.0],
-    ids=["cross-10", "cross-50", "boundary--30"],
-)
-def test_band_crossing_emits_no_dialogue_event(tmp_path, start_aff):
-    """A pre-existing relationship whose encounter crosses/touches a band
-    boundary (+10: 8→10, +50: 48→50, −30 boundary: -30→-28) emits NO
-    dialogue event — band events (RELATIONSHIP_CHANGED) belong to
-    SOCIALIZE/lifecycle only. (A true downward −30 crossing is
-    unreachable from dialogue: the conflict path requires aff < -30 to
-    start, so the −30 case is pinned as a boundary touch.)"""
-    settings, factory, client, cid, npc_ids = make_world(tmp_path)
-    wid = settings.world.world_id
-    npc = npc_ids[0]
-    _set_affection(factory, wid, cid, npc, start_aff)
-    before = _event_ids(factory, wid)
-
-    body = _msg(client, _start(client, npc))
-    assert body["relationship_effect"]["applied"] is True
-    assert body["relationship_formed"] is None
-    assert _event_ids(factory, wid) == before, \
-        "band crossing/touch from dialogue emits nothing"
-    with factory() as s:
-        assert s.query(RelationshipEvent).filter_by(world_id=wid).count() == 0
-
-
-# ---------- g. RULE-vs-actual delta at the clamp ----------
+# ---------- f. RULE-vs-actual delta at the clamp ----------
 
 def test_rule_vs_actual_delta_at_clamp(tmp_path):
     """Creation with initial_affection=100.0: the helper clamps the write
@@ -456,7 +429,7 @@ def test_rule_vs_actual_delta_at_clamp(tmp_path):
     assert rel["affection"] == 100.0, "row clamped at 100"
 
 
-# ---------- h. Canonical pair ordering (reversed lexical) ----------
+# ---------- g. Canonical pair ordering (reversed lexical) ----------
 
 def test_canonical_ordering_reversed_lexical_actor_is_player(tmp_path):
     """The player id (plr_*) sorts AFTER the npc id (npc_*) — the reversed
@@ -482,7 +455,7 @@ def test_canonical_ordering_reversed_lexical_actor_is_player(tmp_path):
     assert body["relationship_formed"]["target_id"] == npc
 
 
-# ---------- i. /dialogue/start alone ----------
+# ---------- h. /dialogue/start alone ----------
 
 def test_dialogue_start_alone_no_relationship_no_event(tmp_path):
     """/dialogue/start never applies the effect: an encounter is a message
@@ -500,7 +473,7 @@ def test_dialogue_start_alone_no_relationship_no_event(tmp_path):
     assert _event_ids(factory, wid) == before, "start emits no event"
 
 
-# ---------- j. Rollback atomicity ----------
+# ---------- i. Rollback atomicity ----------
 
 def test_rollback_atomicity_no_partial_persistence(tmp_path, monkeypatch):
     """Drive a real request far enough to run the hook + log_event, then
@@ -535,7 +508,7 @@ def test_rollback_atomicity_no_partial_persistence(tmp_path, monkeypatch):
             "rollback drops the flushed dialogue messages"
 
 
-# ---------- k. Enum / schema ----------
+# ---------- j. Enum / schema ----------
 
 def test_enum_45_and_membership():
     """The catalog grows 44→45: RELATIONSHIP_FORMED is appended after
@@ -561,7 +534,7 @@ def test_schema_version_still_0150(tmp_path):
         assert version == "0.15.0"
 
 
-# ---------- l. Wire serializers ----------
+# ---------- k. Wire serializers ----------
 
 def test_wire_serializers_expose_new_event(tmp_path):
     """The WS polling serializer and the REST /world/events expose the new
@@ -603,7 +576,7 @@ def test_wire_serializers_expose_new_event(tmp_path):
     assert formed[0]["actor_id"] == cid
 
 
-# ---------- m. UI static pins ----------
+# ---------- l. UI static pins ----------
 
 def _read(path):
     with open(path, "r", encoding="utf-8") as f:

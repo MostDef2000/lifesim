@@ -3432,6 +3432,15 @@ function renderChat(session, locName) {
           "Начало отношений"));
         log.scrollTop = log.scrollHeight;
       }
+      // #195 slice 2: band-crossing banner — driven ONLY by the fresh
+      // POST response's relationship_band_changed field (a pre-existing
+      // relationship moved across a band boundary), same idiom and
+      // placement as the milestone above. Never synthesized from history.
+      if (r.relationship_band_changed) {
+        log.append(el("div", { class: "chat-band-change", role: "status" },
+          "Изменение отношений"));
+        log.scrollTop = log.scrollHeight;
+      }
       const npcMsg = [...hist.messages].reverse().find((m) => m.sender === "npc");
       renderSugg(npcMsg && npcMsg.suggested_responses
         ? npcMsg.suggested_responses : []);

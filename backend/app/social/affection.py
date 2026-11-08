@@ -36,6 +36,27 @@ from app.config.config import Settings
 from app.db.models import Relationship
 
 
+def affection_band(affection: float) -> str:
+    """Classify an affection value into its band (#195 slice 2).
+
+    Pure module-level classifier — the four branches are copied EXACTLY
+    from the inline ``get_band`` in lifecycle.py's SOCIALIZE branch (same
+    boundary inclusivity, same band strings): conflicted [-100, -30),
+    stranger [-30, 10), acquaintance [10, 50), friend [50, 100]. Reads
+    nothing, writes nothing, emits nothing. lifecycle.py keeps its own
+    inline copy byte-identical (its m2/m3 pins and the m195 SOCIALIZE
+    guard pin its behavior) — this helper is the shared classifier for
+    the dialogue crossing detection.
+    """
+    if affection < -30:
+        return "conflicted"
+    if affection < 10:
+        return "stranger"
+    if affection < 50:
+        return "acquaintance"
+    return "friend"
+
+
 def apply_socialize_affection(
     session: Session,
     world_id: str,
