@@ -142,6 +142,13 @@ def get_or_create_weather(
     current day's row (or None if disabled)."""
     if not settings.weather.enabled:
         return None
+    existing = (
+        session.query(WeatherState)
+        .filter_by(world_id=world_id, day=day)
+        .first()
+    )
+    if existing is not None:
+        return existing
     from sqlalchemy import func as _func
 
     last = (
