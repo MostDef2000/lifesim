@@ -1738,12 +1738,16 @@ def create_app(settings, session_factory: sessionmaker):
         )
         import json as _json
 
+        from app.events.texts import render_event_texts
+
+        texts = render_event_texts(session, events)
         return [
             {
                 "id": e.id, "event_type": e.event_type, "actor_id": e.actor_id,
                 "location_id": e.location_id, "day": e.game_timestamp // 1440,
                 "game_timestamp": e.game_timestamp,
                 "payload": _json.loads(e.payload) if e.payload else {},
+                "text": texts.get(e.id, e.event_type),
             }
             for e in events
         ]

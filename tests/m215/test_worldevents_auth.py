@@ -33,7 +33,7 @@ PW = "Correct-Horse-9!"
 
 # the wire contract of one /world/events row (app.py get_world_events)
 ROW_KEYS = {"id", "event_type", "actor_id", "location_id",
-            "day", "game_timestamp", "payload"}
+            "day", "game_timestamp", "payload", "text"}
 
 
 def setup_module(module):

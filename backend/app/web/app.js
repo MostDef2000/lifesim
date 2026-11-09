@@ -2173,7 +2173,9 @@ function renderEvents(events) {
   // Rows: raw facts only — formatted tick time (feedRow precedent), the
   // raw event_type string, the raw actor id (or «вы» for the player's own
   // actions; the line is omitted entirely when the event has no actor —
-  // never a fabricated person). Place: top-level numeric location_id,
+  // never a fabricated person). #291: when the server rendered a text for
+  // the row it replaces the raw code and the actor line (the name is
+  // already in the phrase). Place: top-level numeric location_id,
   // else a DIRECT numeric payload.location_id (POWER_OUTAGE carries one) —
   // CHARACTER_MOVED's from/to fields are NOT parsed (no guessing, no
   // string coercion): an unusable place is no place affordance.
@@ -2186,11 +2188,12 @@ function renderEvents(events) {
         && typeof p.location_id === "number"
         && Number.isSafeInteger(p.location_id) && p.location_id > 0
         ? p.location_id : null);
+    const text = typeof ev.text === "string" && ev.text ? ev.text : null;
     return el("div", { class: "panel" },
       el("div", {}, typeof ev.game_timestamp === "number"
         ? dayTime(ev.game_timestamp) : "—"),
-      el("div", {}, ev.event_type || "—"),
-      ev.actor_id
+      el("div", {}, text || ev.event_type || "—"),
+      !text && ev.actor_id
         ? el("div", { class: "muted" },
             ev.actor_id === S.character.id ? "вы" : ev.actor_id)
         : null,
@@ -2916,10 +2919,15 @@ function isCriticalEvent(ev) {
 
 function feedRow(ev) {
   const critical = isCriticalEvent(ev);
+  // #291: a server-rendered text replaces the raw code and the actor id
+  // (the name is already in the phrase); no text -> today's raw row.
+  const text = typeof ev.text === "string" && ev.text ? ev.text : null;
   return el("div", { class: `ev${critical ? " ev-critical" : ""}` },
     el("span", { class: "t" }, dayTime(ev.game_timestamp || 0)),
-    el("span", { class: "ev-text" }, ev.event_type || ""),
-    ev.actor_id ? el("span", { class: "muted" }, ` · ${ev.actor_id}`) : null);
+    el("span", { class: "ev-text" }, text || ev.event_type || ""),
+    !text && ev.actor_id
+      ? el("span", { class: "muted" }, ` · ${ev.actor_id}`)
+      : null);
 }
 
 function startFeed() {
