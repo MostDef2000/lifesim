@@ -30,7 +30,11 @@ APP_JS = os.path.join(ROOT, "backend/app/web/app.js")
 APP_CSS = os.path.join(ROOT, "backend/app/web/style.css")
 
 # Exact bytes of the :root block at base c355c2b (captured before the #63
-# edits). The rework must not drift a single global token.
+# edits). The rework must not drift a single global token. #289: the token
+# VALUES are unchanged — only the #172 comment was reworded to document the
+# intentional theme split (the world shell is warm and carries its own
+# --w-line; this root fallback stays the DARK-theme value for screens outside
+# .world-shell).
 ROOT_BLOCK_EXPECTED = (
     "\n  --bg: #101418; --panel: #1a2027; --line: #2a323c;\n"
     "  --text: #d8dee6; --dim: #8a94a3; --accent: #4da3ff;"
@@ -38,7 +42,9 @@ ROOT_BLOCK_EXPECTED = (
     "  /* #172: .task-row/.opp/.inv-item use var(--w-line) outside .world-shell\n"
     "     (tasks/inventory/chat) — without a root fallback the shorthand is\n"
     "     invalid at computed-value time and NO divider renders (verified in\n"
-    '     browser: "0px none"). Same value as .world-shell:976. */\n'
+    '     browser: "0px none"). Since #289 the world shell is warm (canon §14)\n'
+    "     and carries its own --w-line; this root fallback remains the\n"
+    "     DARK-theme value for the screens outside .world-shell. */\n"
     "  --w-line: rgba(148, 178, 205, 0.16);"
 )
 

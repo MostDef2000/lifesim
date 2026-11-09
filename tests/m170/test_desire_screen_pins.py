@@ -290,16 +290,27 @@ def test_root_wline_fallback_pin():
     """#172: .task-row/.opp/.inv-item consume var(--w-line) on screens that
     render outside .world-shell (tasks/inventory/chat). Without a :root
     fallback the border shorthand is invalid at computed-value time and the
-    divider silently disappears (browser-verified "0px none"). The fallback
-    value must equal .world-shell's own --w-line; four definitions total
-    (:root + .world-shell + .desire-shell + .shop-shell)."""
+    divider silently disappears (browser-verified "0px none"). Four
+    definitions total (:root + .world-shell + .desire-shell + .shop-shell).
+
+    #289: the world shell is warm (canon §14) and carries its OWN --w-line;
+    the :root fallback stays the DARK-theme value for the screens outside
+    .world-shell. The old "fallback must equal .world-shell's --w-line"
+    equality is superseded by this intentional theme split — the pin now
+    asserts both values independently (never drops the #172 existence
+    invariant)."""
     css = _read(APP_CSS)
     # Four scopes: :root fallback (#172) + .world-shell + .desire-shell
     # (the latter deliberately self-contained — stays correct even if the
     # root fallback is ever removed) + .shop-shell (#173 — same warm values,
     # same self-contained pattern).
     assert css.count("--w-line:") == 4
+    # #172 shorthand-validity invariant: the :root fallback EXISTS and stays
+    # the DARK-theme value (serves tasks/inventory/chat outside .world-shell).
     root = css.split("}", 1)[0]
     assert "--w-line: rgba(148, 178, 205, 0.16);" in root
+    # #289: .world-shell carries its OWN warm --w-line (canon §14) — the theme
+    # split is intentional, so the world value is the warm ink, NOT the dark
+    # root fallback.
     world = css[css.index(".world-shell {"):css.index(".world-shell {") + 400]
-    assert "rgba(148, 178, 205, 0.16)" in world
+    assert "--w-line: rgba(48, 39, 31, 0.12);" in world

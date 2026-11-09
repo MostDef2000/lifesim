@@ -119,10 +119,12 @@ def test_lane_b_css_pins():
     assert "inset: -8px" in poi_before
     assert "position: absolute" in poi_before
     # The 8px dot visual is shared by spans and POI buttons (m21 pin
-    # survives). Two occurrences total: the base rule plus the pre-existing
-    # small-viewport media override (see tests/m21:185-188) — this lane
-    # adds no new .anchor .dot rule.
-    assert css.count(".anchor .dot {") == 2
+    # survives). Two NON-world-scoped occurrences total: the base rule plus
+    # the pre-existing small-viewport media override (see tests/m21:185-188) —
+    # this lane adds no new .anchor .dot rule. #289 adds a separate
+    # world-scoped .world-shell .anchor .dot rule (warm markers), so subtract
+    # it to keep the non-world-scoped count exact.
+    assert css.count(".anchor .dot {") - css.count(".world-shell .anchor .dot {") == 2
 
 
 def test_lane_b_invariants():

@@ -973,7 +973,7 @@ function backToMap() {
   // Back navigation from the scene state to the world view.
   S.scene = null;
   renderScenePanel();
-  const map = document.querySelector(".world-map-panel");
+  const map = document.querySelector(".world-stage");
   if (map) map.scrollIntoView({ behavior: S.mapReducedMotion ? "auto" : "smooth", block: "start" });
 }
 
@@ -1265,6 +1265,74 @@ function hydrateWorldClock() {
   });
 }
 
+/* ---------- #289: world screen canon v3 — floating nav pill + inline icons ----------
+   The world screen uses the pill INSTEAD of the topbar (other screens keep
+   topbar() unchanged). Icons are inline SVG (stroke 1.75, 24px box, §27) —
+   no external assets, no emoji. */
+
+/* Static-path SVG builder. DOM only via createElementNS/setAttribute — never
+   raw HTML string injection (XSS discipline), and the path data below is a
+   fixed literal table, never user data. */
+function svgIcon(paths) {
+  const NS = "http://www.w3.org/2000/svg";
+  const svg = document.createElementNS(NS, "svg");
+  svg.setAttribute("viewBox", "0 0 24 24");
+  svg.setAttribute("fill", "none");
+  svg.setAttribute("stroke", "currentColor");
+  svg.setAttribute("stroke-width", "1.75");
+  svg.setAttribute("stroke-linecap", "round");
+  svg.setAttribute("stroke-linejoin", "round");
+  svg.setAttribute("aria-hidden", "true");
+  for (const [tag, attrs] of paths) {
+    const node = document.createElementNS(NS, tag);
+    for (const [k, v] of Object.entries(attrs)) node.setAttribute(k, v);
+    svg.append(node);
+  }
+  return svg;
+}
+
+const ICON_DROP = [["path", { d: "M12 3.25s6.25 6.5 6.25 10.5a6.25 6.25 0 1 1-12.5 0c0-4 6.25-10.5 6.25-10.5z" }]];
+const ICON_EYE = [["path", { d: "M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" }],
+  ["circle", { cx: "12", cy: "12", r: "3" }]];
+
+/* 9 sections, same hash routes (and order) as the topbar tabs. */
+const PILL_TABS = [
+  ["#/world", "Мир", [["circle", { cx: "12", cy: "9.25", r: "4.25" }],
+    ["path", { d: "M3.5 18.75c1.42 0 1.42 1.5 2.83 1.5s1.41-1.5 2.83-1.5 1.41 1.5 2.83 1.5 1.41-1.5 2.83-1.5 1.42 1.5 2.83 1.5 1.41-1.5 2.83-1.5" }]]],
+  ["#/chat", "Чат", [["path", { d: "M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z" }]]],
+  ["#/people", "Люди", [["path", { d: "M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" }],
+    ["circle", { cx: "9", cy: "7", r: "4" }],
+    ["path", { d: "M23 21v-2a4 4 0 0 0-3-3.87" }],
+    ["path", { d: "M16 3.13a4 4 0 0 1 0 7.75" }]]],
+  ["#/inventory", "Инвентарь", [["path", { d: "M6 2 3 6v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6l-3-4z" }],
+    ["path", { d: "M3 6h18" }],
+    ["path", { d: "M16 10a4 4 0 0 1-8 0" }]]],
+  ["#/shop", "Рынок", [["path", { d: "M20.59 13.41l-7.17 7.17a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82z" }],
+    ["line", { x1: "7", y1: "7", x2: "7.01", y2: "7" }]]],
+  ["#/tasks", "Дела", [["rect", { x: "5", y: "4.5", width: "14", height: "17", rx: "2.25" }],
+    ["path", { d: "M9 2.5h6a1 1 0 0 1 1 1V5a1 1 0 0 1-1 1H9a1 1 0 0 1-1-1V3.5a1 1 0 0 1 1-1z" }],
+    ["path", { d: "m8.9 13.6 2.2 2.2 4.2-4.7" }]]],
+  ["#/desire", "Цель", [["path", { d: "M4 15s1-1 4-1 5 2 7 2 4-1 4-1V3s-1 1-4 1-5-2-7-2-4 1-4 1z" }],
+    ["line", { x1: "4", y1: "22", x2: "4", y2: "15.5" }]]],
+  ["#/profile", "Профиль", [["path", { d: "M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" }],
+    ["circle", { cx: "12", cy: "7", r: "4" }]]],
+  ["#/appearance", "Образ", [["rect", { x: "3", y: "3", width: "18", height: "18", rx: "2.5" }],
+    ["circle", { cx: "8.5", cy: "8.5", r: "1.5" }],
+    ["path", { d: "m21 15-5-5L5 21" }]]],
+];
+
+/* #289: the world panel chip shows the bare description — the «Погода: »
+   prefix stays a topbar-only affordance (weatherLabel() is untouched). */
+function worldWeatherShort() {
+  if (!S.weather || !S.weather.enabled) return "";
+  return S.weather.description + (S.weather.source === "historical"
+    ? " (реальная " + S.weather.real_date + ")" : "");
+}
+function worldWeatherChipText() {
+  const short = worldWeatherShort();
+  return short ? " · " + short : "";
+}
+
 /* ---------- world view (§78) ---------- */
 
 // #161: navigate without double-dispatching — hash assignment fires
@@ -1485,8 +1553,10 @@ function mapEventMarkers(visibleLocs) {
   return [...grouped.entries()].map(([locationId, events]) => {
     const loc = locations.get(locationId);
     const last = events[events.length - 1];
+    // #289: a critical event at this location tints the marker terracotta.
+    const critical = events.some(isCriticalEvent);
     return el("span", {
-      class: "map-dynamic-marker event-marker",
+      class: `map-dynamic-marker event-marker${critical ? " critical" : ""}`,
       style: `left:${loc.x}%; top:${loc.y}%`,
       "data-location-id": String(locationId),
       title: `${last.event_type || "Событие"} · ${loc.name}`,
@@ -1764,15 +1834,17 @@ function renderWorld(locs, tasksData) {
   });
   const mapReady = keyedPois.every(k => poiMap[k] && poiMap[k].x !== null);
 
-  const feedNode = el("div", { class: "panel feed world-events-card", id: "feed" },
-    el("h2", {}, "События"),
-    ...S.feed.slice(-40).reverse().map(feedRow));
-  // #76: the entry link to the Events screen lives OUTSIDE the #feed node —
-  // both updaters (REST fallback + WS) replaceChildren the whole #feed
-  // contents on every update, so a link inside would vanish on first
-  // arrival. The wrapper keeps the feed node itself byte-identical.
-  const feedBlock = el("div", {}, feedNode,
-    el("a", { href: "#/events" }, "События мира →"));
+  // #289: events feed lives in the left context panel (newest on top). The
+  // updaters (REST fallback + WS) replaceChildren the whole #feed contents
+  // on every update, so the «События мира →» link stays OUTSIDE the #feed
+  // node (boundary kept). Empty state: one quiet phrase (canon §43.1 empty).
+  const feedNode = el("div", { class: "world-feed", id: "feed" },
+    el("h2", { class: "world-sec-h" }, "События"),
+    ...(S.feed.length
+      ? S.feed.slice(-40).reverse().map(feedRow)
+      : [el("p", { class: "world-feed-empty" }, "Сейчас на острове тихо")]));
+  const feedBlock = el("div", { class: "world-feed-block" }, feedNode,
+    el("a", { class: "world-events-link", href: "#/events" }, "События мира →"));
   const actions = [["WORK", "Пойти на работу"], ["EAT", "Поесть"], ["DRINK", "Попить"],
     ["SLEEP", "Отдохнуть / поспать"], ["SOCIALIZE", "Пообщаться"]].map(([a, label]) =>
     el("button", { onclick: () => doAction(a) }, label));
@@ -1800,52 +1872,89 @@ function renderWorld(locs, tasksData) {
   const currentLocationLabel = currentLoc && currentLoc.name ? currentLoc.name : "—";
   const autonomous = ch.control_mode === "AUTONOMOUS";
 
+  // #289: left context panel — header (name/money, location · job, time/weather
+  // chip), needs, island events. The chip's #clock/#weather ids are the poller
+  // targets (hydrateWorldClock + pollEvents update them in place; they used to
+  // target the topbar spans). Privileged Admin stays reachable in the footer.
+  const privileged = ["admin", "developer", "moderator"].includes(S.user.role);
+  const worldPanel = el("aside", { class: "world-panel" },
+    el("header", { class: "world-panel-head" },
+      el("div", { class: "world-who-top" },
+        el("h1", { class: "world-who-name" }, characterName),
+        el("span", { class: "world-money" }, `${ch.money ?? ch.balance ?? "—"} ₽`)),
+      el("p", { class: "world-sub" },
+        `${currentLocationLabel} · ${ch.job ? ch.job : "работы нет"}`),
+      el("div", { class: "world-chip" },
+        svgIcon(ICON_DROP),
+        el("span", {},
+          el("b", { id: "clock" }, S.world ? dayTime(S.world.game_timestamp) : clockPendingLabel()),
+          el("span", { id: "weather" }, worldWeatherChipText())))),
+    el("h2", { class: "world-sec-h" }, "Состояние"),
+    el("div", { class: "world-mini-needs" },
+      needBar("Сытость", needs.hunger), needBar("Вода", needs.thirst),
+      needBar("Энергия", needs.energy), needBar("Общение", needs.social)),
+    el("hr"),
+    feedBlock,
+    privileged ? el("a", { class: "world-admin-link", href: "#/admin" }, "Админ") : null);
+
+  // #289: floating nav pill — 9 sections over the map, same routes as the
+  // topbar; the world screen renders the pill INSTEAD of the topbar.
+  const worldPill = el("nav", { class: "world-pill", "aria-label": "Разделы" },
+    ...PILL_TABS.map(([hash, label, icon]) => el("a", {
+      href: hash,
+      class: hash === "#/world" ? "active" : "",
+      title: label,
+      "aria-label": label,
+    }, svgIcon(icon), el("span", {}, label))));
+
+  // #289: «Осмотреть окрестности» floats bottom-right over the map and zooms
+  // the Living Map to region LOD (§43.2). Scene inspection keeps its existing
+  // triggers (locationView's «Осмотреть» + the scene fallback retry).
+  const inspectBtn = el("button", { class: "world-inspect", type: "button",
+      onclick: () => setMapLod("region"), title: "Приблизить карту до района" },
+    svgIcon(ICON_EYE), "Осмотреть окрестности");
+
   app.replaceChildren(
-    topbar("#/world"),
     el("main", { class: "world-shell" },
-      // #107: first-visit concierge card — first child, spans both grid
-      // columns above the panels; null (renders nothing) once dismissed
-      // or when storage is denied.
+      // #107: first-visit concierge card — floats above the map (top-center);
+      // null (renders nothing) once dismissed or when storage is denied.
       welcomeCard(),
-      el("section", { class: "world-map-stage" },
-        el("div", { class: "panel world-map-panel" },
-          el("div", { class: "world-map-heading" },
-            el("h2", {}, "Остров Рейнеке"),
-            el("button", { type: "button",
-              onclick: () => inspectSurroundings() }, "Осмотреть окрестности")),
-          travelBar(),
-          mapReady ? el("div", { id: "living-map-host" }, buildLivingMap(locs)) : el("div", { class: "locs" },
+      el("section", { class: "world-stage" },
+        mapReady ? el("div", { id: "living-map-host" }, buildLivingMap(locs)) : el("div", { class: "world-map-fallback" },
+          el("h2", {}, "Остров Рейнеке"),
+          el("div", { class: "locs" },
             ...locs.map((loc) => el("div", {
               class: `loc ${loc.id === ch.location_id ? "here" : ""}`,
               onclick: () => moveTo(loc),
             }, el("span", {}, loc.name || `#${loc.id}`),
-               el("span", { class: "muted" }, loc.type || "")))),
+               el("span", { class: "muted" }, loc.type || ""))))),
+        inspectBtn),
+      worldPanel,
+      worldPill,
+      // Below-fold blocks (travel, actions, journal, portrait, scene) —
+      // preserved under the map fold, restyled to the warm canon.
+      el("section", { class: "world-below" },
+        el("nav", { class: "panel world-card world-actions-card" },
+          el("h2", {}, "Действия"),
+          el("div", { class: "world-action-pills", "aria-label": "Действия персонажа" },
+            ...(autonomous
+              ? [el("span", { class: "muted world-autonomous-note" },
+                  AUTONOMOUS_HINT),
+                el("button", { type: "button", onclick: () => { location.hash = "#/profile"; } },
+                  "Открыть Профиль")]
+              : [...actions, extBtn]))),
+        el("div", { class: "panel world-card" },
+          el("h2", {}, "Маршрут"),
+          travelBar()),
+        el("div", { class: "panel world-card" },
+          el("h2", {}, "Место"),
           locationView(locs)),
-        el("aside", { class: "world-character-card" },
-          el("div", { class: "world-character-head" },
-            el("div", {},
-              el("h2", {}, characterName),
-              el("div", { class: "muted" }, currentLocationLabel),
-              el("div", { class: "muted" }, ch.job ? `Работа: ${ch.job}` : "Работа: —"),
-              el("div", { class: "world-money" }, `Деньги: ${ch.money ?? ch.balance ?? "—"} ₽`))),
-          el("div", { class: "world-mini-needs" },
-            needBar("Сытость", needs.hunger), needBar("Вода", needs.thirst),
-            needBar("Энергия", needs.energy), needBar("Общение", needs.social))),
-        el("nav", { class: "world-action-pills", "aria-label": "Действия персонажа" },
-          ...(autonomous
-            ? [el("span", { class: "muted world-autonomous-note" },
-                AUTONOMOUS_HINT),
-              el("button", { type: "button", onclick: () => { location.hash = "#/profile"; } },
-                "Открыть Профиль")]
-            : [...actions, extBtn]))),
-      el("section", { class: "world-secondary" },
         el("div", { class: "panel world-tasks-card" },
           el("h2", {}, "Журнал"),
           taskRows.length ? el("div", { class: "muted" }, `Активных задач: ${activeCount} (полный журнал — на экране Задач)`) : el("div", { class: "muted" }, "Нет активных задач"),
           taskRows.slice(0, 3)),
         portraitBox,
-        sceneBox,
-        feedBlock)));
+        sceneBox)));
 }
 
 async function doAction(actionType, params = {}, after = viewWorld) {
@@ -2792,10 +2901,24 @@ function renderExternal(catalog) {
 
 /* ---------- event feed (§79 WS + polling fallback) ---------- */
 
+/* #289: critical events → terracotta callout row + map marker accent. The
+   backend event model (app/events/events.py) carries no criticality field,
+   so criticality is derived client-side from the event type; a
+   payload.critical === true hook is honored for future backend use. */
+const CRITICAL_EVENT_TYPES = new Set([
+  "CHARACTER_DIED", "OBJECT_BURNING", "OBJECT_BURNED", "OBJECT_DESTROYED",
+  "CRIME_COMMITED", "ARRESTED", "POWER_OUTAGE", "TASK_FAILED",
+]);
+function isCriticalEvent(ev) {
+  return CRITICAL_EVENT_TYPES.has(ev.event_type)
+    || (!!ev.payload && ev.payload.critical === true);
+}
+
 function feedRow(ev) {
-  return el("div", { class: "ev" },
+  const critical = isCriticalEvent(ev);
+  return el("div", { class: `ev${critical ? " ev-critical" : ""}` },
     el("span", { class: "t" }, dayTime(ev.game_timestamp || 0)),
-    el("span", {}, ev.event_type || ""),
+    el("span", { class: "ev-text" }, ev.event_type || ""),
     ev.actor_id ? el("span", { class: "muted" }, ` · ${ev.actor_id}`) : null);
 }
 
@@ -2860,9 +2983,9 @@ async function pollEvents() {
     const locs = await api("/locations");
     if (previousDay !== world.day) {
       try { S.weather = await api("/weather"); } catch { /* keep last readable weather */ }
-      // F3: day-boundary refetch must update the topbar span in place, not wait for a full re-render.
+      // F3: day-boundary refetch must update the panel chip in place, not wait for a full re-render.
       const weatherEl = document.getElementById("weather");
-      if (weatherEl) weatherEl.textContent = weatherLabel();
+      if (weatherEl) weatherEl.textContent = worldWeatherChipText();
     }
     S.character = { ...S.character, ...character };
     // F1: LOD focus follows the authoritative player location on every poll
@@ -2967,7 +3090,7 @@ async function pollEventsFeed() {
       S.feed.push(...fresh);
       const feedBox = document.getElementById("feed");
       if (feedBox) {
-        feedBox.replaceChildren(el("h2", {}, "События"),
+        feedBox.replaceChildren(el("h2", { class: "world-sec-h" }, "События"),
           ...S.feed.slice(-40).reverse().map(feedRow));
       }
       // #82 (A3): REST fallback path mirrors the WS arrival hook.
@@ -3038,7 +3161,7 @@ function connectWs() {
           S.feed.push(...fresh);
           const feedBox = document.getElementById("feed");
           if (feedBox) {
-            feedBox.replaceChildren(el("h2", {}, "События"),
+            feedBox.replaceChildren(el("h2", { class: "world-sec-h" }, "События"),
               ...S.feed.slice(-40).reverse().map(feedRow));
           }
           // #144: a CONTROL_CHANGED fired from another tab/session leaves

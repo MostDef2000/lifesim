@@ -212,7 +212,9 @@ async (page) => {
   }
   async function shell() {
     return await page.evaluate(() => {
-      const tabs = document.querySelectorAll(".tabs button");
+      // #289: the world screen renders the floating nav pill INSTEAD of the
+      // topbar, so the 9 sections are .world-pill a (not .tabs button).
+      const tabs = document.querySelectorAll(".world-pill a");
       const clock = document.getElementById("clock");
       return {
         tabCount: tabs.length,
@@ -252,7 +254,9 @@ async (page) => {
     const sh = await shell();
     const disc = await welcomeState();
     const px = await mapVisiblePx();
-    const geometryTarget = label === "390" ? (px !== null && px >= 160) : null;
+    // #289: the map is full-bleed (fills the first viewport), so on the
+    // 390x844 viewport the map card should fill most of the viewport height.
+    const geometryTarget = label === "390" ? (px !== null && px >= 600) : null;
     const defaultClosed = disc.hasDetails ? !disc.open : null; // null = missing disclosure (BASE)
     const path = await shot("case1-geometry-" + label + ".png");
     return {
