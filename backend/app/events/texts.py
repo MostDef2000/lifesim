@@ -22,6 +22,20 @@ from typing import Any, Dict, Iterable, Optional, Set
 from sqlalchemy.orm import Session
 
 from app.db.models import Character
+from app.events.labels import (
+    ASSET_TYPE,
+    BAND,
+    CONTROL_MODE,
+    CRIME,
+    GOAL_TYPE,
+    LAW_KEY,
+    MEMORY_TYPE,
+    OBJECT_TYPE,
+    RESOURCE_KEY,
+    TASK_TYPE,
+    label,
+)
+from app.social.roles import _OCCUPATION_TITLES_RU
 
 # Payload keys that carry a character id, per event type (verified against
 # the log_event call sites). Types not listed here reference characters
@@ -197,13 +211,16 @@ def _org(payload: Dict[str, Any]) -> str:
 
 
 def _items(items: Any) -> str:
-    """type→qty map («food_bread ×2, water_bottle ×1»); tolerates junk."""
+    """type→qty map («хлеб ×2, куртка ×1»); tolerates junk."""
     if not isinstance(items, dict):
         return ""
     parts = []
     for k, v in items.items():
+        name = label(OBJECT_TYPE, k)
+        if not name:
+            continue  # malformed key (non-str/empty) -> part lost, no repr
         q = _num(v)
-        parts.append(f"{k} ×{q}" if q else str(k))
+        parts.append(f"{name} ×{q}" if q else name)
     return ", ".join(parts)
 
 
@@ -217,7 +234,7 @@ def _t_character_created(ev, p, names) -> str:
         parts.append(f"{age} л.")
     job = _sid(p, "job")
     if job:
-        parts.append(str(job))
+        parts.append(label(_OCCUPATION_TITLES_RU, job))
     text = ", ".join(parts)
     if p.get("type") == "player":
         text += " (игрок)"
@@ -236,7 +253,7 @@ def _t_character_died(ev, p, names) -> str:
 
 
 def _t_item_transferred(ev, p, names) -> str:
-    obj = p.get("object_type") or "предмет"
+    obj = label(OBJECT_TYPE, p.get("object_type")) or "предмет"
     sides = []
     for side in ("from_owner", "to_owner"):
         v = p.get(side)
@@ -256,7 +273,7 @@ def _t_item_transferred(ev, p, names) -> str:
 
 
 def _t_item_consumed(ev, p, names) -> str:
-    obj = p.get("object_type") or "что-то"
+    obj = label(OBJECT_TYPE, p.get("object_type")) or "что-то"
     return f"{_who(names, ev.actor_id)} ест: {obj}{_qty(p.get('quantity'))}"
 
 
@@ -270,7 +287,7 @@ def _t_salary_paid(ev, p, names) -> str:
 
 
 def _t_supply_arrived(ev, p, names) -> str:
-    key = p.get("resource_key") or "ресурс"
+    key = label(RESOURCE_KEY, p.get("resource_key")) or "ресурс"
     text = f"Поставка: {key}{_qty(p.get('amount'))}"
     owner = _name(names, ev.target_id)
     if owner:
@@ -288,7 +305,7 @@ def _t_purchase(ev, p, names) -> str:
 
 def _t_task_failed(ev, p, names) -> str:
     verb = _past(names, ev.actor_id, "не справился", "не справилась")
-    task = p.get("task_type")
+    task = label(TASK_TYPE, p.get("task_type"))
     text = f"{_who(names, ev.actor_id)} {verb}"
     if task:
         text += f" с делом ({task})"
@@ -300,7 +317,7 @@ def _t_task_failed(ev, p, names) -> str:
 
 def _t_task_completed(ev, p, names) -> str:
     verb = _past(names, ev.actor_id, "справился", "справилась")
-    task = p.get("task_type")
+    task = label(TASK_TYPE, p.get("task_type"))
     text = f"{_who(names, ev.actor_id)} {verb} с делом"
     if task:
         text += f" ({task})"
@@ -309,7 +326,7 @@ def _t_task_completed(ev, p, names) -> str:
 
 def _t_constructed(ev, p, names) -> str:
     verb = _past(names, ev.actor_id, "построил", "построила")
-    obj = p.get("object_type") or "сооружение"
+    obj = label(OBJECT_TYPE, p.get("object_type")) or "сооружение"
     return f"{_who(names, ev.actor_id)} {verb}: {obj}"
 
 
@@ -325,7 +342,7 @@ def _t_social_interaction(ev, p, names) -> str:
 def _t_relationship_changed(ev, p, names) -> str:
     a = _who(names, ev.actor_id)
     b = _who(names, ev.target_id)
-    band = p.get("band")
+    band = label(BAND, p.get("band"))
     before, after = _num(p.get("affection_before")), _num(p.get("affection_after"))
     text = f"{a} и {b}: отношение теперь «{band}»" if band \
         else f"{a} и {b}: отношения изменились"
@@ -387,7 +404,7 @@ def _t_org_feast(ev, p, names) -> str:
 
 def _t_law_enacted(ev, p, names) -> str:
     verb = _past(names, ev.actor_id, "принял", "приняла")
-    law = p.get("law_key")
+    law = label(LAW_KEY, p.get("law_key"))
     text = f"{_who(names, ev.actor_id)} {verb} закон"
     if law:
         text += f" «{law}»"
@@ -396,7 +413,7 @@ def _t_law_enacted(ev, p, names) -> str:
 
 def _t_law_violation(ev, p, names) -> str:
     verb = _past(names, ev.actor_id, "нарушил", "нарушила")
-    law = p.get("law_key")
+    law = label(LAW_KEY, p.get("law_key"))
     text = f"{_who(names, ev.actor_id)} {verb} закон"
     if law:
         text += f" «{law}»"
@@ -447,7 +464,7 @@ def _t_message_sent(ev, p, names) -> str:
 
 def _t_ai_decision(ev, p, names) -> str:
     who = _who(names, ev.actor_id)
-    decision = p.get("decision")
+    decision = label(GOAL_TYPE, p.get("decision"))
     text = f"{who}: решение «{decision}»" if decision \
         else f"{who} {_past(names, ev.actor_id, 'принял', 'приняла')} решение"
     reason = p.get("reason")
@@ -461,13 +478,14 @@ def _t_ai_decision(ev, p, names) -> str:
 def _t_control_changed(ev, p, names) -> str:
     frm, to = _sid(p, "from"), _sid(p, "to")
     if frm and to:
-        return f"{_who(names, ev.actor_id)}: режим управления {frm} → {to}"
+        return (f"{_who(names, ev.actor_id)}: режим управления "
+                f"{label(CONTROL_MODE, frm)} → {label(CONTROL_MODE, to)}")
     return f"{_who(names, ev.actor_id)}: изменён режим управления"
 
 
 def _t_goal_queued(ev, p, names) -> str:
     verb = _past(names, ev.actor_id, "поставил", "поставила")
-    goal = p.get("goal_type")
+    goal = label(GOAL_TYPE, p.get("goal_type"))
     text = f"{_who(names, ev.actor_id)} {verb} цель"
     if goal:
         text += f": {goal}"
@@ -475,7 +493,7 @@ def _t_goal_queued(ev, p, names) -> str:
 
 
 def _t_visual_asset(ev, p, names) -> str:
-    kind = p.get("asset_type")
+    kind = label(ASSET_TYPE, p.get("asset_type"))
     if ev.actor_id:
         verb = _past(names, ev.actor_id, "создал", "создала")
         text = f"{_who(names, ev.actor_id)} {verb} визуальный ассет"
@@ -487,7 +505,7 @@ def _t_visual_asset(ev, p, names) -> str:
 
 def _t_memory_created(ev, p, names) -> str:
     verb = _past(names, ev.actor_id, "запомнил", "запомнила")
-    mtype = p.get("memory_type")
+    mtype = label(MEMORY_TYPE, p.get("memory_type"))
     text = f"{_who(names, ev.actor_id)} {verb} событие"
     if mtype:
         text += f" ({mtype})"
@@ -545,15 +563,16 @@ def _t_weather(ev, p, names) -> str:
 
 
 def _t_object_burning(ev, p, names) -> str:
-    return f"Пожар: горит {p.get('object_type') or 'имущество'}"
+    obj = label(OBJECT_TYPE, p.get("object_type")) or "имущество"
+    return f"Пожар: горит {obj}"
 
 
 def _t_object_burned(ev, p, names) -> str:
-    return f"Сгорело: {p.get('object_type') or 'имущество'}"
+    return f"Сгорело: {label(OBJECT_TYPE, p.get('object_type')) or 'имущество'}"
 
 
 def _t_object_destroyed(ev, p, names) -> str:
-    return f"Разрушено: {p.get('object_type') or 'имущество'}"
+    return f"Разрушено: {label(OBJECT_TYPE, p.get('object_type')) or 'имущество'}"
 
 
 def _t_market_listed(ev, p, names) -> str:
@@ -591,20 +610,29 @@ def _t_power_outage(ev, p, names) -> str:
 
 
 def _t_crime_commited(ev, p, names) -> str:
-    who = _who(names, ev.actor_id)
-    if p.get("type") == "theft":
-        verb = _past(names, ev.actor_id, "украл", "украла")
-        obj = p.get("object_type") or "чужую вещь"
-        return f"{who} {verb} {obj}"
-    verb = _past(names, ev.actor_id, "испортил", "испортила")
-    return f"{who} {verb} чужое имущество"
+    # #293: crime-first shape — the object label sits in a nominative-safe
+    # slot after the colon (the old «{who} украла {obj}» put a raw code
+    # where Russian needs an accusative declension).
+    kind = _sid(p, "type")
+    named = label(CRIME, kind) if kind else None
+    if named is None:
+        text = "Преступление"
+    elif named == kind:
+        text = kind  # unknown code -> raw fallback, untouched
+    else:
+        text = named.capitalize()
+    obj = _sid(p, "object_type")
+    if obj:
+        text += f": {label(OBJECT_TYPE, obj)}"
+    return f"{text} ({_who(names, ev.actor_id)})"
 
 
 def _t_crime_reported(ev, p, names) -> str:
     verb = _past(names, ev.actor_id, "сообщил", "сообщила")
     text = f"{_who(names, ev.actor_id)} {verb} о преступлении"
-    if p.get("crime_type"):
-        text += f" ({p.get('crime_type')})"
+    ct = _sid(p, "crime_type")
+    if ct:
+        text += f" ({label(CRIME, ct)})"
     suspect = _name(names, p.get("suspect"))
     if suspect:
         text += f", подозреваемый — {suspect}"

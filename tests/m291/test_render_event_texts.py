@@ -24,13 +24,17 @@ the project's seeded session fixture supplies the Character name rows.
 """
 
 import json
+import os
 
 import pytest
 from sqlalchemy import event as sa_event
 
 from app.db.models import Character, Location, WorldEvent
+from app.events import labels as labels_mod
 from app.events.events import EventType
+from app.events.labels import label
 from app.events.texts import render_event_texts
+from app.social.roles import _OCCUPATION_TITLES_RU
 
 WORLD = "test_world"
 
@@ -76,7 +80,7 @@ def _ev(eid, etype, actor=None, target=None, payload=None, raw_payload=None):
 # representative row per EventType value (45 total, pinned below).
 CASES = [
     ("CHARACTER_CREATED", M_ID, None,
-     {"name": M_NAME, "age": 30, "job": "farmer"}, "Новый житель"),
+     {"name": M_NAME, "age": 30, "job": "Farmer"}, "Новый житель"),
     ("CHARACTER_MOVED", M_ID, None, {}, "переехал"),
     ("CHARACTER_DIED", M_ID, None, {"cause": "illness"}, "умер"),
     ("ITEM_TRANSFERRED", None, None,
@@ -90,9 +94,9 @@ CASES = [
      {"resource_key": "water", "amount": 50}, "Поставка"),
     ("PURCHASE", M_ID, None, {"price": 10}, "купил"),
     ("TASK_FAILED", M_ID, None,
-     {"task_type": "repair", "reason": "no parts"}, "не справился"),
-    ("TASK_COMPLETED", M_ID, None, {"task_type": "repair"}, "справился"),
-    ("CONSTRUCTED", M_ID, None, {"object_type": "house"}, "построил"),
+     {"task_type": "WORK", "reason": "no parts"}, "не справился"),
+    ("TASK_COMPLETED", M_ID, None, {"task_type": "WORK"}, "справился"),
+    ("CONSTRUCTED", M_ID, None, {"object_type": "shed"}, "построил"),
     ("SOCIAL_INTERACTION", M_ID, F_ID,
      {"target_id": F_ID, "duration": 30}, "пообщались"),
     ("RELATIONSHIP_CHANGED", M_ID, F_ID,
@@ -111,9 +115,9 @@ CASES = [
     ("ORG_FEAST", M_ID, None,
      {"organization_id": 1, "cost": 50, "boosted_members": [F_ID]}, "Пир"),
     ("LAW_ENACTED", M_ID, None,
-     {"law_key": "no_theft", "organization_id": 1}, "закон"),
+     {"law_key": "night_home", "organization_id": 1}, "закон"),
     ("LAW_VIOLATION", M_ID, None,
-     {"law_key": "no_theft", "fine": 20, "fine_paid": False}, "нарушил"),
+     {"law_key": "night_home", "fine": 20, "fine_paid": False}, "нарушил"),
     ("RECONCILIATION", M_ID, None,
      {"pair": [M_ID, F_ID], "mediator_id": M_ID}, "Примирение"),
     ("ROLE_ACQUIRED", M_ID, None,
@@ -125,13 +129,13 @@ CASES = [
       "initiator_name": M_NAME, "partner_name": F_NAME}, "объявили пару"),
     ("MESSAGE_SENT", M_ID, None, {"to": F_ID}, "Сообщение"),
     ("AI_DECISION", M_ID, None,
-     {"decision": "EAT", "reason": "hunger"}, "решение"),
+     {"decision": "socialize_with", "reason": "hunger"}, "решение"),
     ("CONTROL_CHANGED", M_ID, None,
      {"from": "AUTONOMOUS", "to": "DIRECT"}, "режим управления"),
-    ("GOAL_QUEUED", M_ID, None, {"goal_type": "build_house"}, "поставил цель"),
+    ("GOAL_QUEUED", M_ID, None, {"goal_type": "travel_to"}, "поставил цель"),
     ("VISUAL_ASSET_CREATED", M_ID, None,
      {"asset_type": "portrait"}, "визуальный ассет"),
-    ("MEMORY_CREATED", M_ID, None, {"memory_type": "episodic"}, "запомнил"),
+    ("MEMORY_CREATED", M_ID, None, {"memory_type": "CONFLICT"}, "запомнил"),
     ("MEMORY_CONSOLIDATED", None, None,
      {"groups": 3, "removed": 5, "character_ids": [M_ID]}, "Обобщение памяти"),
     ("TRAVEL_EXTERNAL_DEPARTED", M_ID, None, {"purpose": "trade"}, "уехал"),
@@ -140,16 +144,16 @@ CASES = [
     ("WEATHER_CHANGED", None, None,
      {"temperature": 15.4, "wind": 3.2, "precipitation": True},
      "Погода изменилась"),
-    ("OBJECT_BURNING", None, None, {"object_type": "house"}, "Пожар"),
-    ("OBJECT_BURNED", None, None, {"object_type": "house"}, "Сгорело"),
-    ("OBJECT_DESTROYED", None, None, {"object_type": "bridge"}, "Разрушено"),
+    ("OBJECT_BURNING", None, None, {"object_type": "shed"}, "Пожар"),
+    ("OBJECT_BURNED", None, None, {"object_type": "shed"}, "Сгорело"),
+    ("OBJECT_DESTROYED", None, None, {"object_type": "shed"}, "Разрушено"),
     ("MARKET_LISTED", M_ID, None, {"price": 15}, "выставил"),
     ("MARKET_SOLD", M_ID, None, {"price": 15, "seller": F_ID}, "продавец"),
     ("POWER_OUTAGE", None, None,
      {"location_id": 3, "demand": 10, "supply": 5, "storm": True},
      "Отключение света"),
     ("CRIME_COMMITED", M_ID, None,
-     {"type": "theft", "object_type": "food_bread"}, "украл"),
+     {"type": "theft", "object_type": "food_bread"}, "Кража: хлеб"),
     ("CRIME_REPORTED", M_ID, None,
      {"crime_type": "theft", "suspect": F_ID, "witnesses": [M_ID]}, "сообщил"),
     ("FINE_PAID", M_ID, None, {"amount": 20, "officer": F_ID}, "штраф"),
@@ -266,7 +270,7 @@ def test_partnership_uses_payload_name_snapshots(people):
 
 def test_gender_female_feminine(people):
     text = render_event_texts(
-        people, [_ev(1, "TASK_COMPLETED", F_ID, None, {"task_type": "repair"})]
+        people, [_ev(1, "TASK_COMPLETED", F_ID, None, {"task_type": "WORK"})]
     )[1]
     assert "справилась" in text
     assert "справился" not in text
@@ -274,7 +278,7 @@ def test_gender_female_feminine(people):
 
 def test_gender_male_masculine(people):
     text = render_event_texts(
-        people, [_ev(1, "TASK_COMPLETED", M_ID, None, {"task_type": "repair"})]
+        people, [_ev(1, "TASK_COMPLETED", M_ID, None, {"task_type": "WORK"})]
     )[1]
     assert "справился" in text
     assert "справилась" not in text
@@ -282,7 +286,7 @@ def test_gender_male_masculine(people):
 
 def test_gender_case_insensitive_lowercase_f(people):
     text = render_event_texts(
-        people, [_ev(1, "TASK_COMPLETED", F2_ID, None, {"task_type": "repair"})]
+        people, [_ev(1, "TASK_COMPLETED", F2_ID, None, {"task_type": "WORK"})]
     )[1]
     assert "справилась" in text
     assert "справился" not in text
@@ -290,7 +294,7 @@ def test_gender_case_insensitive_lowercase_f(people):
 
 def test_gender_unknown_sex_defaults_masculine(people):
     text = render_event_texts(
-        people, [_ev(1, "TASK_COMPLETED", X_ID, None, {"task_type": "repair"})]
+        people, [_ev(1, "TASK_COMPLETED", X_ID, None, {"task_type": "WORK"})]
     )[1]
     assert "справился" in text
     assert "справилась" not in text
@@ -533,3 +537,375 @@ def test_chunked_name_load_select_count_no_exception(people):
     assert "Обобщение памяти" in text
     char_selects = [s for s in statements if "characters" in s.lower()]
     assert len(char_selects) == 2, statements
+
+
+# ---------- 8. #293: label dictionaries (app/events/labels.py) ----------
+# Internal codes (food_bread, AUTONOMOUS, theft, …) must never reach a
+# rendered phrase as-is: each domain dict in app.events.labels maps known
+# codes to Russian display names, unknown codes fall back to the raw code
+# through label(). Phrase assertions go through render_event_texts; the
+# dicts are the module's public surface and are imported for the coverage
+# tables.
+
+LABEL_DOMAINS = {
+    "OBJECT_TYPE": labels_mod.OBJECT_TYPE,
+    "TASK_TYPE": labels_mod.TASK_TYPE,
+    "GOAL_TYPE": labels_mod.GOAL_TYPE,
+    "CONTROL_MODE": labels_mod.CONTROL_MODE,
+    "BAND": labels_mod.BAND,
+    "CRIME": labels_mod.CRIME,
+    "ASSET_TYPE": labels_mod.ASSET_TYPE,
+    "RESOURCE_KEY": labels_mod.RESOURCE_KEY,
+    "LAW_KEY": labels_mod.LAW_KEY,
+    "MEMORY_TYPE": labels_mod.MEMORY_TYPE,
+}
+
+
+def test_label_domain_table_covers_all_module_dicts():
+    """The coverage table must name every public dict in app.events.labels —
+    a new domain dict added to the module fails here until the table (and
+    the rendered phrases) are consciously extended."""
+    module_dicts = {
+        name for name, val in vars(labels_mod).items()
+        if not name.startswith("_") and isinstance(val, dict)
+        and val and all(isinstance(k, str) and isinstance(v, str)
+                        for k, v in val.items())
+    }
+    assert module_dicts == set(LABEL_DOMAINS)
+
+
+@pytest.mark.parametrize(
+    "domain", sorted(LABEL_DOMAINS), ids=sorted(LABEL_DOMAINS),
+)
+def test_label_domain_maps_known_codes_to_russian(domain):
+    """Every known code in a domain maps to a non-empty Russian string
+    different from the raw code — a raw code leaking into a phrase is the
+    bug #293 fixes."""
+    mapping = LABEL_DOMAINS[domain]
+    assert mapping, f"{domain} is empty"
+    for code, ru in mapping.items():
+        assert isinstance(ru, str) and ru.strip(), (domain, code, ru)
+        assert ru != code, (domain, code, ru)
+        assert any("\u0400" <= ch <= "\u04FF" for ch in ru), (domain, code, ru)
+
+
+def _known_object_types_from_config() -> set:
+    """The object_type value domain as defined by config + the food list:
+    shop/kitchen stock, external purchase item_types, construction costs
+    (yaml + model defaults) and their required items, flammable types, and
+    the food list the simulation treats as stealable/spoilable. Built from
+    the config (NOT copied from labels.OBJECT_TYPE) so a NEW config object
+    type fails the guard until the dict is consciously updated."""
+    from app.config.config import ConstructionConfig, load_config
+    from app.simulation.electricity import _FOOD_TYPES
+
+    cfg = os.path.join(os.path.dirname(__file__), "..", "..",
+                       "config", "default.yaml")
+    settings = load_config(cfg)
+    known = set(settings.economy.shop_stock)
+    known |= set(settings.economy.kitchen_stock)
+    for loc in settings.external.locations:
+        for svc in loc.services:
+            if svc.item_type:
+                known.add(svc.item_type)
+    for cost in settings.construction.costs.values():
+        known.update(cost.get("required_items", {}))
+    known.update(settings.construction.costs)
+    known.update(ConstructionConfig().costs)
+    known.update(settings.fire.flammable_types)
+    known.update(_FOOD_TYPES)
+    return known
+
+
+def test_object_type_covers_exactly_known_config_values():
+    """The OBJECT_TYPE dict covers EXACTLY the 19 object types known to the
+    config today — a new config object type fails here and forces a
+    conscious dict update; a stale dict entry fails here too."""
+    known = _known_object_types_from_config()
+    assert len(known) == 19, sorted(known)
+    assert set(labels_mod.OBJECT_TYPE) == known, (
+        sorted(set(labels_mod.OBJECT_TYPE) - known),
+        sorted(set(known) - labels_mod.OBJECT_TYPE),
+    )
+
+
+def test_law_key_covers_exactly_config_catalog():
+    """The LAW_KEY dict covers EXACTLY the law keys in config/default.yaml
+    (org.laws.catalog, lines 212-220) — a new catalog law fails here and
+    forces a conscious dict update; a stale dict entry fails here too.
+    Built from the config (NOT copied from labels.LAW_KEY), same pattern as
+    the object_type guard above."""
+    from app.config.config import load_config
+
+    cfg = os.path.join(os.path.dirname(__file__), "..", "..",
+                       "config", "default.yaml")
+    settings = load_config(cfg)
+    catalog = set(settings.org.laws.catalog)
+    assert set(labels_mod.LAW_KEY) == catalog, (
+        sorted(set(labels_mod.LAW_KEY) - catalog),
+        sorted(catalog - set(labels_mod.LAW_KEY)),
+    )
+
+
+def test_label_unknown_code_returns_raw_code():
+    """label() with an unknown code returns the code itself (raw fallback)
+    — it never invents a name and never raises."""
+    assert label(labels_mod.TASK_TYPE, "WELD_PIPES") == "WELD_PIPES"
+    assert label(labels_mod.OBJECT_TYPE, "food_unknown") == "food_unknown"
+
+
+def test_unknown_task_code_renders_raw_in_phrase(people):
+    """TASK_COMPLETED with an unknown task_type renders the RAW code in the
+    task slot — the phrase is still human, the code is the fallback."""
+    ev = _ev(1, "TASK_COMPLETED", M_ID, None, {"task_type": "WELD_PIPES"})
+    text = render_event_texts(people, [ev])[1]
+    assert text != "TASK_COMPLETED"
+    assert "справился" in text
+    assert "(WELD_PIPES)" in text
+
+
+def test_unknown_crime_type_renders_raw_code_first(people):
+    """CRIME_COMMITED with an unknown crime type renders the RAW code as the
+    phrase head (no invented Russian name) — «arson (Иван Петров)»."""
+    ev = _ev(1, "CRIME_COMMITED", M_ID, None, {"type": "arson"})
+    text = render_event_texts(people, [ev])[1]
+    assert text.startswith("arson")
+    assert M_NAME in text
+
+
+def test_label_non_str_code_returns_none():
+    """#293: label() with a NON-STR code (malformed payload value: dict/
+    list/None/int) returns None — the consuming template drops its clause;
+    a Python repr must never reach a phrase. Str codes are unchanged:
+    known -> the Russian label, unknown -> the raw code (raw fallback)."""
+    assert label(labels_mod.OBJECT_TYPE, {"a": 1}) is None
+    assert label(labels_mod.OBJECT_TYPE, ["a"]) is None
+    assert label(labels_mod.OBJECT_TYPE, None) is None
+    assert label(labels_mod.OBJECT_TYPE, 5) is None
+    # str codes unchanged: known -> label, unknown -> raw code
+    assert label(labels_mod.OBJECT_TYPE, "food_bread") == "хлеб"
+    assert label(labels_mod.OBJECT_TYPE, "food_unknown") == "food_unknown"
+
+
+def test_unhashable_code_through_render_still_renders_phrase(people):
+    """A template consuming a dict-valued code still renders a phrase — no
+    exception, no raw-code demotion. #293: label() returns None for a
+    non-str code, so the object slot falls back to its generic word
+    («ест: что-то») — a Python repr must never reach the phrase."""
+    ev = _ev(1, "ITEM_CONSUMED", M_ID, None, {"object_type": {"a": 1}})
+    text = render_event_texts(people, [ev])[1]
+    assert isinstance(text, str) and text.strip()
+    assert text != "ITEM_CONSUMED"
+    assert M_NAME in text
+    assert "ест: что-то" in text
+    assert "{" not in text  # no Python repr garbage
+
+
+def test_unhashable_code_drops_clause_no_repr(people):
+    """#293: a non-str code drops its clause entirely — TASK_COMPLETED with
+    a dict task_type loses the «с делом (…)» slot; CRIME_REPORTED with a
+    list crime_type loses the «(…)» slot. No «None», no Python repr."""
+    ev = _ev(1, "TASK_COMPLETED", M_ID, None, {"task_type": {"x": 1}})
+    text = render_event_texts(people, [ev])[1]
+    assert isinstance(text, str) and text.strip()
+    assert text != "TASK_COMPLETED"
+    assert M_NAME in text
+    assert "справился" in text
+    assert "с делом (" not in text  # the task slot is dropped
+    assert "{" not in text          # no Python repr garbage
+    assert "None" not in text
+
+    ev2 = _ev(2, "CRIME_REPORTED", M_ID, None, {"crime_type": ["x"]})
+    text2 = render_event_texts(people, [ev2])[2]
+    assert isinstance(text2, str) and text2.strip()
+    assert text2 != "CRIME_REPORTED"
+    assert M_NAME in text2
+    assert "сообщил о преступлении" in text2
+    assert "(None)" not in text2
+    assert "None" not in text2
+    assert "{" not in text2 and "[" not in text2  # no Python repr garbage
+
+
+# ---------- 9. #293: phrase pins for the restructured/new shapes ----------
+
+def test_crime_commited_theft_crime_first_shape(people):
+    """#293 restructure: theft renders «Кража: хлеб (Иван Петров)» — the
+    object label sits in a nominative-safe slot after the colon; the old
+    «украл/украла» accusative shape is gone."""
+    ev = _ev(1, "CRIME_COMMITED", M_ID, None,
+             {"type": "theft", "object_type": "food_bread"})
+    text = render_event_texts(people, [ev])[1]
+    assert "Кража: хлеб" in text
+    assert M_NAME in text
+    assert "украл" not in text
+    assert "украла" not in text
+
+
+def test_crime_commited_vandalism(people):
+    ev = _ev(1, "CRIME_COMMITED", M_ID, None, {"type": "vandalism"})
+    text = render_event_texts(people, [ev])[1]
+    assert "Вандализм" in text
+    assert M_NAME in text
+
+
+def test_crime_commited_missing_type(people):
+    ev = _ev(1, "CRIME_COMMITED", M_ID, None, {})
+    text = render_event_texts(people, [ev])[1]
+    assert "Преступление" in text
+    assert M_NAME in text
+
+
+def test_crime_commited_missing_type_with_object(people):
+    """CRIME_COMMITED with a missing type but a present object_type: the
+    phrase head is the generic «Преступление» and the object label still
+    renders in its nominative-safe slot — «Преступление: хлеб (Иван Петров)»
+    (the untested branch the review flagged)."""
+    ev = _ev(1, "CRIME_COMMITED", M_ID, None, {"object_type": "food_bread"})
+    text = render_event_texts(people, [ev])[1]
+    assert "Преступление: хлеб" in text
+    assert M_NAME in text
+
+
+def test_control_changed_renders_mode_labels(people):
+    """#293: the phrase has NO second colon — «режим управления
+    автономный → прямое управление» (the colon after the actor name is the
+    only one)."""
+    ev = _ev(1, "CONTROL_CHANGED", M_ID, None,
+             {"from": "AUTONOMOUS", "to": "DIRECT"})
+    text = render_event_texts(people, [ev])[1]
+    assert "режим управления автономный → прямое управление" in text
+    assert M_NAME in text
+    assert "None" not in text
+
+
+def test_law_enacted_renders_law_label(people):
+    ev = _ev(1, "LAW_ENACTED", M_ID, None,
+             {"law_key": "night_home", "organization_id": 1})
+    text = render_event_texts(people, [ev])[1]
+    assert "закон «домой к ночи»" in text
+
+
+def test_relationship_changed_renders_band_label(people):
+    ev = _ev(1, "RELATIONSHIP_CHANGED", M_ID, F_ID, {"band": "friend"})
+    text = render_event_texts(people, [ev])[1]
+    assert "«друг»" in text
+
+
+def test_supply_arrived_renders_resource_label(people):
+    ev = _ev(1, "SUPPLY_ARRIVED", None, F_ID,
+             {"resource_key": "water", "amount": 50})
+    text = render_event_texts(people, [ev])[1]
+    assert "Поставка: вода" in text
+
+
+def test_memory_created_renders_memory_type_label(people):
+    ev = _ev(1, "MEMORY_CREATED", M_ID, None, {"memory_type": "crime_witness"})
+    text = render_event_texts(people, [ev])[1]
+    assert "свидетель преступления" in text
+
+
+def test_ai_decision_renders_decision_label(people):
+    ev = _ev(1, "AI_DECISION", M_ID, None, {"decision": "socialize_with"})
+    text = render_event_texts(people, [ev])[1]
+    assert "решение «общение»" in text
+
+
+def test_object_burned_renders_object_label(people):
+    ev = _ev(1, "OBJECT_BURNED", None, None, {"object_type": "shed"})
+    text = render_event_texts(people, [ev])[1]
+    assert "Сгорело: сарай" in text
+
+
+def test_item_transferred_renders_object_label(people):
+    ev = _ev(1, "ITEM_TRANSFERRED", None, None, {"object_type": "jacket"})
+    text = render_event_texts(people, [ev])[1]
+    assert "Передача: куртка" in text
+
+
+# ---------- 10. #293: job title mapping (CHARACTER_CREATED) ----------
+
+@pytest.mark.parametrize(
+    "job", sorted(_OCCUPATION_TITLES_RU), ids=sorted(_OCCUPATION_TITLES_RU),
+)
+def test_character_created_known_job_renders_russian_title(people, job):
+    """Every English job title in _OCCUPATION_TITLES_RU renders its Russian
+    title — parametrized over the actual dict keys (a new title added to
+    the dict is covered automatically; the raw English title never
+    appears)."""
+    ev = _ev(1, "CHARACTER_CREATED", M_ID, None, {"name": M_NAME, "job": job})
+    text = render_event_texts(people, [ev])[1]
+    assert _OCCUPATION_TITLES_RU[job] in text
+    assert job not in text
+
+
+def test_character_created_unknown_job_falls_back_raw(people):
+    """A job title outside _OCCUPATION_TITLES_RU falls back to the raw
+    title in the phrase."""
+    ev = _ev(1, "CHARACTER_CREATED", M_ID, None,
+             {"name": M_NAME, "job": "Beekeeper"})
+    text = render_event_texts(people, [ev])[1]
+    assert "Beekeeper" in text
+
+
+# ---------- 11. #293: the items map in TRAVEL_EXTERNAL_RETURNED ----------
+# The «привёз: …» clause renders the type→qty map through OBJECT_TYPE:
+# known codes get their Russian label with the « ×N» qty suffix, a
+# non-dict items value drops the clause entirely, and a None qty renders
+# the bare label. The raw codes never reach the phrase.
+
+def test_travel_returned_items_render_labeled_with_qty(people):
+    """#293: the items map in TRAVEL_EXTERNAL_RETURNED renders through
+    OBJECT_TYPE with the « ×N» qty suffix — «привёз: хлеб ×2, куртка ×1»;
+    the raw codes (food_bread/jacket) never reach the phrase."""
+    ev = _ev(1, "TRAVEL_EXTERNAL_RETURNED", M_ID, None,
+             {"purpose": "trade", "items": {"food_bread": 2, "jacket": 1},
+              "spent": 5})
+    text = render_event_texts(people, [ev])[1]
+    assert isinstance(text, str) and text.strip()
+    assert text != "TRAVEL_EXTERNAL_RETURNED"
+    assert "вернулся" in text
+    assert "привёз" in text
+    assert "хлеб ×2" in text
+    assert "куртка ×1" in text
+    assert "food_bread" not in text
+    assert "jacket" not in text
+
+
+def test_travel_returned_items_malformed_shapes(people):
+    """#293: malformed items values never leak — a non-dict items value
+    drops the «привёз: …» clause entirely (the raw junk never reaches the
+    phrase); a None qty renders the bare label without «×» (no «None»,
+    no Python repr)."""
+    # items="junk" (not a dict) -> no items clause at all
+    ev = _ev(1, "TRAVEL_EXTERNAL_RETURNED", M_ID, None,
+             {"purpose": "trade", "items": "junk"})
+    text = render_event_texts(people, [ev])[1]
+    assert isinstance(text, str) and text.strip()
+    assert text != "TRAVEL_EXTERNAL_RETURNED"
+    assert "вернулся" in text
+    assert "привёз" not in text   # the items clause is dropped
+    assert "junk" not in text     # the raw value never reaches the phrase
+
+    # items={"food_bread": None} -> bare label, no «×», no «None»
+    ev2 = _ev(2, "TRAVEL_EXTERNAL_RETURNED", M_ID, None,
+              {"purpose": "trade", "items": {"food_bread": None}})
+    text2 = render_event_texts(people, [ev2])[2]
+    assert isinstance(text2, str) and text2.strip()
+    assert text2 != "TRAVEL_EXTERNAL_RETURNED"
+    assert "вернулся" in text2
+    assert "привёз: хлеб" in text2
+    assert "×" not in text2
+    assert "None" not in text2
+    assert "{" not in text2       # no Python repr garbage
+
+
+def test_travel_returned_items_single_qty_regression_pin(people):
+    """#293 regression pin: a single-item map renders the labeled qty —
+    «привёз: хлеб ×2» (the raw code food_bread never reaches the phrase)."""
+    ev = _ev(1, "TRAVEL_EXTERNAL_RETURNED", M_ID, None,
+             {"purpose": "trade", "items": {"food_bread": 2}})
+    text = render_event_texts(people, [ev])[1]
+    assert isinstance(text, str) and text.strip()
+    assert text != "TRAVEL_EXTERNAL_RETURNED"
+    assert "привёз: хлеб ×2" in text
+    assert "food_bread" not in text
