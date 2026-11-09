@@ -97,4 +97,7 @@ class TestSceneFlow:
     def test_world_view_embeds_scene(self):
         js = load_js()
         assert "const sceneBox = sceneBlock();" in js
-        assert "sceneBox," in js
+        # #289: the scene block is now the LAST child of the below-fold
+        # .world-below section (was a middle child of .world-secondary), so the
+        # render-site spelling is "sceneBox)));".
+        assert "sceneBox)));" in js

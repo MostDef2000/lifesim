@@ -94,7 +94,17 @@ def test_storage_semantics_frozen():
 
 
 def test_mobile_media_override_puts_map_first():
+    # #289: the map is full-bleed (fills the first viewport) on ALL viewports;
+    # the mobile override keeps it visible by making the context panel compact
+    # (max-height 42%) and pinning the nav pill to the bottom (reachable,
+    # wrapping). The old grid-template-areas "map first" override is gone — the
+    # shell is a fixed full-viewport scroll container, not a grid.
     clean = [re.sub(r"/\*.*?\*/", "", b, flags=re.S) for b in _media_blocks(CSS)]
-    hits = [b for b in clean if ".world-map-stage" in b
-            and re.search(r"grid-template-areas\s*:\s*[\"']map\b", b)]
-    assert hits, "mobile @media: .world-map-stage + grid-template-areas first row 'map'"
+    hits = [b for b in clean
+            if ".world-panel" in b and "max-height: 42%" in b
+            and ".world-pill" in b and "bottom: 8px" in b]
+    assert hits, "mobile @media: compact .world-panel (max-height 42%) + bottom .world-pill"
+    # The map stage fills the first viewport (full-bleed) — the "map first"
+    # intent is structural, not a grid override.
+    stage = CSS[CSS.index(".world-stage {"):CSS.index("}", CSS.index(".world-stage {")) + 1]
+    assert "height: 100%" in stage

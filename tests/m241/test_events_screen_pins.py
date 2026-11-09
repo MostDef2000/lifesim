@@ -261,17 +261,23 @@ def test_events_world_link_pins():
     js = _read(APP_JS)
     # The standing link exists exactly once…
     assert js.count('"События мира →"') == 1
-    assert js.count('el("a", { href: "#/events" }, "События мира →")') == 1
-    # …and the feed node itself stays byte-identical (same class/id/h2).
+    # #289: the link now carries the world-events-link class (warm canon).
     assert js.count(
-        'const feedNode = el("div", { class: "panel feed world-events-card",'
+        'el("a", { class: "world-events-link", href: "#/events" },'
+        ' "События мира →")') == 1
+    # …and the feed node keeps its id (class moved to the world-feed spelling).
+    assert js.count(
+        'const feedNode = el("div", { class: "world-feed",'
         ' id: "feed" },') == 1
     assert js.count('id: "feed"') == 1
     # Structurally OUTSIDE #feed: the link sits in the wrapper AFTER the
     # feedNode declaration (both updaters replaceChildren #feed — a link
     # inside would vanish on first update).
-    wrap_start = js.index('const feedBlock = el("div", {}, feedNode,')
-    link_idx = js.index('el("a", { href: "#/events" }, "События мира →")')
+    wrap_start = js.index(
+        'const feedBlock = el("div", { class: "world-feed-block" }, feedNode,')
+    link_idx = js.index(
+        'el("a", { class: "world-events-link", href: "#/events" },'
+        ' "События мира →")')
     assert wrap_start < link_idx
     assert js.index("const feedNode =") < wrap_start
     # The updaters still target #feed by id (untouched).

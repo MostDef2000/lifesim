@@ -83,7 +83,9 @@ def test_welcome_card_is_wired_as_first_child_of_world_shell():
     deleting the call must fail this test)."""
     js = _js()
     idx_main = js.index('el("main", { class: "world-shell" },')
-    idx_map = js.index('class: "world-map-stage"', idx_main)
+    # #289: the map stage is now .world-stage (full-bleed Living Map); the
+    # concierge card still renders as the first child, before the stage.
+    idx_map = js.index('class: "world-stage"', idx_main)
     between = js[idx_main:idx_map]
     assert between.count("welcomeCard(),") == 1
 
@@ -173,12 +175,19 @@ def test_css_block_ordered_before_175_comment():
 
 
 def test_css_section_geometry_pins():
-    section = _welcome_css_section(_css())
+    css = _css()
+    # #289: the broad welcome section (first .welcome-card → #175 banner) now
+    # also spans the pre-existing .typing-dots, which legitimately use
+    # border-radius:50% for circular dots — NOT photo avatars. Pin the photo
+    # thumbnail rule itself so the "no circle avatar / no 16:9 hero" intent
+    # stays exact.
+    img_rule = css[css.index(".welcome-photos img {"):
+                   css.index("}", css.index(".welcome-photos img {")) + 1]
     # thumbnails: portrait crop, no circle avatars, no 16/9 hero ratio
-    assert "aspect-ratio: 3 / 4" in section
-    assert "object-fit: cover" in section
-    assert "border-radius: 50%" not in section
-    assert "aspect-ratio: 16 / 9" not in section
+    assert "aspect-ratio: 3 / 4" in img_rule
+    assert "object-fit: cover" in img_rule
+    assert "border-radius: 50%" not in img_rule
+    assert "aspect-ratio: 16 / 9" not in img_rule
 
 
 def test_css_mobile_collapse_at_900():

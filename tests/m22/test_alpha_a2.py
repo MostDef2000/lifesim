@@ -180,8 +180,11 @@ def test_a2_frontend_contract_pins():
     assert "newBadge.textContent = capturedBadgeText;" in js
     assert 'newBadge.classList.toggle("hidden", capturedBadgeHidden);' in js
 
-    # F3: the day-boundary weather refetch must update the topbar span in place.
-    assert "if (weatherEl) weatherEl.textContent = weatherLabel();" in js
+    # F3: the day-boundary weather refetch must update the weather span in
+    # place (not wait for a full re-render). #289: the world screen dropped the
+    # topbar, so the span now lives in the left context panel chip and reads
+    # worldWeatherChipText() (the bare description, no «Погода: » prefix).
+    assert "if (weatherEl) weatherEl.textContent = worldWeatherChipText();" in js
 
     # #122: el() must recurse into array children (topbar tabs, admin/inventory
     # tables) and silently skip boolean children (auth page `isReg && ...`).

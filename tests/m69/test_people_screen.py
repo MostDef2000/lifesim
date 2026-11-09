@@ -274,8 +274,10 @@ def test_people_route_wired_into_registry_once():
 
 
 def test_people_topbar_tab_present_once():
-    # The tab pair ["#/people", "Люди"] in topbar(); "Люди" appears nowhere else.
-    assert _js().count('"Люди"') == 1
+    # The tab pair ["#/people", "Люди"] in topbar(); #289 adds the same label
+    # to the world screen's floating nav pill (PILL_TABS), so "Люди" now
+    # appears exactly twice — topbar (other screens) + world pill.
+    assert _js().count('"Люди"') == 2
 
 
 def test_portrait_fallback_literal_exactly_two_sites():

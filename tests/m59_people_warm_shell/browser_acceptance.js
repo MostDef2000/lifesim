@@ -1143,8 +1143,10 @@ async (page) => {
     });
     const minPx = label === "390" ? 160 : 1; // m270 truth: mobile map >= 160px
     if (px < minPx) throw new Error(`world ${label}: map visible ${px}px < ${minPx}px`);
-    const tabCount = await page.$$eval(".tabs button", (bs) => bs.length);
-    if (tabCount !== 9) throw new Error(`world tabs ${tabCount} != 9`);
+    // #289: the world screen renders the floating nav pill INSTEAD of the
+    // topbar, so the 9 sections are .world-pill a (not .tabs button).
+    const tabCount = await page.$$eval(".world-pill a", (bs) => bs.length);
+    if (tabCount !== 9) throw new Error(`world pill tabs ${tabCount} != 9`);
     await noPageOverflow();
     await shot("world-" + label);
     return `mapVisiblePx=${px}`;

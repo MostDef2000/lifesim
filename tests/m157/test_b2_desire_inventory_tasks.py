@@ -663,7 +663,10 @@ def test_ui_legacy_pins_intact():
     assert js.count("scene-view") == 3
     assert js.count('document.getElementById("scene-view")') == 2
     assert js.count('"Осмотреть окрестности"') == 1
-    assert js.count("«Осмотреть окрестности»") == 1
+    # #289: a new comment mentions the bare guillemet label, so pin the full
+    # scene-fallback hint string (code-only, comment-robust) instead of the
+    # bare label to keep the "hint appears once" intent exact.
+    assert js.count('"Нажмите «Осмотреть окрестности», чтобы осмотреться."') == 1
     assert js.count('"Осмотреть"') == 1
     assert js.count('"Открыть Scene"') == 1
     # #72: +1 — the Place screen's always-available «К карте» (read-only
