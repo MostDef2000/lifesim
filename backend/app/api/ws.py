@@ -48,6 +48,7 @@ def poll_events(
     session: Session, world_id: str, cursor: int, limit: int = 100
 ) -> List[Dict[str, Any]]:
     from app.db.models import WorldEvent
+    from app.events.texts import render_event_texts
 
     events = (
         session.query(WorldEvent)
@@ -57,7 +58,10 @@ def poll_events(
         .limit(limit)
         .all()
     )
-    return [_serialize_event(e) for e in events]
+    # #291: one batched text render per poll tick — no per-event queries.
+    texts = render_event_texts(session, events)
+    return [{**_serialize_event(e), "text": texts.get(e.id, e.event_type)}
+            for e in events]
 
 
 def register_ws_route(app, settings, session_factory) -> None:
