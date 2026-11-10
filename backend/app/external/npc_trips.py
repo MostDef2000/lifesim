@@ -16,6 +16,7 @@ from app.db.models import (
     ExternalService,
     WorldEvent,
 )
+from app.events.labels import SERVICE_TYPE, label
 
 
 def run_npc_trip_phase(
@@ -86,7 +87,7 @@ def run_npc_trip_phase(
             parameters=json.dumps({
                 "service_id": service.id,
                 "location_id": ext_loc.id,
-                "purpose": f"treatment ({ext_loc.name})",
+                "purpose": f"{label(SERVICE_TYPE, service.service_type)} ({ext_loc.name})",
                 "travel_cost": travel_cost,
                 "basket_cost": basket_cost,
             }),

@@ -94,7 +94,9 @@ class TestNpcUtilityTrips:
                 source="utility").first()
             assert task is not None
             params = json.loads(task.parameters)
-            assert params["purpose"].startswith("treatment")
+            # #295: purpose is the Russian service label + location name
+            # (npc_trips.py: label(SERVICE_TYPE, service_type) + " (name)").
+            assert params["purpose"].startswith("лечение")
             # service treatment exists
             svc = session.get(ExternalService, params["service_id"])
             assert svc.service_type == "treatment"

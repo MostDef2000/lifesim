@@ -103,7 +103,7 @@ def complete_task(
             from app.db.models import WorldObject
             obj = session.query(WorldObject).get(obj_id)
             if not obj or obj.quantity < 1:
-                fail_task(session, world_id, character, task, game_timestamp, "food gone")
+                fail_task(session, world_id, character, task, game_timestamp, "еда кончилась")
                 return
 
             consume_object(session, world_id, game_timestamp, obj_id, 1, character.id)
@@ -128,7 +128,7 @@ def complete_task(
                 .first()
             )
             if not water_balance or water_balance.quantity < drink_amount:
-                fail_task(session, world_id, character, task, game_timestamp, "water gone")
+                fail_task(session, world_id, character, task, game_timestamp, "вода кончилась")
                 return
             adjust_resource(
                 session, world_id, "water", "organization", str(community_org.id),
@@ -167,7 +167,7 @@ def complete_task(
             from app.economy import get_balance
             stock_obj = session.query(WorldObject).get(obj_id)
             if not stock_obj or stock_obj.quantity < 1:
-                fail_task(session, world_id, character, task, game_timestamp, "stock gone")
+                fail_task(session, world_id, character, task, game_timestamp, "запасы кончились")
                 return
 
             char_acc = (
@@ -176,7 +176,7 @@ def complete_task(
                 .one()
             )
             if get_balance(session, char_acc.id) < price:
-                fail_task(session, world_id, character, task, game_timestamp, "insufficient funds")
+                fail_task(session, world_id, character, task, game_timestamp, "не хватило денег")
                 return
 
             shop_org = (
@@ -225,7 +225,7 @@ def complete_task(
             )
 
         if service is None or service.world_id != world_id:
-            fail_task(session, world_id, character, task, game_timestamp, "service gone")
+            fail_task(session, world_id, character, task, game_timestamp, "услуга недоступна")
             return
 
         log_event(
@@ -243,7 +243,7 @@ def complete_task(
         if _get_balance(session, char_acc.id) < travel_cost + basket_cost:
             fail_task(
                 session, world_id, character, task, game_timestamp,
-                "insufficient funds at departure",
+                "не хватило денег на дорогу",
             )
             return
 
@@ -316,7 +316,7 @@ def complete_task(
         costs = settings.construction.costs.get(object_type)
         if costs is None:
             fail_task(session, world_id, character, task, game_timestamp,
-                      "unknown blueprint")
+                      "неизвестный чертёж")
             return
         required = costs.get("required_items", {})
         for item_type, qty in required.items():
@@ -331,7 +331,7 @@ def complete_task(
             )
             if sum(o.quantity for o in owned) < qty:
                 fail_task(session, world_id, character, task,
-                          game_timestamp, "missing resources")
+                          game_timestamp, "не хватает материалов")
                 return
         for item_type, qty in required.items():
             left = qty
@@ -832,7 +832,7 @@ def _advance_character(
                     return
                 if action_type != "IDLE":
                     fail_task(
-                        session, world_id, char, active_task, now, "interrupted"
+                        session, world_id, char, active_task, now, "прервано"
                     )
                     _enqueue_decision(
                         session, world_id, char, action_type, params,
@@ -857,7 +857,7 @@ def _advance_character(
 
             max_dur = getattr(settings.actions, active_task.task_type).max_duration_minutes
             if active_task.ends_at - active_task.started_at > max_dur:
-                fail_task(session, world_id, char, active_task, now, "timeout")
+                fail_task(session, world_id, char, active_task, now, "время вышло")
                 continue
 
             # Still in progress and healthy — done for this character

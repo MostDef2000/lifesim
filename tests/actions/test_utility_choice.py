@@ -184,12 +184,13 @@ def test_idle_interrupt(session, settings, world_id):
     # IDLE task failed
     session.refresh(task)
     assert task.status == "failed"
-    # Reason should be "interrupted"
+    # #295: the fail reason is the Russian string written at the source
+    # (lifecycle.py _advance_character interrupt path: "прервано").
     from app.db.models import WorldEvent
     event = session.query(WorldEvent).filter_by(event_type=EventType.TASK_FAILED.value).first()
     import json
     payload = json.loads(event.payload)
-    assert payload["reason"] == "interrupted"
+    assert payload["reason"] == "прервано"
 
     # Non-IDLE planned task exists (EAT or MOVE to kitchen)
     new_task = (

@@ -53,7 +53,12 @@ def test_world_shell_pins():
     assert 'class: "world-who-name"' in js
     assert 'class: "world-money"' in js
     assert 'class: "world-chip"' in js
-    assert '`${currentLocationLabel} · ${ch.job ? ch.job : "работы нет"}`' in js
+    # #295: the job title is localized through the JS mirror of the backend
+    # _OCCUPATION_TITLES_RU (codeLabel raw-fallback for unknown titles).
+    assert (
+        '`${currentLocationLabel} · ${ch.job ? codeLabel(JOB_TITLES_RU, ch.job) : "работы нет"}`'
+        in js
+    )
     assert 'class: "world-mini-needs"' in js
     # Below-fold blocks (was .world-secondary): actions, travel, place,
     # journal, portrait, scene.

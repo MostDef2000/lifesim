@@ -74,7 +74,10 @@ ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "../.."))
 # stripped, event "TICK", now=0, history [{user: "привет"}]). Any change to
 # the roleless prompt bytes (whitespace drift included) breaks these.
 DECISION_ROLELESS_SHA = (
-    "2f8b98d99f87303e1231560428fd390f1971f50db09feebd519b046690ae2483"
+    # 2026-11-10: updated for #295 (Russian-reason hint added to the roleless
+    # decision prompt) — the prompt STRUCTURE stays byte-pinned (asserted
+    # below); only the hint line changed the bytes.
+    "f62babb7a064b1fceadd9afac2496b3e02d4e306b2b9958bab0fdfdd371f5051"
 )
 DIALOGUE_ROLELESS_SHA = (
     # 2026-10-14: updated for #197 (gendered name pools) — the generated NPC
@@ -298,8 +301,10 @@ def test_decision_prompt_roleless_byte_identical_to_pre_change(world):
         assert lines[8] == "current_event: TICK"
         assert lines[9] == "available_actions: []"
         assert lines[10] == ""
+        # #295: the Russian-reason hint is part of the roleless prompt bytes.
         assert lines[11] == (
-            'Decide the next action. Reply with strict JSON: {"decision": '
+            'Decide the next action. The "reason" must be written in '
+            'Russian. Reply with strict JSON: {"decision": '
             'str, "target_character_id": str|null, "confidence": float, '
             '"reason": str}'
         )
@@ -329,7 +334,9 @@ def test_decision_prompt_roleless_byte_identical_to_pre_change(world):
             "current_event: TICK",
             "available_actions: []",
             "",
-            'Decide the next action. Reply with strict JSON: {"decision": '
+            # #295: the Russian-reason hint is part of the roleless prompt.
+            'Decide the next action. The "reason" must be written in '
+            'Russian. Reply with strict JSON: {"decision": '
             'str, "target_character_id": str|null, "confidence": float, '
             '"reason": str}',
         ])

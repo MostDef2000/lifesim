@@ -153,7 +153,8 @@ def build_decision_prompt(session: Session, world_id: str, character_id: str,
         f"current_event: {event_type}",
         f"available_actions: {json.dumps(available_actions)}",
         "",
-        "Decide the next action. Reply with strict JSON: "
+        "Decide the next action. The \"reason\" must be written in Russian. "
+        "Reply with strict JSON: "
         '{"decision": str, "target_character_id": str|null, '
         '"confidence": float, "reason": str}',
     ]
