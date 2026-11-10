@@ -133,7 +133,6 @@ def create_app(settings, session_factory: sessionmaker):
 
     from app.api.auth import (
         SESSION_TOKEN_VERSION,
-        sign_token,
         verify_token,
     )
     from app.db.models import Character, User
@@ -339,26 +338,6 @@ def create_app(settings, session_factory: sessionmaker):
 
     # ---------- Auth routes (§81) ----------
 
-    def _set_cookie(response: Response, user: User) -> None:
-        # Issue #309: the token carries the user's session_generation (`gen`
-        # claim, checked by current_user) and the Secure attribute follows
-        # api.cookie_secure (false only for plain-http dev).
-        token = sign_token(
-            user.id,
-            user.role,
-            get_secret(settings),
-            settings.api.session_ttl_min,
-            user.session_generation,
-        )
-        response.set_cookie(
-            settings.api.cookie_name,
-            token,
-            httponly=True,
-            samesite="lax",
-            secure=settings.api.cookie_secure,
-            max_age=settings.api.session_ttl_min * 60,
-        )
-
     @app.post("/auth/logout")
     def logout(response: Response):
         """Clear the session cookie (#138).
@@ -372,9 +351,17 @@ def create_app(settings, session_factory: sessionmaker):
 
         Issue #309: the OIDC browser-binding cookie (app.api.oidc) is
         cleared too, so a stale binding can never pair with a later
-        transaction. Clearing an absent cookie is a harmless no-op.
+        transaction. Clearing an absent cookie is a harmless no-op. Delete
+        attributes mirror the set attributes (Path/Secure/SameSite/HttpOnly)
+        — the browser only drops a cookie when they match.
         """
-        response.delete_cookie(settings.api.cookie_name)
+        response.delete_cookie(
+            settings.api.cookie_name,
+            path="/",
+            secure=settings.api.cookie_secure,
+            httponly=True,
+            samesite="lax",
+        )
         response.delete_cookie(
             f"{settings.api.cookie_name}_bind",
             path="/",
@@ -382,6 +369,8 @@ def create_app(settings, session_factory: sessionmaker):
             httponly=True,
             samesite="lax",
         )
+        # The logout response carries cookie-clearing headers — never cache it.
+        response.headers["cache-control"] = "no-store"
         return {"ok": True}
 
     @app.get("/auth/me", response_model=MeOut)
@@ -2499,8 +2488,16 @@ def create_app(settings, session_factory: sessionmaker):
     # same fail-closed pattern as get_secret: api.require_secret=true (pinned
     # by production.yaml) raises at boot when the env var is missing;
     # dev/test fall back to an empty secret and the exchange fails at
-    # request time. Not configured (api.oidc=None) → no routes registered.
-    if settings.api.oidc is not None:
+    # request time. With the API enabled there is no local login to fall
+    # back to, so a missing api.oidc block fails closed at boot.
+    if settings.api.oidc is None:
+        if settings.api.enabled:
+            raise RuntimeError(
+                "api.oidc is not configured but api.enabled=true: local "
+                "register/login no longer exists (issue #309) — configure "
+                "api.oidc or set api.enabled=false."
+            )
+    else:
         from app.api.oidc import register_oidc_routes
 
         register_oidc_routes(app, settings, get_oidc_client_secret(settings), db)
