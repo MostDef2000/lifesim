@@ -12,7 +12,6 @@ from app.db.models import (
     Character,
     CharacterTrait,
     Location,
-    User,
     WorldClock,
     WorldEvent,
     WorldObject,
@@ -47,17 +46,16 @@ _AUTO_OUTFIT_POOL = (
 )
 
 
-def _effective_outfit_mode(session: Session, character) -> str:
+def _effective_outfit_mode(character) -> str:
     """#205: raw characters.outfit -> effective mode.
 
     Normalization rules (all documented invariants of 020):
     - NULL / unknown / blank value -> "auto" (legacy rows, hand-made rows:
       EXACTLY the pre-#205 prompt behavior);
-    - "nude" requires the OWNING user to have age_confirmed (П4 18+, stored
-      on users and enforced at registration). No owner (NPC — the lazy
-      canonical portrait GET can be triggered by any authenticated user) or
-      an owner without the flag collapses to "auto", so the nude fragment
-      can only ever be produced from an age-confirmed owner's stored state;
+    - "nude" is unconditional (owner decision 2026-11-10, issue #309: the
+      П4 18+ registration gate died with local registration — the outfit
+      mode is the character owner's per-character choice, enforced nowhere
+      else);
     - worn clothing takes precedence at PROMPT level (build_prompt): an
       explicitly worn WorldObject means the character is dressed in EVERY
       mode, including nude — worn items always win.
@@ -65,13 +63,6 @@ def _effective_outfit_mode(session: Session, character) -> str:
     mode = (getattr(character, "outfit", None) or "auto").strip().lower()
     if mode not in _OUTFIT_MODES:
         return "auto"
-    if mode == "nude":
-        owner_id = character.user_id
-        if owner_id is None:
-            return "auto"  # NPC: no owning user -> never nude
-        owner = session.get(User, owner_id)
-        if owner is None or not owner.age_confirmed:
-            return "auto"
     return mode
 
 
@@ -722,7 +713,7 @@ def build_portrait_descriptor(session: Session, world_id: str, character_id: str
     # as "auto" in build_prompt (which since #205d renders one seed-selected
     # concrete-garment pool item, absent outfit_auto_variant -> pool[0];
     # pre-#205c this read was byte-identical).
-    descriptor["outfit_mode"] = _effective_outfit_mode(session, character)
+    descriptor["outfit_mode"] = _effective_outfit_mode(character)
     # 019 Phase 1 (T3): the canonical visual profile travels with the
     # descriptor (persisted on the VisualAsset scene_descriptor JSON — no
     # model/endpoint change). Built from the same committed state as above.
@@ -803,10 +794,9 @@ def build_prompt(descriptor: dict, visual_config_weather: str = "clear") -> str:
             # a concrete-garment pool item — pool[0] unless the descriptor
             # carries a seed-selected outfit_auto_variant (previously
             # nothing, byte-identical to pre-#205). The outfit_mode "nude"
-            # fragment only ever reaches this point for an age-confirmed
-            # owner: _effective_outfit_mode collapses every other case to
-            # "auto" (guardrail phrase / canonical_negative above are
-            # untouched, #119 invariant).
+            # fragment is unconditional since issue #309 (the П4 18+ gate
+            # died with local registration; guardrail phrase /
+            # canonical_negative above are untouched, #119 invariant).
             mode = descriptor.get("outfit_mode") or "auto"
             if mode == "casual":
                 # #205b (owner feedback 2026-10-16): "casual everyday clothes"

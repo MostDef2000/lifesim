@@ -21,6 +21,7 @@ WebSocket annotation at route-add time.
 
 import asyncio
 import json
+import time
 from typing import Any, Dict, List
 
 from sqlalchemy import func
@@ -67,7 +68,7 @@ def poll_events(
 def register_ws_route(app, settings, session_factory) -> None:
     from fastapi import WebSocket, WebSocketDisconnect
 
-    from app.api.auth import verify_token
+    from app.api.auth import SESSION_TOKEN_VERSION, verify_token
 
     @app.websocket("/ws")
     async def ws_endpoint(
@@ -99,8 +100,13 @@ def register_ws_route(app, settings, session_factory) -> None:
         # #124: auth via the httpOnly session cookie carried by the upgrade
         # request (same-origin client) — no credential in the URL, so the
         # token never reaches access logs. Supersedes /ws?token= (issue #124).
+        # Issue #309: only v2 session tokens connect — the payload must
+        # carry the `v: 2` marker and a `gen` claim matching the user row's
+        # session_generation (legacy v1 tokens and pre-wipe tokens die here).
         session_cookie = _session_cookie(websocket, settings)
         payload = verify_token(session_cookie, _ws_secret(settings)) if session_cookie else None
+        if payload is not None and payload.get("v") != SESSION_TOKEN_VERSION:
+            payload = None
         if payload is not None:
             try:
                 with session_factory() as session:
@@ -109,9 +115,15 @@ def register_ws_route(app, settings, session_factory) -> None:
                 user = None  # fail closed on DB errors
             if user is None or user.disabled:
                 payload = None
+            elif payload.get("gen") != user.session_generation:
+                payload = None
         if payload is None:
             await websocket.close(code=4401)
             return
+        # Captured for the in-loop session recheck below (issue #309).
+        token_exp = float(payload.get("exp", 0))
+        token_gen = payload.get("gen")
+        user_id = int(payload["sub"])
 
         await websocket.accept()
         # M8 (§89): live connection counter for /admin/overview
@@ -167,6 +179,14 @@ def register_ws_route(app, settings, session_factory) -> None:
                 await websocket.send_json({"type": "cursor", "id": cursor})
 
             while True:
+                # Issue #309: periodic session recheck. The cookie token can
+                # expire and the account can be deleted, banned or wiped
+                # (session_generation rotated) while the socket is open —
+                # any drift closes 4401. The raise unwinds to the
+                # WebSocketDisconnect handler below, so the connection-
+                # counter cleanup always runs.
+                if time.time() >= token_exp:
+                    raise WebSocketDisconnect(code=4401)
                 # non-blocking drain of client control messages (cursor updates)
                 client_cursor = None
                 try:
@@ -180,6 +200,15 @@ def register_ws_route(app, settings, session_factory) -> None:
                     pass
 
                 with session_factory() as session:
+                    # same session as the poll: one PK lookup per tick also
+                    # re-checks missing / disabled / generation mismatch
+                    user = session.get(User, user_id)
+                    if (
+                        user is None
+                        or user.disabled
+                        or user.session_generation != token_gen
+                    ):
+                        raise WebSocketDisconnect(code=4401)
                     events = poll_events(
                         session, settings.world.world_id, cursor
                     )

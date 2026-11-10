@@ -39,6 +39,27 @@ def get_secret(settings) -> str:
     return _DEV_SECRET_FALLBACK  # dev fallback (R2/NFR-security; dev/test only)
 
 
+def get_oidc_client_secret(settings) -> str:
+    """OIDC provider client secret from env (name: api.oidc.client_secret_env).
+
+    Same pattern as get_secret (#112): the config carries the ENV-VAR NAME
+    only. When api.require_secret is true a missing variable raises at boot
+    (fail closed); dev/test fall back to an EMPTY secret — the token
+    exchange then simply fails at request time, there is no dev literal.
+    """
+
+    cfg = settings.api.oidc
+    secret = os.getenv(cfg.client_secret_env)
+    if secret:
+        return secret
+    if getattr(getattr(settings, "api", None), "require_secret", False):
+        raise RuntimeError(
+            f"api.oidc.client_secret_env '{cfg.client_secret_env}' not set; "
+            "refusing to start OIDC SSO without the provider secret"
+        )
+    return ""  # dev/test: exchange fails at request time, no dev literal
+
+
 
 def _schema_version(session):
     """Current schema version from SchemaMeta (010: dynamic, was hardcoded)."""
@@ -108,14 +129,11 @@ def create_app(settings, session_factory: sessionmaker):
     _setup_app_logging()
     from fastapi import Depends, FastAPI, HTTPException, Request, Response
     from fastapi.exceptions import RequestValidationError
-    from fastapi.responses import JSONResponse
     from pydantic import BaseModel
 
     from app.api.auth import (
-        hash_password,
+        SESSION_TOKEN_VERSION,
         sign_token,
-        validate_registration,
-        verify_password,
         verify_token,
     )
     from app.db.models import Character, User
@@ -200,11 +218,13 @@ def create_app(settings, session_factory: sessionmaker):
             now = _time.time()
             window = settings.admin.rate_limit_window_sec
             # Strict bucket only for credential endpoints (brute-force
-            # surface). /auth/me & /auth/logout share the global bucket:
-            # a legit re-login after a secret reset must not lock the
-            # user out (phase-5 incident, lf.mostdef.ru).
+            # surface). With local login gone (issue #309) these are the
+            # OIDC redirect start and the callback (code brute-force /
+            # callback replay surface). /auth/me & /auth/logout share the
+            # global bucket: a legit re-login after a secret reset must not
+            # lock the user out (phase-5 incident, lf.mostdef.ru).
             path = request.url.path
-            strict_auth = path in ("/auth/login", "/auth/register")
+            strict_auth = path in ("/auth/login", "/auth/callback")
             scope = "auth" if strict_auth else "global"
             limit = settings.admin.auth_rpm if strict_auth else settings.admin.global_rpm
             bucket = _hits.setdefault((ip, scope), collections.deque())
@@ -253,7 +273,13 @@ def create_app(settings, session_factory: sessionmaker):
             s.close()
 
     def current_user(request: Request, session: Session = Depends(db)) -> User:
-        """Auth via httpOnly cookie or Authorization: Bearer (R2)."""
+        """Auth via httpOnly cookie or Authorization: Bearer (R2).
+
+        Issue #309: only v2 tokens authenticate — the payload must carry the
+        `v: 2` marker (SESSION_TOKEN_VERSION) and a `gen` claim equal to the
+        user row's session_generation. Legacy v1 tokens (no marker) and
+        tokens from before a wipe/re-JIT (generation rotated) are rejected.
+        """
         token = request.cookies.get(settings.api.cookie_name)
         if not token:
             auth = request.headers.get("authorization", "")
@@ -264,9 +290,13 @@ def create_app(settings, session_factory: sessionmaker):
         payload = verify_token(token, get_secret(settings))
         if payload is None:
             raise HTTPException(status_code=401, detail="invalid or expired token")
+        if payload.get("v") != SESSION_TOKEN_VERSION:
+            raise HTTPException(status_code=401, detail="invalid or expired token")
         user = session.get(User, int(payload["sub"]))
         if user is None:
             raise HTTPException(status_code=401, detail="user not found")
+        if payload.get("gen") != user.session_generation:
+            raise HTTPException(status_code=401, detail="invalid or expired token")
         if user.disabled:  # M8 (§84): banned accounts lose API access
             raise HTTPException(status_code=403, detail="account disabled")
         return user
@@ -283,16 +313,6 @@ def create_app(settings, session_factory: sessionmaker):
             .first()
         )
         return int(clock.game_timestamp) if clock is not None else 0
-
-    class RegisterIn(BaseModel):
-        username: str
-        email: str
-        password: str
-        age_confirmed: bool = False
-
-    class LoginIn(BaseModel):
-        username: str
-        password: str
 
     class DeleteAccountIn(BaseModel):
         # #138: self-service deletion confirm — must equal the caller's username.
@@ -320,57 +340,24 @@ def create_app(settings, session_factory: sessionmaker):
     # ---------- Auth routes (§81) ----------
 
     def _set_cookie(response: Response, user: User) -> None:
+        # Issue #309: the token carries the user's session_generation (`gen`
+        # claim, checked by current_user) and the Secure attribute follows
+        # api.cookie_secure (false only for plain-http dev).
         token = sign_token(
-            user.id, user.role, get_secret(settings), settings.api.session_ttl_min
+            user.id,
+            user.role,
+            get_secret(settings),
+            settings.api.session_ttl_min,
+            user.session_generation,
         )
         response.set_cookie(
             settings.api.cookie_name,
             token,
             httponly=True,
             samesite="lax",
+            secure=settings.api.cookie_secure,
             max_age=settings.api.session_ttl_min * 60,
         )
-
-    @app.post("/auth/register", status_code=201)
-    def register(body: RegisterIn, session: Session = Depends(db)):
-        # M8 (§85): registration controls
-        if not settings.admin.registration_enabled:
-            raise HTTPException(status_code=403, detail="registration disabled")
-        if settings.admin.max_players > 0:
-            users_count = session.query(User).count()
-            if users_count >= settings.admin.max_players:
-                raise HTTPException(status_code=409, detail="max players reached")
-        errors = validate_registration(body.username, body.email, body.password, body.age_confirmed)
-        if errors:
-            return JSONResponse(status_code=422, content={"detail": errors})
-        dup = (
-            session.query(User)
-            .filter((User.username == body.username) | (User.email == body.email))
-            .first()
-        )
-        if dup is not None:
-            raise HTTPException(status_code=409, detail="username or email already registered")
-        user = User(
-            username=body.username,
-            email=body.email,
-            password_hash=hash_password(body.password),
-            role="user",
-            age_confirmed=True,
-            created_at=0,
-        )
-        session.add(user)
-        session.commit()
-        return {"id": user.id, "username": user.username}
-
-    @app.post("/auth/login")
-    def login(body: LoginIn, response: Response, session: Session = Depends(db)):
-        user = session.query(User).filter_by(username=body.username).first()
-        if user is None or not verify_password(body.password, user.password_hash):
-            raise HTTPException(status_code=401, detail="invalid credentials")
-        if user.disabled:  # M8 (§84): account moderation
-            raise HTTPException(status_code=403, detail="account disabled")
-        _set_cookie(response, user)
-        return {"id": user.id, "username": user.username}
 
     @app.post("/auth/logout")
     def logout(response: Response):
@@ -382,8 +369,19 @@ def create_app(settings, session_factory: sessionmaker):
         token remains valid until its TTL expires, but it only authenticates
         a live user — a deleted or disabled account is rejected by
         current_user regardless of the token.
+
+        Issue #309: the OIDC browser-binding cookie (app.api.oidc) is
+        cleared too, so a stale binding can never pair with a later
+        transaction. Clearing an absent cookie is a harmless no-op.
         """
         response.delete_cookie(settings.api.cookie_name)
+        response.delete_cookie(
+            f"{settings.api.cookie_name}_bind",
+            path="/",
+            secure=settings.api.cookie_secure,
+            httponly=True,
+            samesite="lax",
+        )
         return {"ok": True}
 
     @app.get("/auth/me", response_model=MeOut)
@@ -1010,15 +1008,6 @@ def create_app(settings, session_factory: sessionmaker):
                 status_code=422,
                 detail="outfit_mode must be auto|casual|formal|nude")
         character = _owned_character(session, user, cid)
-        # 18+ gate (П4): nude is an opt-in for an age-confirmed owner. The
-        # requester IS the owner here (_owned_character), so the stored
-        # flag is checked directly; build_portrait_descriptor re-checks the
-        # same DB truth defensively (rows edited outside this endpoint).
-        # Registration already enforces age_confirmed=true; the check is
-        # defense in depth, not the primary gate.
-        if body.outfit_mode == "nude" and not user.age_confirmed:
-            raise HTTPException(
-                status_code=422, detail="nude requires an age-confirmed account")
         if character.outfit != body.outfit_mode:
             character.outfit = body.outfit_mode
             character.updated_at = _world_now(session)
@@ -1588,6 +1577,8 @@ def create_app(settings, session_factory: sessionmaker):
         """Create/replace the ONE active desire. Unsupported text → HTTP 200
         with an explicit clarification and NO row (scene_act ok:false
         pattern #87: the reason is data, not an error)."""
+        from fastapi.responses import JSONResponse
+
         from app.db.models import CharacterDesire
         from app.desire.llm_interpret import resolve_desire_interpretation
 
@@ -1632,6 +1623,8 @@ def create_app(settings, session_factory: sessionmaker):
         becomes active; the create happens only on explicit confirm via
         POST /characters/{cid}/desire. Unsupported/ambiguous/short text →
         200 + clarification, NO row (scene_act ok:false pattern #87)."""
+        from fastapi.responses import JSONResponse
+
         from app.desire.llm_interpret import resolve_desire_interpretation
 
         # ownership gate only — the pure catalog never touches the character
@@ -2500,6 +2493,17 @@ def create_app(settings, session_factory: sessionmaker):
     from app.api.ws import register_ws_route
 
     register_ws_route(app, settings, session_factory)
+
+    # Issue #309: OIDC SSO (Authentik) — local register/login are gone. The
+    # provider client secret is resolved HERE, at API construction, with the
+    # same fail-closed pattern as get_secret: api.require_secret=true (pinned
+    # by production.yaml) raises at boot when the env var is missing;
+    # dev/test fall back to an empty secret and the exchange fails at
+    # request time. Not configured (api.oidc=None) → no routes registered.
+    if settings.api.oidc is not None:
+        from app.api.oidc import register_oidc_routes
+
+        register_oidc_routes(app, settings, get_oidc_client_secret(settings), db)
 
     # ---------- External Vladivostok (M7, §38-39/106) ----------
 

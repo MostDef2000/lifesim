@@ -8,6 +8,7 @@
 
 - **Included**:
   - Таблицы: `users` (username/email уникальны, password_hash, role, age_confirmed, created_at), `character_goals` (goal_type, params JSON, status queued|active|done|failed|cancelled, deadline_day, source_text), `dialogue_sessions` (participants, location_id, started_at, ended_at, context JSON), `dialogue_messages` (session_id, sender: user|npc|system, content, created_at); колонки `characters.user_id` (nullable FK) и `characters.control_mode` (default AUTONOMOUS). Schema 0.4.0 → 0.5.0.
+  > SUPERSEDED (2026-11-10, OIDC SSO): локальная регистрация/пароли удалены — см. issue #309
   - Auth: POST /auth/register (18+ gate — обязательное `age_confirmed`; П4), POST /auth/login, POST /auth/logout, GET /auth/me; PBKDF2-HMAC-SHA256 (100k итераций, per-user salt, stdlib); HMAC-подписанный токен (stdlib) в httpOnly cookie + Bearer-поддержка; роли: user (MVP; moderator/admin/developer — поле зарезервировано).
   - Создание персонажа: POST /characters — привязка `user_id`, имя уникально в мире, стартовые параметры через существующий генератор (профессия/жильё/деньги); максимум 1 персонаж на пользователя (MVP).
   - Режимы управления (§60-61): POST /characters/{id}/control {mode}; переход AUTONOMOUS → DIRECT останавливает текущую задачу (status='CANCELLED', событие CONTROL_CHANGED); в DIRECT utility-AI не создаёт задач персонажу; в GUIDED очередь целей игрока исполняется (преобразование в CharacterTask), остальное — как AUTONOMOUS; событие `CONTROL_CHANGED` (audit, П1).
@@ -29,11 +30,13 @@
 - **Protected boundaries**:
   - П1: любое действие игрока/NPC — через validators; ни один endpoint не мутирует деньги/инвентарь напрямую.
   - П2: мир жив без API и без LLM (api.enabled=false — headless путь не изменён ни байтом).
+  > SUPERSEDED (2026-11-10, OIDC SSO): локальная регистрация/пароли удалены — см. issue #309
   - П4: 18+ gate на регистрации; возраст — серверное поле; свободный текст диалога не создаёт consent-обязательств.
 
 ## Requirements
 
 - **R1: Гейты и байт-идентичность**. Весь API-слой активен только при `api.enabled` (приложение создаётся фабрикой; headless CLI не зависит от него). Симуляционное поведение изменяется ТОЛЬКО для персонажей с `user_id IS NOT NULL`: AUTONOMOUS — текущее поведение; DIRECT — choose_action не вызывается; GUIDED — цель игрока конвертируется в задачу, utility работает дальше. Персонажи без владельца — всегда AUTONOMOUS: прогоны M1-M4 (AE5''' keystone) байт-идентичны.
+> SUPERSEDED (2026-11-10, OIDC SSO): локальная регистрация/пароли удалены — см. issue #309
 - **R2: Auth**. register: username 3-32 `[a-zA-Z0-9_]`, email валидный, password ≥ 8, `age_confirmed=true` (иначе 422); хэш PBKDF2-HMAC-SHA256, salt 16B, 100_000 итераций. login: проверка, токен (HMAC-SHA256, payload {user_id, role, exp}) в httpOnly cookie `vl1_session` + Accept Bearer. me/logout. Токен истекает (session_ttl_min, дефолт 720). Ownership: все персонаж-эндпоинты проверяют владение (403/404).
 - **R3: Создание персонажа**. POST /characters {name, sex, age?} — age ≥ 18 (П4); генератор даёт профессию/жильё/деньги (реиспользование generator.py); `user_id` + `control_mode='AUTONOMOUS'`; лимит 1 персонаж/пользователь (409). Имя уникально в мире (409).
 - **R4: Control modes**. POST /characters/{id}/control {mode} — валидные значения enum; смена пишется в `characters.control_mode` + событие `CONTROL_CHANGED` {from, to}; при → DIRECT текущая STARTED-задача (source != player) получает status='CANCELLED' (progress_tick игнорирует); при → AUTONOMOUS/GUIDED задачи игрока завершаются штатно. DIRECT: в progress_tick перед choose_action — если control_mode='DIRECT', задача не создаётся (character просто не получает новой utility-задачи; needs-тик работает).

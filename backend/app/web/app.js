@@ -256,27 +256,41 @@ async function route() {
   (routes[hash] || viewWorld)();
 }
 
-/* ---------- auth (§77 login/register) ---------- */
+/* ---------- auth (OIDC SSO via Authentik, issue #309) ---------- */
+
+/* ?error= codes mirror backend/app/api/oidc.py ERROR_CODES exactly. Values
+   are fixed Russian strings — provider-supplied text is never rendered. */
+const AUTH_ERROR_TEXTS = {
+  auth_failed: "Ошибка входа, попробуйте ещё раз",
+  state_mismatch: "Сессия входа устарела, попробуйте ещё раз",
+  provider_error: "Провайдер входа недоступен, попробуйте позже",
+  group_denied: "Доступ только для членов группы lifesim",
+  registration_closed: "Регистрация новых игроков закрыта",
+  username_taken: "Имя занято, обратитесь к администратору",
+};
+
+/* Consume ?error=<code> once at page load: map to the fixed text, then strip
+   the query (hash preserved) so a reload cannot re-show it and no parameter
+   value can loop back into a redirect. No auto-redirect happens here — the
+   only way to /auth/login is the explicit «Войти» button. */
+function consumeAuthError() {
+  /* Manual query parse: URLSearchParams is absent in the m269 node-vm harness
+     (stub environment), and the error codes are fixed ASCII — no decoding. */
+  const q = (location.search || "").replace(/^\?/, "");
+  let code = null;
+  for (const pair of q.split("&")) {
+    const eq = pair.indexOf("=");
+    if (eq > 0 && pair.slice(0, eq) === "error") { code = pair.slice(eq + 1); break; }
+  }
+  if (code === null) return null;
+  history.replaceState(null, "", (location.pathname || "") + location.hash);
+  return AUTH_ERROR_TEXTS[code] || "Ошибка входа";
+}
+const authErrorText = consumeAuthError();
 
 function viewAuth() {
   location.hash = "#/login";
   document.body.classList.add("landing-mode");
-  const mode = S.authMode === "register" ? "register" : "login";
-  const isReg = mode === "register";
-
-  function focusUsername() {
-    const input = document.getElementById("auth-username");
-    if (!input) return;
-    input.focus({ preventScroll: false });
-  }
-
-  function openAuth(nextMode) {
-    // Reuse the original primary/secondary CTA semantics: switch mode, then
-    // re-render the always-visible cream auth card and focus the first field.
-    S.authMode = nextMode;
-    viewAuth();
-    focusUsername();
-  }
 
   function eyebrowOrnament() {
     const ns = "http://www.w3.org/2000/svg";
@@ -313,70 +327,17 @@ function viewAuth() {
       el("span", { class: "landing-bubble-text" }, "Добро пожаловать на Рейнеке. Я помогу тебе освоиться.")),
     el("p", { class: "landing-sub" }, "Симулятор жизни на острове Рейнеке. 18+"),
     el("div", { class: "landing-hero-actions" },
-      el("button", { class: "landing-cta", type: "button", onclick: () => openAuth("register") }, "Начать жизнь на Рейнеке"),
-      el("button", { class: "landing-secondary", type: "button", onclick: () => openAuth("login") }, "У меня уже есть персонаж")));
+      el("button", { class: "landing-cta", type: "button",
+        onclick: () => { window.location.href = "/auth/login"; } }, "Войти")),
+    el("div", { class: "err-text landing-auth-error", role: "alert" },
+      authErrorText || ""));
 
   const scene = el("img", { class: "landing-scene",
     src: "/static/static/landing/concierge-cat-hero.webp",
     alt: "Кошка-консьержка встречает гостей на пирсе острова Рейнеке" });
   const scrim = el("div", { class: "landing-scrim", "aria-hidden": "true" });
 
-  const err = el("div", { class: "err-text landing-auth-error", role: "alert" });
-  const username = el("input", { id: "auth-username", name: "username", autocomplete: "username", required: "required" });
-  const password = el("input", { id: "auth-password", name: "password", type: "password",
-    autocomplete: isReg ? "new-password" : "current-password", required: "required" });
-  const email = el("input", { id: "auth-email", name: "email", type: "email", autocomplete: "email", placeholder: "you@example.com" });
-  const age = el("input", { id: "auth-age", name: "age_confirmed", type: "checkbox", class: "landing-checkbox" });
-
-  const submitBtn = el("button", { class: "landing-cta landing-auth-submit", type: "submit" },
-    isReg ? "Создать аккаунт" : "Войти");
-  const form = el("form", { class: "landing-auth-form", onsubmit: async (ev) => {
-    ev.preventDefault();
-    err.textContent = "";
-    submitBtn.disabled = true;
-    submitBtn.setAttribute("aria-busy", "true");
-    try {
-      if (isReg) {
-        if (!age.checked) { err.textContent = "Подтвердите, что вам 18 лет или больше."; return; }
-        await api("/auth/register", { method: "POST", body: {
-          username: username.value, email: email.value,
-          password: password.value, age_confirmed: true } });
-      }
-      await api("/auth/login", { method: "POST", body: {
-        username: username.value, password: password.value } });
-      S.user = await api("/auth/me");
-      S.authProbed = false;
-      S.character = null;
-      creatorResetDraft();  // W118-RV1 F1: fresh login must not inherit the previous session's draft
-      appearanceResetDraft();  // #65: same isolation for the outfit prompt draft
-      desireResetDraft();  // #66: same isolation for the interpret-request state
-      gotoWorld();  // #161: single dispatch — no direct route() next to the hash assignment
-    } catch (e) { err.textContent = e.message; }
-    finally {
-      submitBtn.disabled = false;
-      submitBtn.removeAttribute("aria-busy");
-    }
-  } },
-    el("div", { class: "landing-auth-heading" },
-      el("div", {},
-        el("p", { class: "landing-kicker" }, isReg ? "Новый житель" : "Возвращение на остров"),
-        el("h2", {}, isReg ? "Начать жизнь на Рейнеке" : "Войти в Рейнеке"))),
-    el("p", { class: "landing-auth-intro" },
-      isReg ? "Создайте аккаунт. После входа вы сможете создать своего персонажа." : "Войдите в существующий аккаунт и вернитесь к своему персонажу."),
-    el("label", { for: "auth-username" }, "Имя пользователя"), username,
-    isReg && el("label", { for: "auth-email" }, "Email"), isReg && email,
-    el("label", { for: "auth-password" }, "Пароль"), password,
-    isReg && el("label", { class: "landing-age-row", for: "auth-age" }, age,
-      el("span", {}, "Мне 18 лет или больше")),
-    submitBtn,
-    err,
-    el("button", { class: "landing-auth-switch", type: "button", onclick: () => openAuth(isReg ? "login" : "register") },
-      isReg ? "У меня уже есть аккаунт" : "Нет аккаунта? Зарегистрироваться"));
-
-  const authCard = el("aside", { class: "landing-auth-card",
-    "aria-label": isReg ? "Регистрация" : "Вход" }, form);
-
-  const heroInner = el("div", { class: "landing-hero-inner" }, heroCopy, authCard);
+  const heroInner = el("div", { class: "landing-hero-inner" }, heroCopy);
 
   const hero = el("section", { class: "landing-hero" }, scene, scrim, heroInner);
 

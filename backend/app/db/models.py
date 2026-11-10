@@ -1,3 +1,4 @@
+import secrets
 from datetime import datetime
 
 from sqlalchemy import (
@@ -423,14 +424,26 @@ class DialogueTurn(Base):
 # 29. users (M5, SPEC §81/104)
 class User(Base):
     __tablename__ = "users"
+    # OIDC SSO: identity = (oidc_issuer, oidc_sub) exact pair — never
+    # email/username linking. password_hash is nullable only because the
+    # column survives the wipe-first schema reset; no code path hashes or
+    # verifies passwords anymore.
+    __table_args__ = (
+        UniqueConstraint("oidc_issuer", "oidc_sub", name="uq_users_oidc_sub"),
+    )
     id = Column(Integer, primary_key=True, autoincrement=True)
     username = Column(String, nullable=False, unique=True)
     email = Column(String, nullable=False, unique=True)
-    password_hash = Column(String, nullable=False)
+    password_hash = Column(String, nullable=True)  # legacy column, unused (OIDC only)
     role = Column(String, nullable=False, default="user")  # user|moderator|admin|developer (§82)
-    age_confirmed = Column(Boolean, nullable=False, default=False)  # П4: 18+
     disabled = Column(Boolean, nullable=False, default=False)  # M8 (§84): account moderation
     created_at = Column(Integer, nullable=False)
+    oidc_issuer = Column(String, nullable=True)
+    oidc_sub = Column(String, nullable=True)
+    # Session-generation nonce: minted at user creation, baked into every
+    # session token (v:2 `gen` claim) and re-checked against this row —
+    # a wipe/re-JIT (or any row replacement) invalidates outstanding tokens.
+    session_generation = Column(String, nullable=False, default=lambda: secrets.token_hex(16))
 
 
 # 016 (§33): crimes — theft/vandalism with witness reports and police resolution

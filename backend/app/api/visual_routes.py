@@ -427,16 +427,6 @@ def register_visual_routes(app, settings: Settings, session_factory: sessionmake
 
         # ownership + aliveness guard (404/422/403)
         _owned_character_for_portrait(session, request_user, cid)
-        # П4 18+ gate (020 P3 stage 2): nude rendering requires an
-        # age-confirmed OWNER — identical semantics to PATCH
-        # /characters/{cid}/outfit (app.py), where the requester is also
-        # the owner, so the account flag is checked directly. The portrait
-        # route is owner-scoped (403 above), so an NPC can never be pushed
-        # into nude rendering through this path.
-        if body.nude and not request_user.age_confirmed:
-            raise HTTPException(
-                status_code=422,
-                detail="nude requires an age-confirmed account")
         # 020 P3 stage 2: reference consumption — owner check (missing AND
         # foreign ids answer the SAME stage-1 404) happens BEFORE any
         # generation; the transport is never called for a rejected ref.
