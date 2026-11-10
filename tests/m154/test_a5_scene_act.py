@@ -170,11 +170,19 @@ def _actor_events(factory, world_id, cid, after_id):
             .order_by(WorldEvent.id)
             .all()
         )
+        # #295: mirror the endpoint's response shape EXACTLY — the API now
+        # renders each row's "text" via render_event_texts (app.py
+        # _actor_events_since), so the helper must too or the equality
+        # asserts break when events are non-empty.
+        from app.events.texts import render_event_texts
+
+        texts = render_event_texts(session, rows)
         return [
             {"id": e.id, "event_type": e.event_type, "actor_id": e.actor_id,
              "location_id": e.location_id, "day": e.game_timestamp // 1440,
              "game_timestamp": e.game_timestamp,
-             "payload": json.loads(e.payload) if e.payload else {}}
+             "payload": json.loads(e.payload) if e.payload else {},
+             "text": texts.get(e.id)}
             for e in rows
         ]
 

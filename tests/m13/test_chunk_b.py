@@ -74,7 +74,9 @@ class TestTripMemory:
                 world_id=settings.world.world_id,
                 event_type="TRAVEL_EXTERNAL_RETURNED", actor_id=npc.id,
                 payload=json.dumps({
-                    "purpose": "treatment (Владивосток)",
+                    # #295: current emitters write the Russian service label
+                    # (npc_trips.py: label(SERVICE_TYPE, ...) + " (name)").
+                    "purpose": "лечение (Владивосток)",
                     "healed": True, "items": [],
                 }),
                 game_timestamp=2 * 1440,
@@ -83,7 +85,7 @@ class TestTripMemory:
             ctx = build_context(
                 session, settings.world.world_id, player, npc)
             assert "npc_recent_trip" in ctx
-            assert "treatment" in ctx["npc_recent_trip"]
+            assert "лечение" in ctx["npc_recent_trip"]
             assert "полечился" in ctx["npc_recent_trip"]
 
     def test_no_trip_no_key(self, tmp_path):
@@ -106,10 +108,10 @@ class TestTripMemory:
         from app.api.dialogue import fallback_reply
 
         ctx = {"relationship": {"trust": 0, "affection": 10, "respect": 0},
-               "npc_recent_trip": "treatment; полечился"}
+               "npc_recent_trip": "лечение; полечился"}
         reply = fallback_reply(ctx, "Иван")
         assert "вернулся с материка" in reply
-        assert "treatment" in reply
+        assert "лечение" in reply
 
 
 @pytest.fixture()

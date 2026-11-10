@@ -52,7 +52,8 @@ def test_death_process(session: Session, settings: Settings, world_id: str):
     # Verify death state
     char = session.query(Character).filter_by(id="npc_die").one()
     assert char.alive is False
-    assert char.death_cause == "critical needs failure"
+    # #295: the death cause is the Russian free-text written by health.py.
+    assert char.death_cause == "критический отказ нужд"
 
     # Verify task cancelled
     task = session.query(CharacterTask).filter_by(character_id="npc_die").one()

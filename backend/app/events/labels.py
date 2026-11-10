@@ -97,6 +97,12 @@ RESOURCE_KEY = {
     "water": "вода",
 }
 
+# External-service types (config-driven, open set; default.yaml services).
+SERVICE_TYPE = {
+    "treatment": "лечение",
+    "purchase": "покупка",
+}
+
 # Law keys (LAW_ENACTED/LAW_VIOLATION law_key; config org.laws.catalog).
 LAW_KEY = {
     "no_conflict": "запрет конфликтов",

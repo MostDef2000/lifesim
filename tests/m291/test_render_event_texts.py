@@ -556,6 +556,7 @@ LABEL_DOMAINS = {
     "CRIME": labels_mod.CRIME,
     "ASSET_TYPE": labels_mod.ASSET_TYPE,
     "RESOURCE_KEY": labels_mod.RESOURCE_KEY,
+    "SERVICE_TYPE": labels_mod.SERVICE_TYPE,
     "LAW_KEY": labels_mod.LAW_KEY,
     "MEMORY_TYPE": labels_mod.MEMORY_TYPE,
 }

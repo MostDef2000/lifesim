@@ -54,6 +54,34 @@ function loadRetryNode(loading, retry) {
     el("button", { type: "button", onclick: retry }, "Повторить"));
 }
 
+/* #295: display dictionaries for internal codes that reach UI surfaces
+   (task rows, profile/career job, taskRow source/object_type). Mirrors the
+   backend canons: TASK_TYPE/OBJECT_TYPE — app/events/labels.py; job titles —
+   app/social/roles.py _OCCUPATION_TITLES_RU; statuses/sources — the values
+   actually written to CharacterTask (app/actions/lifecycle.py,
+   app/ai/worker.py, app/external/npc_trips.py). Unknown code → raw, the
+   same doctrine as the backend label() — a lookup never invents a name. */
+const TASK_TYPE_RU = { SLEEP: "сон", EAT: "еда", DRINK: "питьё", WORK: "работа",
+  MOVE: "перемещение", BUY_ITEM: "покупка", SOCIALIZE: "общение", IDLE: "безделье",
+  TRAVEL_EXTERNAL: "внешняя поездка", CONSTRUCT: "строительство" };
+const TASK_STATUS_RU = { planned: "запланирована", active: "активна",
+  completed: "выполнена", failed: "провалена", cancelled: "отменена",
+  STARTED: "начата" };
+const TASK_SOURCE_RU = { player: "игрок", user: "игрок", utility: "система",
+  ai: "ИИ", need: "потребность", goal: "цель" };
+const JOB_TITLES_RU = { Farmer: "Фермер", Fisher: "Рыболов", Crafter: "Крафтер",
+  Storekeeper: "Кладовщик" };
+const OBJECT_TYPE_RU = { food_bread: "хлеб", food_canned: "консервы", water_bottle: "бутылка воды",
+  jacket: "куртка", boots: "сапоги", hat: "шляпа", food_groceries: "продукты",
+  tool_kit: "набор инструментов", shed: "сарай", generator: "генератор",
+  wood_pile: "поленница", pier_extension: "пристройка к пирсу", haystack: "стог сена",
+  furniture: "мебель", cloth: "ткань", food_stock: "запасы еды", prepared_meal: "готовая еда",
+  fish: "рыба", berries: "ягоды" };
+function codeLabel(map, code) {
+  if (code == null) return "";
+  return Object.prototype.hasOwnProperty.call(map, code) ? map[code] : String(code);
+}
+
 /* #175: connection banner — a dead server must be visible. The banner is
    created lazily, appended to document.body exactly once, and toggled via
    .hidden like .toast. Liveness oracle = consecutive pollEvents failures
@@ -1081,8 +1109,8 @@ function sceneActInterpText(i) {
   if (i.intent === "move") return `идти: ${p.destination_name || p.destination_id || ""}`;
   if (i.intent === "socialize") return `поговорить: ${p.target_name || ""}`;
   if (i.intent === "buy") return `купить: ${p.item || ""}`;
-  if (i.intent === "wear") return `надеть: ${p.object_type || p.object_text || ""}`;
-  if (i.intent === "take_off") return `снять: ${p.object_type || p.object_text || ""}`;
+  if (i.intent === "wear") return `надеть: ${codeLabel(OBJECT_TYPE_RU, p.object_type) || p.object_text || ""}`;
+  if (i.intent === "take_off") return `снять: ${codeLabel(OBJECT_TYPE_RU, p.object_type) || p.object_text || ""}`;
   return String(i.intent || "");
 }
 
@@ -1105,9 +1133,14 @@ function sceneActResultNode() {
     } else if (r.action === "wear" || r.action === "take_off") {
       lines.push(el("div", {}, r.worn ? "Надето" : "Снято"));
     } else if (r.task_id) {
-      const ev = r.events && r.events.length
-        ? " · " + r.events[r.events.length - 1].event_type : "";
-      lines.push(el("div", {}, "Принято: " + r.task_type
+      // #295: the last event's server-rendered text wins; raw event_type is
+      // the fallback (same doctrine as the feed). task_label is the
+      // backend's label(TASK_TYPE, ...) — JS dict covers older payloads.
+      const lastEv = r.events && r.events.length
+        ? r.events[r.events.length - 1] : null;
+      const ev = lastEv ? " · " + (lastEv.text || lastEv.event_type) : "";
+      lines.push(el("div", {}, "Принято: "
+        + (r.task_label || codeLabel(TASK_TYPE_RU, r.task_type))
         + " (задача " + r.task_id + ")" + ev));
     }
   }
@@ -1559,7 +1592,7 @@ function mapEventMarkers(visibleLocs) {
       class: `map-dynamic-marker event-marker${critical ? " critical" : ""}`,
       style: `left:${loc.x}%; top:${loc.y}%`,
       "data-location-id": String(locationId),
-      title: `${last.event_type || "Событие"} · ${loc.name}`,
+      title: `${last.text || last.event_type || "Событие"} · ${loc.name}`,
     }, events.length > 1 ? String(events.length) : "!");
   });
 }
@@ -1857,8 +1890,8 @@ function renderWorld(locs, tasksData) {
     const active = tasksData.active || [];
     [...active, ...planned].forEach(t => {
       taskRows.push(el("div", { class: "task" },
-        el("span", { class: "status" }, t.status),
-        el("span", {}, t.task_type || "")));
+        el("span", { class: "status" }, codeLabel(TASK_STATUS_RU, t.status)),
+        el("span", {}, codeLabel(TASK_TYPE_RU, t.task_type) || "")));
     });
   }
   const activeCount = tasksData && tasksData.active ? tasksData.active.length : 0;
@@ -1883,7 +1916,7 @@ function renderWorld(locs, tasksData) {
         el("h1", { class: "world-who-name" }, characterName),
         el("span", { class: "world-money" }, `${ch.money ?? ch.balance ?? "—"} ₽`)),
       el("p", { class: "world-sub" },
-        `${currentLocationLabel} · ${ch.job ? ch.job : "работы нет"}`),
+        `${currentLocationLabel} · ${ch.job ? codeLabel(JOB_TITLES_RU, ch.job) : "работы нет"}`),
       el("div", { class: "world-chip" },
         svgIcon(ICON_DROP),
         el("span", {},
@@ -2285,7 +2318,7 @@ function renderCareer(fresh, roles) {
   // the validator auto-redirects the character transparently (needs_move).
   const job = fresh.job;
   const jobPanel = el("section", { class: "panel" },
-    el("h2", {}, job ? `Работа: ${job}` : "Работа не назначена"),
+    el("h2", {}, job ? `Работа: ${codeLabel(JOB_TITLES_RU, job)}` : "Работа не назначена"),
     job ? el("div", { class: "place-actions" },
       el("button", { type: "button",
         onclick: () => doAction("WORK", {}, () => {}) }, "Работать")) : null);
@@ -2633,7 +2666,7 @@ function renderPlace(locId, place, locs) {
                 el("span", { class: "muted" },
                   typeof ev.game_timestamp === "number"
                     ? dayTime(ev.game_timestamp) : "—"),
-                el("span", {}, ev.event_type || ""))))
+                el("span", {}, ev.text || ev.event_type || ""))))
           : el("p", { class: "muted" },
               "В загруженной выборке событий этого места нет."));
     } catch (e) {
@@ -4386,11 +4419,13 @@ function taskRow(t) {
   const loc = locId != null
     ? (S.mapLocations || []).find((l) => l.id == locId) : null;
   const params = t.parameters || {};
-  const reason = params.reason || params.object_type || "";
+  // #295: reason is backend free text — shown as-is; object_type is a code
+  // and gets its display name (raw fallback for unknown config values).
+  const reason = params.reason || codeLabel(OBJECT_TYPE_RU, params.object_type) || "";
   return el("div", { class: "task-row" },
-    el("span", { class: "status" }, t.status || ""),
-    el("span", {}, t.task_type || ""),
-    t.source ? el("span", { class: "muted" }, ` · ${t.source}`) : null,
+    el("span", { class: "status" }, codeLabel(TASK_STATUS_RU, t.status) || ""),
+    el("span", {}, codeLabel(TASK_TYPE_RU, t.task_type) || ""),
+    t.source ? el("span", { class: "muted" }, ` · ${codeLabel(TASK_SOURCE_RU, t.source)}`) : null,
     t.ends_at != null ? el("span", { class: "muted" }, ` · до ${dayTime(t.ends_at)}`) : null,
     t.completed_at != null
       ? el("span", { class: "muted" }, ` · завершено ${dayTime(t.completed_at)}`) : null,
@@ -5243,7 +5278,7 @@ function renderProfile(modeSel) {
 
   // hero identity chips — async ones start muted and fill in place.
   const locChipV = el("span", { class: "profile-chip-v muted" }, "…");
-  const jobChipV = el("span", { class: "profile-chip-v" }, ch.job ? String(ch.job) : "—");
+  const jobChipV = el("span", { class: "profile-chip-v" }, ch.job ? codeLabel(JOB_TITLES_RU, ch.job) : "—");
   const partnerChipV = el("span", { class: "profile-chip-v muted" }, "…");
   const locChip = el("span", { class: "profile-chip" },
     el("span", { class: "profile-chip-k" }, "Локация"), locChipV);
@@ -5255,7 +5290,7 @@ function renderProfile(modeSel) {
   // «Текущая ситуация» values — the muted sub-panel pattern (placeholder →
   // fill, .catch → «недоступно»), same as the roles line below.
   const locValue = el("span", { class: "muted" }, "…");
-  const jobValue = el("span", {}, ch.job ? String(ch.job) : "—");
+  const jobValue = el("span", {}, ch.job ? codeLabel(JOB_TITLES_RU, ch.job) : "—");
   const partnerValue = el("span", { class: "muted" }, "…");
   const desireValue = el("span", { class: "muted" }, "…");
 

@@ -12,6 +12,8 @@ from typing import Any
 
 from sqlalchemy.orm import Session, sessionmaker
 
+from app.events.labels import TASK_TYPE, label
+
 _DEV_SECRET_FALLBACK = "dev-insecure-secret-change-me"
 
 
@@ -1080,12 +1082,16 @@ def create_app(settings, session_factory: sessionmaker):
             .limit(limit)
             .all()
         )
+        from app.events.texts import render_event_texts
+
+        texts = render_event_texts(session, rows)
         return [
             {
                 "id": e.id, "event_type": e.event_type, "actor_id": e.actor_id,
                 "location_id": e.location_id, "day": e.game_timestamp // 1440,
                 "game_timestamp": e.game_timestamp,
                 "payload": _json.loads(e.payload) if e.payload else {},
+                "text": texts.get(e.id),
             }
             for e in rows
         ]
@@ -1460,6 +1466,7 @@ def create_app(settings, session_factory: sessionmaker):
         session.commit()
         return JSONResponse(status_code=201, content={
             "ok": True, "task_id": task.id, "task_type": task.task_type,
+            "task_label": label(TASK_TYPE, task.task_type),
             "status": task.status, "interpretation": interpretation,
             "events": _actor_events_since(session, wid, character.id, watermark),
         })

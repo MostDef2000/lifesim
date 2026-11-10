@@ -108,5 +108,5 @@ def process_deaths(session: Session, world_id: str, game_timestamp: int):
     for char in characters:
         health = session.query(CharacterHealth).filter_by(character_id=char.id).one()
         if health.health <= 0:
-            handle_death(session, world_id, game_timestamp, char, "critical needs failure")
+            handle_death(session, world_id, game_timestamp, char, "критический отказ нужд")
             session.flush()
