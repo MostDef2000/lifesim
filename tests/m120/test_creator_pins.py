@@ -153,15 +153,15 @@ def test_creator_fields_pins():
     # key was rejected server-side with "unknown draft field".
     assert view.count("...CREATOR_FIELDS.map(([key, lbl]) => {") == 1
     assert view.count('el("div", { class: "creator-field" },\n'
-                      '        el("div", { class: "creator-field-head" },\n'
-                      '          el("label", {}, lbl),\n'
-                      '          // the variant request carries the CANONICAL (server) draft key —\n'
-                      '          // DRAFT_FIELDS is snake_case; the local grid key is camelCase\n'
-                      '          // for hairColor/extra (the apply path maps the response back\n'
-                      '          // via CREATOR_DRAFT_RENAME; the request map is its derived\n'
-                      '          // inverse).\n'
-                      '          aiVariantBtn(CREATOR_DRAFT_RENAME_REV[key] || key)),\n'
-                      '        input);') == 1
+                  '        el("div", { class: "creator-field-head" },\n'
+                  '          el("label", {}, lbl),\n'
+                  '          // the variant request carries the CANONICAL (server) draft key —\n'
+                  '          // DRAFT_FIELDS is snake_case; the local grid key is camelCase\n'
+                  '          // for hairColor/extra (the apply path maps the response back\n'
+                  '          // via CREATOR_DRAFT_RENAME; the request map is its derived\n'
+                  '          // inverse).\n'
+                  '          aiVariantBtn(CREATOR_DRAFT_RENAME_REV[key] || key)),\n'
+                  '        input);') == 1
     assert view.count('el("div", { class: "creator-appearance" },') == 1
 
 
