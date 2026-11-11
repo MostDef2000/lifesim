@@ -8,12 +8,11 @@ from sqlalchemy.orm import sessionmaker
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../../.."))
 
-from fastapi.testclient import TestClient  # noqa: E402
-
 from app.api.app import create_app  # noqa: E402
 from app.config.config import load_config  # noqa: E402
 from app.db.models import bootstrap, create_engine_factory  # noqa: E402
 from app.world.seed_world import seed_world  # noqa: E402
+from tests.helpers import auth_client, make_user  # noqa: E402
 
 SETTINGS = None
 
@@ -52,16 +51,12 @@ def build_world(settings, seed=42):
 
 
 def login_player(settings, factory, username="artist"):
+    # #309: local register/login gone — create the user directly and sign
+    # the app's own session cookie.
     app = create_app(settings, factory)
-    client = TestClient(app)
-    r = client.post("/auth/register", json={
-        "username": username,
-        "email": f"{username[0]}@x.com",
-        "password": "password123",
-        "age_confirmed": True,
-    })
-    assert r.status_code == 201, r.text
-    client.post("/auth/login", json={"username": username, "password": "password123"})
+    with factory() as session:
+        user = make_user(session, username, f"{username[0]}@x.com")
+    client = auth_client(app, settings, user)
     r = client.post("/characters", json={"name": "Muse", "sex": "F", "age": 27})
     assert r.status_code == 201, r.text
     return app, client, r.json()["id"]
@@ -192,8 +187,14 @@ class TestAE4Persistence:
         engine2 = create_engine_factory(settings)
         factory2 = sessionmaker(bind=engine2, expire_on_commit=False)
         app2 = create_app(settings, factory2)
-        client2 = TestClient(app2)
-        client2.post("/auth/login", json={"username": "artist", "password": "password123"})
+        # #309: same user row survives the "restart" — sign a fresh cookie.
+        from sqlalchemy import select
+
+        from app.db.models import User
+
+        with factory2() as session:
+            artist = session.scalars(select(User).where(User.username == "artist")).first()
+        client2 = auth_client(app2, settings, artist)
         r = client2.get(f"/visual/assets/{asset['id']}/file")
         assert r.status_code == 200
         assert r.content == original_bytes

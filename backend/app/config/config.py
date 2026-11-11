@@ -230,17 +230,33 @@ class LlmConfig(BaseModel):
     retry: int = 1
     memory: AiMemoryConfig = Field(default_factory=AiMemoryConfig)
 
+class OidcConfig(BaseModel):
+    """OIDC SSO (Authentik): local auth replaced by the provider flow.
+
+    client_secret_env carries the ENV-VAR NAME only (same pattern as
+    api.secret_env) — the value is resolved at API construction via
+    get_secret-style lookup and never lives in config files.
+    """
+    issuer: str  # exact-match issuer (trailing slash significant for Authentik)
+    client_id: str
+    callback_url: str  # redirect_uri; from config only, never request headers
+    required_group: str  # groups claim must contain exactly this group
+    scopes: List[str] = Field(default_factory=lambda: ["openid", "profile", "email", "groups"])
+    client_secret_env: str = "LIFESIM_OIDC_CLIENT_SECRET"
+
 class ApiConfig(BaseModel):
     """M5 (SPEC §80-81/104): web-api surface. Headless by default (П2)."""
     enabled: bool = False
     host: str = "127.0.0.1"
     port: int = 8000
-    session_ttl_min: int = 720
+    session_ttl_min: int = 30
     cookie_name: str = "vl1_session"
+    cookie_secure: bool = True  # Secure attr on auth cookies (false only for plain-http dev)
     ws_interval_s: float = 1.0
     secret_env: str = "VL1_SECRET"  # HMAC secret env name (see get_secret)
     docs: bool = False  # #113: Swagger/redoc/openapi; fail-closed (prod pins false)
     require_secret: bool = False  # #112: true → refuse dev-fallback session secret
+    oidc: Optional[OidcConfig] = None  # required when api.enabled (resolved at create_app)
 
 class RomanceConfig(BaseModel):
     """018 (§31): explicit consent for romance. Off by default (П4 gate)."""
@@ -373,7 +389,6 @@ class FireConfig(BaseModel):
 
 class AdminConfig(BaseModel):
     """M8 (§85/§27/§107): public alpha operations."""
-    registration_enabled: bool = True
     max_players: int = 0  # 0 = unlimited
     rate_limit_enabled: bool = True
     global_rpm: int = 600

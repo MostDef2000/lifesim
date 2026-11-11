@@ -17,6 +17,7 @@ from app.db.models import (  # noqa: E402
     create_engine_factory,
 )
 from app.world.seed_world import seed_world  # noqa: E402
+from tests.helpers import auth_client, make_user  # noqa: E402
 
 SETTINGS = None
 
@@ -59,91 +60,21 @@ class TestSchema:
             assert session.query(User).filter_by(disabled=True).count() == 0
 
 
-class TestRegistrationControls:
-    def test_registration_disabled_403(self, tmp_path):
-        settings = make_settings(tmp_path, registration_enabled=False)
-        build(settings)
-        app = create_app(settings, sessionmaker(bind=create_engine_factory(settings)))
-        client = TestClient(app)
-        r = client.post("/auth/register", json={
-            "username": "blocked", "email": "b@x.com",
-            "password": "password123", "age_confirmed": True,
-        })
-        assert r.status_code == 403
-        assert "registration disabled" in r.json()["detail"]
-
-    def test_max_players_409(self, tmp_path):
-        settings = make_settings(tmp_path, max_players=1)
-        build(settings)
-        app = create_app(settings, sessionmaker(bind=create_engine_factory(settings)))
-        client = TestClient(app)
-        r1 = client.post("/auth/register", json={
-            "username": "first", "email": "f@x.com",
-            "password": "password123", "age_confirmed": True,
-        })
-        assert r1.status_code == 201
-        r2 = client.post("/auth/register", json={
-            "username": "second", "email": "s@x.com",
-            "password": "password123", "age_confirmed": True,
-        })
-        assert r2.status_code == 409
-        assert "max players" in r2.json()["detail"]
-
-    def test_unlimited_by_default(self, tmp_path):
-        settings = make_settings(tmp_path)
-        build(settings)
-        app = create_app(settings, sessionmaker(bind=create_engine_factory(settings)))
-        client = TestClient(app)
-        for i in range(3):
-            r = client.post("/auth/register", json={
-                "username": f"user{i}", "email": f"u{i}@x.com",
-                "password": "password123", "age_confirmed": True,
-            })
-            assert r.status_code == 201
+# #309: TestRegistrationControls deleted — local /auth/register is gone
+# (404). The max_players cap now lives in the OIDC callback
+# (oidc.py "registration_closed"); registration_enabled no longer exists.
+# test_disabled_login_403 deleted — /auth/login is now the OIDC redirect
+# start (GET); the disabled check is covered by test_disabled_token_rejected.
 
 
 class TestDisabledAccounts:
-    def test_disabled_login_403(self, tmp_path):
-        settings = make_settings(tmp_path)
-        engine = build(settings)
-        factory = sessionmaker(bind=engine)
-        with factory() as session:
-            session.add(User(
-                username="banned", email="b@x.com",
-                password_hash="$pbkdf2$fake", role="user",
-                age_confirmed=True, disabled=True, created_at=0,
-            ))
-            session.commit()
-        client = TestClient(create_app(settings, factory))
-        r = client.post("/auth/login", json={"username": "banned", "password": "x"})
-        assert r.status_code in (401, 403)  # bad hash -> 401; disabled check on valid creds
-
-        # with valid password -> 403
-        from app.api.auth import hash_password
-
-        with factory() as session:
-            u = session.query(User).filter_by(username="banned").one()
-            u.password_hash = hash_password("password123")
-            session.commit()
-        r = client.post("/auth/login", json={"username": "banned", "password": "password123"})
-        assert r.status_code == 403
-        assert "account disabled" in r.json()["detail"]
-
     def test_disabled_token_rejected(self, tmp_path):
         settings = make_settings(tmp_path)
         engine = build(settings)
-        factory = sessionmaker(bind=engine)
-        from app.api.auth import hash_password
-
+        factory = sessionmaker(bind=engine, expire_on_commit=False)
         with factory() as session:
-            session.add(User(
-                username="convict", email="c@x.com",
-                password_hash=hash_password("password123"), role="user",
-                age_confirmed=True, disabled=False, created_at=0,
-            ))
-            session.commit()
-        client = TestClient(create_app(settings, factory))
-        client.post("/auth/login", json={"username": "convict", "password": "password123"})
+            user = make_user(session, "convict", "c@x.com")
+        client = auth_client(create_app(settings, factory), settings, user)
         assert client.get("/auth/me").status_code == 200
 
         with factory() as session:
@@ -151,8 +82,7 @@ class TestDisabledAccounts:
             u.disabled = True
             session.commit()
         # new app instance (same token cookie)
-        client2 = TestClient(create_app(settings, factory))
-        client2.cookies.update(client.cookies)
+        client2 = auth_client(create_app(settings, factory), settings, user)
         r = client2.get("/auth/me")
         assert r.status_code == 403
 
@@ -164,14 +94,89 @@ class TestRateLimit:
         client = TestClient(
             create_app(settings, sessionmaker(bind=create_engine_factory(settings)))
         )
+        # #309: strict bucket now guards the OIDC endpoints; /auth/callback
+        # with no params is a network-free 302 fail-redirect.
         statuses = []
         for i in range(5):
-            r = client.post("/auth/login", json={"username": f"u{i}", "password": "x"})
+            r = client.get("/auth/callback", follow_redirects=False)
             statuses.append(r.status_code)
-        assert statuses[:3].count(401) == 3  # within limit: normal responses
+        assert statuses[:3].count(302) == 3  # within limit: normal responses
         assert statuses[3] == 429 and statuses[4] == 429
-        assert client.post("/auth/login", json={"username": "x", "password": "x"}
-                           ).headers.get("retry-after") is not None
+        assert client.get(
+            "/auth/callback", follow_redirects=False
+        ).headers.get("retry-after") is not None
+
+    def test_xff_last_entry_single_bucket(self, tmp_path):
+        # #309 ИБ-этап: behind Caddy the proxy APPENDS the real client IP
+        # to any client-supplied X-Forwarded-For, so only the LAST entry is
+        # trustworthy. A client rotating fake FIRST entries must all land
+        # in ONE bucket (same real IP) and hit 429, not get a fresh bucket
+        # per request.
+        settings = make_settings(tmp_path, auth_rpm=3, rate_limit_window_sec=60)
+        build(settings)
+        client = TestClient(
+            create_app(settings, sessionmaker(bind=create_engine_factory(settings)))
+        )
+        statuses = []
+        for i in range(5):
+            r = client.get(
+                "/auth/callback",
+                headers={"X-Forwarded-For": f"10.0.0.{i}, 203.0.113.7"},
+                follow_redirects=False,
+            )
+            statuses.append(r.status_code)
+        assert statuses[:3].count(302) == 3  # within limit: normal responses
+        assert statuses[3] == 429 and statuses[4] == 429
+
+    def test_xff_different_last_entries_separate_buckets(self, tmp_path):
+        # #309 ИБ-этап: inverse — distinct LAST entries are distinct
+        # clients and must not share a bucket (no premature 429).
+        settings = make_settings(tmp_path, auth_rpm=3, rate_limit_window_sec=60)
+        build(settings)
+        client = TestClient(
+            create_app(settings, sessionmaker(bind=create_engine_factory(settings)))
+        )
+        statuses = []
+        for i in range(3):
+            r = client.get(
+                "/auth/callback",
+                headers={"X-Forwarded-For": f"10.0.0.{i}, 203.0.113.7"},
+                follow_redirects=False,
+            )
+            statuses.append(r.status_code)
+        for i in range(3):
+            r = client.get(
+                "/auth/callback",
+                headers={"X-Forwarded-For": f"10.9.0.{i}, 203.0.113.8"},
+                follow_redirects=False,
+            )
+            statuses.append(r.status_code)
+        assert all(s == 302 for s in statuses)
+
+    def test_xff_multiple_header_lines_last_line_wins(self, tmp_path):
+        # #309 ИБ-этап: a client can send SEVERAL X-Forwarded-For header
+        # lines; headers.get() reads only the first line, so rotating fakes
+        # in repeated lines must not restore the bypass. All lines are
+        # joined and the LAST entry of the joined list (Caddy's appended
+        # real IP, "203.0.113.9") must key the bucket.
+        settings = make_settings(tmp_path, auth_rpm=3, rate_limit_window_sec=60)
+        build(settings)
+        client = TestClient(
+            create_app(settings, sessionmaker(bind=create_engine_factory(settings)))
+        )
+        statuses = []
+        for i in range(5):
+            r = client.get(
+                "/auth/callback",
+                headers=[
+                    ("X-Forwarded-For", f"10.0.0.{i}"),
+                    ("X-Forwarded-For", "203.0.113.9"),
+                ],
+                follow_redirects=False,
+            )
+            statuses.append(r.status_code)
+        assert statuses[:3].count(302) == 3  # within limit: normal responses
+        assert statuses[3] == 429 and statuses[4] == 429
 
     def test_rate_limit_disabled(self, tmp_path):
         settings = make_settings(tmp_path, rate_limit_enabled=False, auth_rpm=1)
@@ -180,10 +185,10 @@ class TestRateLimit:
             create_app(settings, sessionmaker(bind=create_engine_factory(settings)))
         )
         statuses = [
-            client.post("/auth/login", json={"username": f"u{i}", "password": "x"}).status_code
+            client.get("/auth/callback", follow_redirects=False).status_code
             for i in range(4)
         ]
-        assert all(s == 401 for s in statuses)
+        assert all(s == 302 for s in statuses)
 
 
 class TestRequestID:

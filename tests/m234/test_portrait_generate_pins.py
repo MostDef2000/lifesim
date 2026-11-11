@@ -32,10 +32,11 @@ from fastapi.testclient import TestClient
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../../.."))
 
+from tests.helpers import auth_client, make_user  # noqa: E402
+
 from app.config.config import load_config  # noqa: E402
 
 SETTINGS = None
-PW = "Correct-Horse-9!"
 OIL_PREFIX = "oil painting, "
 
 # Hand-copied literals from backend/app/visual/descriptor.py — pinned as
@@ -73,14 +74,13 @@ def _make_settings(tmp_path):
     })
 
 
-def _register_and_login(client, username):
-    r = client.post("/auth/register", json={
-        "username": username, "email": f"{username}@x.com",
-        "password": PW, "age_confirmed": True,
-    })
-    assert r.status_code == 201, r.text
-    r = client.post("/auth/login", json={"username": username, "password": PW})
-    assert r.status_code == 200, r.text
+def _authed(app, settings, factory, username):
+    """#309: local register/login is gone — create the user directly
+    (make_user) and return a client with the app's own signed session
+    cookie."""
+    with factory() as session:
+        user = make_user(session, username, f"{username}@x.com")
+    return auth_client(app, settings, user)
 
 
 def _build(tmp_path):
@@ -158,7 +158,7 @@ class TestCanonicalReuseBypass:
         the oil-prefixed prompt), while a plain repeat POST takes the
         canonical reuse path (200 reused=True, transport NOT invoked)."""
         settings, engine, factory, app, client = _build(tmp_path)
-        _register_and_login(client, "m234t3")
+        client = _authed(app, settings, factory, "m234t3")
         sink = {}
         _mount(app, sink)
         cid = _create_character(client)
@@ -215,7 +215,7 @@ class TestVanishedReferenceFile:
         stage-1 file endpoint (dynamic oracle, m233 test_m orphan case) and
         the transport is never called."""
         settings, engine, factory, app, client = _build(tmp_path)
-        _register_and_login(client, "m234t4")
+        client = _authed(app, settings, factory, "m234t4")
         ref_id = _upload_reference(client)
         sink = {}
         _mount(app, sink)
@@ -252,7 +252,7 @@ class TestNudeNegativeComposition:
         the composition phrase "bare midriff" (byte pin: the canonical
         negative alone)."""
         settings, engine, factory, app, client = _build(tmp_path)
-        _register_and_login(client, "m234nudeneg")
+        client = _authed(app, settings, factory, "m234nudeneg")
         sink = {}
         _mount(app, sink)
         cid = _create_character(client)
@@ -283,7 +283,7 @@ class TestNudeNegativeComposition:
         negative stays byte-identical to compose_negative(): canonical +
         "bare midriff, exposed stomach, navel"."""
         settings, engine, factory, app, client = _build(tmp_path)
-        _register_and_login(client, "m234clothedneg")
+        client = _authed(app, settings, factory, "m234clothedneg")
         sink = {}
         _mount(app, sink)
         cid = _create_character(client)

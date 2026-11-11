@@ -9,14 +9,13 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../../.."))
 
 from fastapi.testclient import TestClient  # noqa: E402
 
-from app.api.auth import hash_password  # noqa: E402
 from app.config.config import load_config  # noqa: E402
 from app.db.models import (  # noqa: E402
-    User,
     bootstrap,
     create_engine_factory,
 )
 from app.world.seed_world import seed_world  # noqa: E402
+from tests.helpers import auth_client, make_user  # noqa: E402
 
 SETTINGS = None
 
@@ -42,18 +41,11 @@ def admin_env(tmp_path):
     with sessionmaker(bind=engine)() as session:
         bootstrap(engine, settings, seed=42)
         seed_world(session, settings, settings.world.world_id)
-        session.add(User(
-            username="root", email="root@x.com",
-            password_hash=hash_password("password123"),
-            role="admin", age_confirmed=True, created_at=0,
-        ))
-        session.commit()
+        user = make_user(session, "root", "root@x.com", role="admin")
     factory = sessionmaker(bind=engine, expire_on_commit=False)
     from app.api.app import create_app
 
-    client = TestClient(create_app(settings, factory))
-    client.post("/auth/login", json={"username": "root", "password": "password123"})
-    return client
+    return auth_client(create_app(settings, factory), settings, user)
 
 
 class TestAdminScreen:
@@ -96,10 +88,10 @@ class TestExternalFormData:
         from app.world.seed_external import seed_external_world
 
         client = TestClient(create_app(settings, sessionmaker(bind=engine)))
-        client.post("/auth/register", json={
-            "username": "trav", "email": "t@x.com",
-            "password": "password123", "age_confirmed": True,
-        })
+        with sessionmaker(bind=engine)() as session:
+            # #309: player row created directly (OIDC callback equivalent);
+            # must exist before seeding contacts
+            user = make_user(session, "trav", "t@x.com")
         with sessionmaker(bind=engine)() as session:
             # players must exist before seeding contacts
             import random as _r
@@ -112,7 +104,7 @@ class TestExternalFormData:
             )
             seed_external_world(session, settings, settings.world.world_id, _r.Random(7))
             session.commit()
-        client.post("/auth/login", json={"username": "trav", "password": "password123"})
+        client = auth_client(client.app, settings, user)
         catalog = client.get("/external").json()
         assert len(catalog) >= 3
         svc = catalog[0]["services"][0]
@@ -137,37 +129,33 @@ class TestRateLimitScope:
         with sessionmaker(bind=engine)() as session:
             bootstrap(engine, settings, seed=42)
             seed_world(session, settings, settings.world.world_id)
-            session.add(User(
-                username="rluser", email="rl@x.com",
-                password_hash=hash_password("password123"),
-                role="player", age_confirmed=True, created_at=0,
-            ))
-            session.commit()
+            user = make_user(session, "rluser", "rl@x.com", role="player")
         from app.api.app import create_app
 
-        return TestClient(create_app(settings, sessionmaker(
-            bind=engine, expire_on_commit=False)))
+        return (TestClient(create_app(settings, sessionmaker(
+            bind=engine, expire_on_commit=False))), settings, user)
 
     def test_login_strict_bucket(self, tmp_path):
-        client = self._env(tmp_path, auth_rpm=2)
-        # two failed logins fill the strict bucket (401), third is 429
-        assert client.post("/auth/login", json={
-            "username": "rluser", "password": "wrong"}).status_code == 401
-        assert client.post("/auth/login", json={
-            "username": "rluser", "password": "wrong"}).status_code == 401
-        assert client.post("/auth/login", json={
-            "username": "rluser", "password": "wrong"}).status_code == 429
+        client, _, _ = self._env(tmp_path, auth_rpm=2)
+        # #309: strict bucket now guards GET /auth/login + GET /auth/callback;
+        # /auth/callback with no params is a network-free 302 fail-redirect.
+        # two requests fill the strict bucket (302), third is 429
+        assert client.get("/auth/callback", follow_redirects=False).status_code == 302
+        assert client.get("/auth/callback", follow_redirects=False).status_code == 302
+        assert client.get("/auth/callback", follow_redirects=False).status_code == 429
 
     def test_auth_me_not_in_strict_bucket(self, tmp_path):
-        client = self._env(tmp_path, auth_rpm=1)
+        client, _, _ = self._env(tmp_path, auth_rpm=1)
         # /auth/me without cookie -> 401, and NOT rate-limited by auth bucket
         for _ in range(5):
             assert client.get("/auth/me").status_code == 401
 
     def test_legit_login_then_me(self, tmp_path):
-        client = self._env(tmp_path, auth_rpm=1)
-        r = client.post("/auth/login", json={
-            "username": "rluser", "password": "password123"})
-        assert r.status_code == 200
+        client, settings, user = self._env(tmp_path, auth_rpm=1)
+        # #309: legit login = GET /auth/login (302 to provider, no network
+        # needed); it consumes the strict bucket (auth_rpm=1)
+        r = client.get("/auth/login", follow_redirects=False)
+        assert r.status_code == 302
         # /auth/me right after login must not trip the strict bucket
+        client = auth_client(client.app, settings, user)
         assert client.get("/auth/me").status_code == 200

@@ -205,10 +205,12 @@ def test_welcome_block_adds_no_pinned_literals():
 
 
 def test_m9_landing_literals_untouched():
-    # The m9 landing pins are substring checks (tests/m9/test_chunk_a.py:72-75,
-    # 85); the welcome card adds occurrences but must not remove the originals.
+    # The m9 landing pins are substring checks (tests/m9/test_chunk_a.py:79-100);
+    # the welcome card adds occurrences but must not remove the originals.
+    # #309: the register-form CTA «Начать жизнь на Рейнеке» is gone — the
+    # landing CTA is now «Войти» (→ GET /auth/login), pinned in m9.
     js = _js()
     assert "Остров живёт, даже когда тебя нет." in js
-    assert "Начать жизнь на Рейнеке" in js
+    assert "Войти" in js
     assert "Кошка-консьержка" in js
     assert '"/static/static/landing/concierge-cat-hero.webp"' in js

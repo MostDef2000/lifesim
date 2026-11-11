@@ -74,13 +74,12 @@ def test_free_request_request_state_reset_pins():
     # per-session reset, exactly once.
     assert js.count("let desireInterpSeq = 0;") == 1
     assert js.count("function desireResetDraft()") == 1
-    # Three auth-transition call sites: login, logout, account deletion.
-    assert js.count("desireResetDraft();") == 3
+    # Two auth-transition call sites: logout, account deletion. (#309: the
+    # login site is gone with local auth — OIDC SSO has no in-app login
+    # form to reset from.)
+    assert js.count("desireResetDraft();") == 2
     # Adjacency (W118-RV1 F1 precedent): each call sits immediately after
     # the #65 appearanceResetDraft() call at that site.
-    assert js.count("appearanceResetDraft();  // #65: same isolation for "
-                    "the outfit prompt draft\n"
-                    "      desireResetDraft();") == 1  # login
     assert js.count("appearanceResetDraft();  // #65: logout clears the "
                     "outfit prompt draft\n"
                     "          desireResetDraft();") == 1  # logout

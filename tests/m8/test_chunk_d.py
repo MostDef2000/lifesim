@@ -10,14 +10,13 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../../.."))
 from fastapi.testclient import TestClient  # noqa: E402
 
 from app.api.app import create_app  # noqa: E402
-from app.api.auth import hash_password  # noqa: E402
 from app.config.config import load_config  # noqa: E402
 from app.db.models import (  # noqa: E402
-    User,
     bootstrap,
     create_engine_factory,
 )
 from app.world.seed_world import seed_world  # noqa: E402
+from tests.helpers import auth_client, make_user  # noqa: E402
 
 SETTINGS = None
 
@@ -56,15 +55,9 @@ class TestAE1AdminE2E:
         factory = sessionmaker(bind=engine, expire_on_commit=False)
 
         with factory() as session:
-            session.add(User(
-                username="root", email="root@x.com",
-                password_hash=hash_password("password123"),
-                role="admin", age_confirmed=True, created_at=0,
-            ))
-            session.commit()
+            user = make_user(session, "root", "root@x.com", role="admin")
 
-        client = TestClient(create_app(settings, factory))
-        client.post("/auth/login", json={"username": "root", "password": "password123"})
+        client = auth_client(create_app(settings, factory), settings, user)
 
         # overview works
         r = client.get("/admin/overview")
@@ -118,20 +111,9 @@ class TestAE2Keystone:
         assert all(r["ok"] for r in results), [r for r in results if not r["ok"]]
 
 
-class TestAE3Registration:
-    """AE3'''''': registration controls (§85)."""
-
-    def test_disabled_and_max_players(self, tmp_path):
-        settings = make_settings(tmp_path, registration_enabled=False, max_players=2)
-        build(settings)
-        client = TestClient(
-            create_app(settings, sessionmaker(bind=create_engine_factory(settings)))
-        )
-        r = client.post("/auth/register", json={
-            "username": "nope", "email": "n@x.com",
-            "password": "password123", "age_confirmed": True,
-        })
-        assert r.status_code == 403
+# #309: TestAE3Registration deleted — registration_enabled no longer exists
+# (local /auth/register is gone; the max_players cap now lives in the OIDC
+# callback, oidc.py "registration_closed").
 
 
 class TestAE4Backup:
@@ -185,31 +167,28 @@ class TestAE5Negatives:
         settings = make_settings(tmp_path)
         engine = build(settings)
         factory = sessionmaker(bind=engine, expire_on_commit=False)
+        users = {}
         with factory() as session:
             for username, role in [("adm", "admin"), ("mod", "moderator"),
                                    ("usr", "user")]:
-                session.add(User(
-                    username=username, email=f"{username}@x.com",
-                    password_hash=hash_password("password123"),
-                    role=role, age_confirmed=True, created_at=0,
-                ))
-            session.commit()
+                users[username] = make_user(session, username, f"{username}@x.com",
+                                            role=role)
 
-        client = TestClient(create_app(settings, factory))
-        client.post("/auth/login", json={"username": "usr", "password": "password123"})
+        app = create_app(settings, factory)
         # user role: everything admin → 403
+        client = auth_client(app, settings, users["usr"])
         assert client.get("/admin/overview").status_code == 403
         assert client.post("/admin/world/pause").status_code == 403
         assert client.post("/admin/users/1/disable").status_code == 403
         assert client.get("/admin/audit").status_code == 403
 
         # moderator reads but cannot act
-        client.post("/auth/login", json={"username": "mod", "password": "password123"})
+        client = auth_client(app, settings, users["mod"])
         assert client.get("/admin/overview").status_code == 200
         assert client.post("/admin/world/pause").status_code == 403
 
         # admin: ok
-        client.post("/auth/login", json={"username": "adm", "password": "password123"})
+        client = auth_client(app, settings, users["adm"])
         assert client.get("/admin/overview").status_code == 200
 
 

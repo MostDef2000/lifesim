@@ -149,11 +149,12 @@ def test_creator_section_guide_pins():
     assert "CREATOR_DRAFT" not in guide
     assert "rebuildDraft" not in guide
     # Shared hash landmines unchanged (m128/m162): the guide adds NO hash
-    # assignment site anywhere.
+    # assignment site anywhere. #309: the login-success gotoWorld site is
+    # gone with local auth (count was 5).
     assert js.count('location.hash = "#/create";') == 1
     assert js.count('location.hash = "#/profile";') == 3
     assert js.count('location.hash = "#/world";') == 4
-    assert js.count("gotoWorld();") == 5
+    assert js.count("gotoWorld();") == 4
     assert view.count("route();") == 0
 
 

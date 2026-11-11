@@ -60,9 +60,11 @@ def test_feed_dedup_pins():
     assert (
         js.count("  const ws = new WebSocket(`${proto}://${location.host}/ws`);") == 1
     )
-    # #132 console-quiet flags: set/clear counts unchanged.
+    # #132 console-quiet flags: set/clear counts unchanged. (#309: the
+    # login/register-success authProbed reset site is gone with local auth —
+    # the flag is cleared at logout only, pinned in tests/m132.)
     assert js.count("S.authProbed = true") == 1
-    assert js.count("S.authProbed = false") == 2
+    assert js.count("S.authProbed = false") == 1
     assert js.count("S.visualDisabled = true") == 1
     assert js.count("S.visualDisabled = false") == 1
     # S.feed is declared exactly once in the S init line.

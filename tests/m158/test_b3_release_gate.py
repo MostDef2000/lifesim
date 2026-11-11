@@ -53,7 +53,7 @@ from sqlalchemy.orm import sessionmaker
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../../.."))
 
-from fastapi.testclient import TestClient  # noqa: E402
+from tests.helpers import auth_client, make_user  # noqa: E402
 
 from app.actions.lifecycle import progress_tick  # noqa: E402
 from app.api.app import create_app  # noqa: E402
@@ -74,7 +74,6 @@ from app.world.social_seed import seed_social  # noqa: E402
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "../.."))
 APP_JS = os.path.join(ROOT, "backend/app/web/app.js")
 
-PW = "Correct-Horse-9!"
 SETTINGS = None
 
 
@@ -108,14 +107,10 @@ def build_world(settings, seed=42):
     return engine
 
 
-def _register_and_login(client, username):
-    r = client.post("/auth/register", json={
-        "username": username, "email": f"{username}@x.com",
-        "password": PW, "age_confirmed": True,
-    })
-    assert r.status_code == 201, r.text
-    r = client.post("/auth/login", json={"username": username, "password": PW})
-    assert r.status_code == 200, r.text
+def _authed(app, settings, factory, username):
+    with factory() as s:
+        user = make_user(s, username, f"{username}@x.com")
+    return auth_client(app, settings, user)
 
 
 def _travel_to_npc(client, factory, settings, cid):
@@ -166,8 +161,7 @@ def world(tmp_path):
     engine = build_world(settings)
     factory = sessionmaker(bind=engine, expire_on_commit=False)
     app = create_app(settings, factory)
-    client = TestClient(app)
-    _register_and_login(client, "b3player")
+    client = _authed(app, settings, factory, "b3player")
     r = client.post("/characters", json={"name": "Борис Орлов", "sex": "M", "age": 30})
     assert r.status_code == 201, r.text
     cid = r.json()["id"]

@@ -7,8 +7,8 @@ a logged-out visitor loads the app:
   session the probe 401s and api()'s 401 branch re-routes, which used to spam
   "unauthorized" errors on every navigation. After the fix the failed probe is
   negatively cached in S.authProbed, and the flag is cleared exactly at the
-  two sites where the auth state genuinely changes: successful login/register
-  (viewAuth onsubmit) and logout.
+  one auth-state transition that remains: logout. (#309: the
+  login/register-success reset site is gone with local auth.)
 - Change (b): portraitBlock() negatively caches a visual-disabled backend
   (HTTP 503 only) in S.visualDisabled so every re-render stops re-firing the
   doomed /visual/characters/:id/portrait request. 404 stays uncached (a legit
@@ -44,9 +44,10 @@ def test_console_quiet_pins():
     # time per session; every later route() call short-circuits).
     assert js.count("!S.user && !S.authProbed") == 1
     # The flag is set exactly once (the failed probe) and cleared at exactly
-    # the two auth-state transitions (login/register success + logout).
+    # the one auth-state transition that remains: logout. (#309: the
+    # login/register-success reset site is gone with local auth.)
     assert js.count("S.authProbed = true") == 1
-    assert js.count("S.authProbed = false") == 2
+    assert js.count("S.authProbed = false") == 1
 
     # ---------- change (b): visual-disabled negative cache (503 only) ----------
     # The negative cache gates the canonical-portrait fetch, caches 503 only,

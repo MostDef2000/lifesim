@@ -185,9 +185,12 @@ def test_run_build_refuses_missing_secret_at_boot(tmp_path, monkeypatch):
 
 
 def test_run_build_proceeds_when_secret_set(tmp_path, monkeypatch):
-    """Positive control: same config + secret env → the app builds."""
+    """Positive control: same config + secret env → the app builds.
+    #309: the OIDC client secret is now a boot requirement too — set a
+    dummy (test fixture, not a real secret)."""
     cfg = _production_style_config(tmp_path)
     run_mod = _boot_env(monkeypatch, tmp_path, cfg)
     monkeypatch.setenv("VL1_SECRET", "unit-test-not-a-real-secret")
+    monkeypatch.setenv("LIFESIM_OIDC_CLIENT_SECRET", "unit-test-not-a-real-secret")
     app = run_mod._build()
     assert app is not None

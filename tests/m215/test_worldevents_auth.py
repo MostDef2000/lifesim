@@ -23,13 +23,12 @@ from fastapi.testclient import TestClient
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../../.."))
 
-from app.api.auth import hash_password  # noqa: E402
+from tests.helpers import auth_client, make_user  # noqa: E402
+
 from app.config.config import load_config  # noqa: E402
-from app.db.models import User, bootstrap, create_engine_factory  # noqa: E402
+from app.db.models import bootstrap, create_engine_factory  # noqa: E402
 
 SETTINGS = None
-
-PW = "Correct-Horse-9!"
 
 # the wire contract of one /world/events row (app.py get_world_events)
 ROW_KEYS = {"id", "event_type", "actor_id", "location_id",
@@ -63,23 +62,17 @@ class TestWorldEventsAuthGate:
                 session, settings, random.Random(42),
                 settings.world.world_id, 20,
             )
-            session.add(User(
-                username="w215owner", email="w215a@x.com",
-                password_hash=hash_password(PW),
-                role="player", age_confirmed=True, created_at=0,
-            ))
-            session.commit()
-            user_a = session.query(User).filter_by(username="w215owner").one()
+            user_a = make_user(session, "w215owner", "w215a@x.com")
             create_player_character(
                 session, settings, settings.world.world_id,
                 user_a, "Валда Тест", "F", 30, 0,
             )
             session.commit()
+            # last commit expired user_a's attrs (expire_on_commit) — refresh
+            # before the session closes or auth_client hits a detached row.
+            session.refresh(user_a)
         app = create_app(settings, sessionmaker(bind=engine))
-        client = TestClient(app)
-        r = client.post("/auth/login", json={
-            "username": "w215owner", "password": PW})
-        assert r.status_code == 200, r.text
+        client = auth_client(app, settings, user_a)
         return client
 
     @pytest.fixture()

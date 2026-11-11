@@ -32,9 +32,9 @@ import os
 import random
 import sys
 
-from fastapi.testclient import TestClient
-
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../../.."))
+
+from tests.helpers import auth_client, make_user  # noqa: E402
 
 from app.config.config import load_config  # noqa: E402
 from app.db.models import (  # noqa: E402
@@ -47,7 +47,6 @@ from app.db.models import (  # noqa: E402
 from app.world.seed_world import seed_world  # noqa: E402
 
 SETTINGS = None
-PW = "Correct-Horse-9!"
 
 
 def setup_module(module):
@@ -69,14 +68,13 @@ def _make_settings(tmp_path):
     })
 
 
-def _register_and_login(client, username):
-    r = client.post("/auth/register", json={
-        "username": username, "email": f"{username}@x.com",
-        "password": PW, "age_confirmed": True,
-    })
-    assert r.status_code == 201, r.text
-    r = client.post("/auth/login", json={"username": username, "password": PW})
-    assert r.status_code == 200, r.text
+def _authed(app, settings, factory, username):
+    """#309: local register/login is gone — create the user directly
+    (make_user) and return a client with the app's own signed session
+    cookie."""
+    with factory() as session:
+        user = make_user(session, username, f"{username}@x.com")
+    return auth_client(app, settings, user)
 
 
 def _create_character(client, name):
@@ -103,8 +101,7 @@ def _build(tmp_path):
         session.commit()
     factory = sessionmaker(bind=engine, expire_on_commit=False)
     app = create_app(settings, factory)
-    client = TestClient(app)
-    _register_and_login(client, "m230player")
+    client = _authed(app, settings, factory, "m230player")
     return settings, engine, factory, app, client
 
 

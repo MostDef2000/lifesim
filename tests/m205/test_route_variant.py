@@ -34,8 +34,6 @@ from sqlalchemy.orm import sessionmaker
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../../.."))
 
-from fastapi.testclient import TestClient  # noqa: E402
-
 from app.api.app import create_app  # noqa: E402
 from app.api.visual_routes import _deterministic_seed  # noqa: E402
 from app.characters.generator import generate_population  # noqa: E402
@@ -43,6 +41,7 @@ from app.config.config import load_config  # noqa: E402
 from app.db.models import bootstrap, create_engine_factory  # noqa: E402
 from app.visual.descriptor import _AUTO_OUTFIT_POOL, build_prompt  # noqa: E402
 from app.world.seed_world import seed_world  # noqa: E402
+from tests.helpers import auth_client, make_user  # noqa: E402
 
 SETTINGS = None
 
@@ -83,16 +82,10 @@ def world(tmp_path):
         session.commit()
 
     factory = sessionmaker(bind=engine, expire_on_commit=False)
-    client = TestClient(create_app(settings, factory))
-    r = client.post("/auth/register", json={
-        "username": "w205eartfan",
-        "email": "w205e@x.com",
-        "password": "password123",
-        "age_confirmed": True,
-    })
-    assert r.status_code == 201, r.text
-    client.post("/auth/login", json={
-        "username": "w205eartfan", "password": "password123"})
+    app = create_app(settings, factory)
+    with factory() as s:
+        user = make_user(s, "w205eartfan", "w205e@x.com")
+    client = auth_client(app, settings, user)
     r = client.post("/characters", json={"name": "Pablo", "sex": "M", "age": 25})
     assert r.status_code == 201, r.text
     cid = r.json()["id"]

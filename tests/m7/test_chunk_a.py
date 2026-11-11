@@ -50,17 +50,10 @@ def build(tmp_path, population=20):
 
 
 def _mk_user(session, username="pilot"):
-    from app.api.auth import hash_password
-    from app.db.models import User
+    # #309: local auth gone — create the user row directly (no password).
+    from tests.helpers import make_user
 
-    user = User(
-        username=username, email=f"{username}@x.com",
-        password_hash=hash_password("password123"),
-        role="user", age_confirmed=True, created_at=0,
-    )
-    session.add(user)
-    session.flush()
-    return user
+    return make_user(session, username, f"{username}@x.com")
 
 
 @pytest.fixture()

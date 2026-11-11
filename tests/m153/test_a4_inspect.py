@@ -28,7 +28,8 @@ from sqlalchemy.orm import sessionmaker
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../../.."))
 
-from fastapi.testclient import TestClient  # noqa: E402
+
+from tests.helpers import auth_client, make_user  # noqa: E402
 
 from app.api.app import create_app  # noqa: E402
 from app.config.config import load_config  # noqa: E402
@@ -84,16 +85,15 @@ def build_world(settings, seed=42):
 
 
 def make_player(settings, engine, username="inspector86"):
-    """App + client + registered player with a character that has `looks`."""
+    """App + client + player with a character that has `looks`.
+    #309: local register/login is gone — the user row is created directly
+    (make_user) and the client carries the app's own signed session
+    cookie (auth_client)."""
     factory = sessionmaker(bind=engine, expire_on_commit=False)
     app = create_app(settings, factory)
-    client = TestClient(app)
-    r = client.post("/auth/register", json={
-        "username": username, "email": f"{username[0]}@x.com",
-        "password": "password123", "age_confirmed": True,
-    })
-    assert r.status_code == 201, r.text
-    client.post("/auth/login", json={"username": username, "password": "password123"})
+    with factory() as session:
+        user = make_user(session, username, f"{username[0]}@x.com")
+    client = auth_client(app, settings, user)
     r = client.post("/characters", json={
         "name": "Inspect Tester", "sex": "M", "age": 34, "looks": LOOKS,
     })

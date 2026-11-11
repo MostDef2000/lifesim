@@ -14,6 +14,7 @@ from app.api.app import create_app  # noqa: E402
 from app.config.config import load_config  # noqa: E402
 from app.db.models import bootstrap, create_engine_factory  # noqa: E402
 from app.world.seed_world import seed_world  # noqa: E402
+from tests.helpers import auth_client, make_user  # noqa: E402
 
 SETTINGS = None
 
@@ -45,15 +46,11 @@ def world(tmp_path):
 
     factory = sessionmaker(bind=engine, expire_on_commit=False)
     app = create_app(settings, factory)
-    client = TestClient(app)
-    r = client.post("/auth/register", json={
-        "username": "traveler",
-        "email": "t@x.com",
-        "password": "password123",
-        "age_confirmed": True,
-    })
-    assert r.status_code == 201, r.text
-    client.post("/auth/login", json={"username": "traveler", "password": "password123"})
+    # #309: local register/login gone — create the user directly and sign
+    # the app's own session cookie.
+    with factory() as session:
+        traveler = make_user(session, "traveler", "t@x.com")
+    client = auth_client(app, settings, traveler)
     r = client.post("/characters", json={"name": "Ferryman", "sex": "M", "age": 33})
     assert r.status_code == 201, r.text
     cid = r.json()["id"]
@@ -94,14 +91,9 @@ class TestExternalAPI:
         r = client.get(f"/characters/{cid}/contacts")
         assert r.status_code == 200
         # another user sees 403
-        other = TestClient(create_app(settings, factory))
-        other.post("/auth/register", json={
-            "username": "peeker",
-            "email": "p@x.com",
-            "password": "password123",
-            "age_confirmed": True,
-        })
-        other.post("/auth/login", json={"username": "peeker", "password": "password123"})
+        with factory() as session:
+            peeker = make_user(session, "peeker", "p@x.com")
+        other = auth_client(create_app(settings, factory), settings, peeker)
         r2 = other.get(f"/characters/{cid}/contacts")
         assert r2.status_code == 403
 

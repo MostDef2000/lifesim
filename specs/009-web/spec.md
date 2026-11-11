@@ -9,6 +9,7 @@
 - **Included**:
   - Статика: `backend/app/web/` (index.html, app.js, style.css); FastAPI отдаёт `/` → index.html + `/static/*`. Route `/` требует auth? Нет: `/` — лендинг-редирект по сессии (нет cookie → форма входа; есть → /world-вид).
   - Экраны (вкладки одного SPA):
+    > SUPERSEDED (2026-11-10, OIDC SSO): локальная регистрация/пароли удалены — см. issue #309
     - **login/register** (§77): формы → POST /auth/register|login; age_confirmed чекбокс (18+, П4); ошибка инлайн.
     - **world** (§78 MVP): шапка (game day/time, пауза из /world), панель персонажа (needs-бары из /characters/{id}, живость, деньги), задачи (planned/active из /characters/{id}/tasks… — фактический эндпоинт: /actions активные? — используем существующие GET /characters/{id} + /characters/{id}/inventory + events), карта (список локаций из /locations, текущая подсвечена, MOVE кликом), лента событий (WS §79, fallback: GET /world/events?since=).
     - **chat** (§77): выбор NPC (список из /characters NPC на той же локации? — MVP: выбор из /characters?per=… фильтр id like npc_), POST /dialogue/start, сообщения, suggested_responses кликабельны.
@@ -22,11 +23,13 @@
 - **Protected boundaries**:
   - П1: клиент ничего не считает сам — только вызывает существующий API; никакого дублирования бизнес-логики.
   - П2: статика не влияет на headless (tests/m1-m4); новые роуты — только раздача файлов.
+  > SUPERSEDED (2026-11-10, OIDC SSO): локальная регистрация/пароли удалены — см. issue #309
   - П4: register-форма требует age_confirmed (сервер уже валидирует).
 
 ## Requirements
 
 - **R1: Раздача статики**. `GET /` → index.html (200); `/static/app.js`, `/static/style.css` → 200; отсутствующие файлы — 404. Не ломает существующие API-роуты (порядок регистрации: статика в конце).
+> SUPERSEDED (2026-11-10, OIDC SSO): локальная регистрация/пароли удалены — см. issue #309
 - **R2: Auth-флоу**. register (18+ чекбокс обязателен) → auto-login (существующий эндпоинт возвращает cookie) → переход к world-виду. 401 из любого API-вызова → показ login-формы.
 - **R3: Мир на экране**. После login: шапка с day/мин (из GET /world), needs-бары (hunger/thirst/energy/social — 0-100), деньги, список задач, локации списком с подсветкой текущей, клик по локации → POST /actions MOVE (или needs_move-подсказка от 422).
 - **R4: Действия**. Кнопки базовых действий; ответ 201 → тост «задача принята»; 422/409 → текст detail.

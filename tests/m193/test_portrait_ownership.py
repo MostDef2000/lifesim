@@ -26,17 +26,16 @@ import random
 import sys
 
 import pytest
-from fastapi.testclient import TestClient
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../../.."))
+
+from tests.helpers import auth_client, make_user  # noqa: E402
 
 from app.config.config import load_config  # noqa: E402
 from app.db.models import bootstrap, create_engine_factory  # noqa: E402
 from app.world.seed_world import seed_world  # noqa: E402
 
 SETTINGS = None
-
-PW = "Correct-Horse-9!"
 
 
 def setup_module(module):
@@ -58,14 +57,10 @@ def _make_settings(tmp_path):
     })
 
 
-def _register_and_login(client, username):
-    r = client.post("/auth/register", json={
-        "username": username, "email": f"{username}@x.com",
-        "password": PW, "age_confirmed": True,
-    })
-    assert r.status_code == 201, r.text
-    r = client.post("/auth/login", json={"username": username, "password": PW})
-    assert r.status_code == 200, r.text
+def _authed(app, settings, factory, username):
+    with factory() as s:
+        user = make_user(s, username, f"{username}@x.com")
+    return auth_client(app, settings, user)
 
 
 def _create_character(client, name):
@@ -95,12 +90,10 @@ class TestPortraitOwnership:
 
         app = create_app(settings, factory)
 
-        owner = TestClient(app)
-        _register_and_login(owner, "w193owner")
+        owner = _authed(app, settings, factory, "w193owner")
         owner_cid = _create_character(owner, "Влада")
 
-        other = TestClient(app)
-        _register_and_login(other, "w193other")
+        other = _authed(app, settings, factory, "w193other")
         other_cid = _create_character(other, "Остап")
 
         return settings, factory, owner, other, owner_cid, other_cid

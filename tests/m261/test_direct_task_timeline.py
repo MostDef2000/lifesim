@@ -34,10 +34,11 @@ import os
 import sys
 
 import pytest
-from fastapi.testclient import TestClient
 from sqlalchemy.orm import sessionmaker
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../../.."))
+
+from tests.helpers import auth_client, make_user, session_cookie  # noqa: E402
 
 from app.actions.lifecycle import enqueue_task, progress_tick  # noqa: E402
 from app.api.app import create_app  # noqa: E402
@@ -78,12 +79,9 @@ def world(tmp_path):
         session.commit()
     factory = sessionmaker(bind=engine, expire_on_commit=False)
     app = create_app(settings, factory)
-    client = TestClient(app)
-    client.post("/auth/register", json={
-        "username": "pilot261", "email": "p261@x.com",
-        "password": "password123", "age_confirmed": True,
-    })
-    client.post("/auth/login", json={"username": "pilot261", "password": "password123"})
+    with factory() as s:
+        user = make_user(s, "pilot261", "p261@x.com")
+    client = auth_client(app, settings, user)
     r = client.post("/characters", json={"name": "Ivan Direct", "sex": "M", "age": 30})
     assert r.status_code == 201, r.text
     cid = r.json()["id"]
@@ -351,12 +349,9 @@ def test_fresh_direct_player_first_task_activates_at_now(world):
     genesis backdating to 0, no deadlock)."""
     settings, client, cid, factory = world
     wid = settings.world.world_id
-    client.post("/auth/logout")
-    client.post("/auth/register", json={
-        "username": "fresh261", "email": "f261@x.com",
-        "password": "password123", "age_confirmed": True,
-    })
-    client.post("/auth/login", json={"username": "fresh261", "password": "password123"})
+    with factory() as s:
+        fresh_user = make_user(s, "fresh261", "f261@x.com")
+    client.cookies.set(settings.api.cookie_name, session_cookie(settings, fresh_user))
     r = client.post("/characters", json={"name": "Fresh Direct", "sex": "M", "age": 28})
     assert r.status_code == 201, r.text
     fresh_cid = r.json()["id"]

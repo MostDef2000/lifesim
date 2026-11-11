@@ -253,12 +253,20 @@ api:
   enabled: true
   host: 127.0.0.1
   port: 8000
-  session_ttl_min: 720
+  session_ttl_min: 30
   cookie_name: vl1_session
+  cookie_secure: true
   ws_interval_s: 1.0
   secret_env: VL1_SECRET
   docs: false
   require_secret: true
+  oidc:
+    issuer: https://auth.mostdef.ru/application/o/lifesim/
+    client_id: lifesim
+    callback_url: https://lf.mostdef.ru/auth/callback
+    required_group: lifesim
+    scopes: [openid, profile, email, groups]
+    client_secret_env: LIFESIM_OIDC_CLIENT_SECRET
 
 visual:
   enabled: true
@@ -295,7 +303,6 @@ external:
         - { service_type: "purchase", item_type: "tool_kit", price: 90, duration_minutes: 25 }
 
 admin:
-  registration_enabled: true
   max_players: 0
   rate_limit_enabled: true
   global_rpm: 600

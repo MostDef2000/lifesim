@@ -4,10 +4,11 @@ import subprocess
 import sys
 
 import pytest
-from fastapi.testclient import TestClient
 from sqlalchemy.orm import sessionmaker
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../../.."))
+
+from tests.helpers import auth_client, make_user
 
 from app.api.app import create_app
 from app.config.config import load_config
@@ -63,14 +64,9 @@ def world(tmp_path):
 
     factory = sessionmaker(bind=engine, expire_on_commit=False)
     app = create_app(settings, factory)
-    client = TestClient(app)
-    client.post("/auth/register", json={
-        "username": "a2user", "email": "a2@x.com",
-        "password": "password123", "age_confirmed": True,
-    })
-    client.post("/auth/login", json={
-        "username": "a2user", "password": "password123",
-    })
+    with factory() as s:
+        user = make_user(s, "a2user", "a2@x.com")
+    client = auth_client(app, settings, user)
     created = client.post("/characters", json={
         "name": "A2 Hero", "sex": "F", "age": 25,
     })

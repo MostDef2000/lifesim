@@ -13,6 +13,7 @@ from fastapi.testclient import TestClient  # noqa: E402
 from app.config.config import load_config  # noqa: E402
 from app.db.models import bootstrap, create_engine_factory  # noqa: E402
 from app.world.seed_world import seed_world  # noqa: E402
+from tests.helpers import auth_client, make_user  # noqa: E402
 
 SETTINGS = None
 
@@ -46,13 +47,11 @@ def env(tmp_path):
     factory = sessionmaker(bind=engine, expire_on_commit=False)
     from app.api.app import create_app
 
-    client = TestClient(create_app(settings, factory))
-    # register + login + create character (what the SPA auth flow does)
-    client.post("/auth/register", json={
-        "username": "player", "email": "p@x.com",
-        "password": "password123", "age_confirmed": True,
-    })
-    client.post("/auth/login", json={"username": "player", "password": "password123"})
+    # #309: local register/login gone — create the user row directly and
+    # sign the app's own session cookie (what the OIDC callback does).
+    with factory() as session:
+        user = make_user(session, "player", "p@x.com")
+    client = auth_client(create_app(settings, factory), settings, user)
     me = client.get("/auth/me").json()
     r = client.post("/characters", json={"name": "Ivy Stone", "sex": "F", "age": 27})
     assert r.status_code == 201, r.text

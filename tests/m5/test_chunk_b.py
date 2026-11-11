@@ -14,6 +14,7 @@ from app.config.config import load_config  # noqa: E402
 from app.db.models import bootstrap, create_engine_factory  # noqa: E402
 from app.simulation.engine import Engine, TickScheduler, WorldClock  # noqa: E402
 from app.world.seed_world import seed_world  # noqa: E402
+from tests.helpers import auth_client, make_user  # noqa: E402
 
 SETTINGS = None
 
@@ -38,12 +39,11 @@ def world(tmp_path):
         session.commit()
     factory = sessionmaker(bind=engine, expire_on_commit=False)
     app = create_app(settings, factory)
-    from fastapi.testclient import TestClient
-    client = TestClient(app)
-    client.post("/auth/register", json={
-        "username": "pilot", "email": "p@x.com", "password": "password123", "age_confirmed": True,
-    })
-    client.post("/auth/login", json={"username": "pilot", "password": "password123"})
+    # #309: no local register/login — create the user row directly and
+    # sign the app's own v2 session cookie.
+    with factory() as session:
+        pilot = make_user(session, "pilot", "p@x.com")
+    client = auth_client(app, settings, pilot)
     r = client.post("/characters", json={"name": "Ivan Petrov", "sex": "M", "age": 30})
     assert r.status_code == 201, r.text
     cid = r.json()["id"]
@@ -93,19 +93,14 @@ def test_control_mode_invalid_rejected(world):
 
 
 def test_control_requires_ownership(world):
-    _, _, client, cid, engine, factory = world
-    # second user registers, cannot control pilot's character
-    client.post("/auth/logout")
-    client.post("/auth/register", json={
-        "username": "intruder",
-        "email": "i@x.com",
-        "password": "password123",
-        "age_confirmed": True,
-    })
-    client.post("/auth/login", json={"username": "intruder", "password": "password123"})
-    r = client.post(f"/characters/{cid}/control", json={"mode": "DIRECT"})
+    settings, app, client, cid, engine, factory = world
+    # second user cannot control pilot's character
+    with factory() as session:
+        intruder = make_user(session, "intruder", "i@x.com")
+    client2 = auth_client(app, settings, intruder)
+    r = client2.post(f"/characters/{cid}/control", json={"mode": "DIRECT"})
     assert r.status_code == 403
-    r = client.get(f"/characters/{cid}/goals")
+    r = client2.get(f"/characters/{cid}/goals")
     assert r.status_code == 403
 
 
@@ -187,17 +182,15 @@ def test_direct_action_runs_and_completes(world):
 
 
 def test_direct_action_get_other_users_task_403(world):
-    _, _, client, cid, *_ = world
+    settings, app, client, cid, engine, factory = world
     client.post(f"/characters/{cid}/control", json={"mode": "DIRECT"})
     r = client.post("/actions", json={"character_id": cid, "action_type": "WORK"})
     assert r.status_code == 201, r.text
     tid = r.json()["task_id"]
-    client.post("/auth/logout")
-    client.post("/auth/register", json={
-        "username": "snoop", "email": "s@x.com", "password": "password123", "age_confirmed": True,
-    })
-    client.post("/auth/login", json={"username": "snoop", "password": "password123"})
-    r = client.get(f"/actions/{tid}")
+    with factory() as session:
+        snoop = make_user(session, "snoop", "s@x.com")
+    client2 = auth_client(app, settings, snoop)
+    r = client2.get(f"/actions/{tid}")
     assert r.status_code == 403
 
 

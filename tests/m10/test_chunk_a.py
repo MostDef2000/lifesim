@@ -152,16 +152,9 @@ class TestColdDecay:
         engine = build(settings)
         factory = sessionmaker(bind=engine, expire_on_commit=False)
         with factory() as session:
-            from app.api.auth import hash_password
-            from app.db.models import User
+            from tests.helpers import make_user
 
-            user = User(
-                username="wtest", email="w@x.com",
-                password_hash=hash_password("password123"),
-                role="player", age_confirmed=True, created_at=0,
-            )
-            session.add(user)
-            session.flush()
+            user = make_user(session, "wtest", "w@x.com", role="player")
             create_player_character(
                 session, settings, settings.world.world_id,
                 user, "Погода Тест", "M", 30, 0,

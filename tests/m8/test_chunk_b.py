@@ -7,10 +7,8 @@ from sqlalchemy.orm import sessionmaker
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../../.."))
 
-from fastapi.testclient import TestClient  # noqa: E402
 
 from app.api.app import create_app  # noqa: E402
-from app.api.auth import hash_password  # noqa: E402
 from app.config.config import load_config  # noqa: E402
 from app.db.models import (  # noqa: E402
     CharacterTask,
@@ -19,6 +17,7 @@ from app.db.models import (  # noqa: E402
     create_engine_factory,
 )
 from app.world.seed_world import seed_world  # noqa: E402
+from tests.helpers import auth_client, make_user  # noqa: E402
 
 SETTINGS = None
 
@@ -52,23 +51,21 @@ def world(tmp_path):
 
         from app.characters.generator import generate_population as gen
         gen(session, settings, random.Random(42), settings.world.world_id, 20)
-        for username, role in [("boss", "admin"), ("helper", "moderator"),
-                               ("pleb", "user")]:
-            session.add(User(
-                username=username, email=f"{username}@x.com",
-                password_hash=hash_password("password123"),
-                role=role, age_confirmed=True, created_at=0,
-            ))
         session.commit()
 
     factory = sessionmaker(bind=engine, expire_on_commit=False)
     app = create_app(settings, factory)
 
+    # #309: local login gone — create the users directly and sign the
+    # app's own session cookie.
+    users = {}
+    with factory() as session:
+        for username, role in [("boss", "admin"), ("helper", "moderator"),
+                               ("pleb", "user")]:
+            users[username] = make_user(session, username, f"{username}@x.com", role=role)
+
     def client_for(username):
-        c = TestClient(create_app(settings, factory))
-        r = c.post("/auth/login", json={"username": username, "password": "password123"})
-        assert r.status_code == 200, r.text
-        return c
+        return auth_client(create_app(settings, factory), settings, users[username])
 
     # player + active task for cancel/teleport tests
     pc = client_for("pleb")
@@ -189,10 +186,10 @@ class TestUserModeration:
         r = boss.post(f"/admin/users/{pleb_id}/disable")
         assert r.status_code == 200
 
-        # banned: existing token rejected, fresh login blocked, live tasks cancelled
+        # banned: existing token rejected, live tasks cancelled
+        # (#309: "fresh login blocked" now lives in the OIDC callback —
+        # user.disabled -> auth_failed; not testable without a provider)
         assert pleb.get("/auth/me").status_code == 403
-        r = pleb.post("/auth/login", json={"username": "pleb", "password": "password123"})
-        assert r.status_code == 403
         with factory() as session:
             assert session.get(CharacterTask, int(task_id)).status == "cancelled"
 

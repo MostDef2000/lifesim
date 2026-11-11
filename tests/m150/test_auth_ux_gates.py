@@ -20,6 +20,8 @@ from sqlalchemy.orm import sessionmaker
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../../.."))
 
+from tests.helpers import auth_client, make_user  # noqa: E402
+
 from app.api.app import create_app  # noqa: E402
 from app.config.config import load_config  # noqa: E402
 from app.db.models import (  # noqa: E402
@@ -46,7 +48,6 @@ APP_PY = os.path.join(ROOT, "backend/app/api/app.py")
 APP_JS = os.path.join(ROOT, "backend/app/web/app.js")
 APP_CSS = os.path.join(ROOT, "backend/app/web/style.css")
 
-PW = "Correct-Horse-9!"
 SETTINGS = None
 
 
@@ -72,16 +73,14 @@ def world(tmp_path):
     return settings, app, TestClient(app), factory
 
 
-def _register_and_login(client, username):
-    r = client.post("/auth/register", json={
-        "username": username, "email": f"{username}@example.com",
-        "password": PW, "age_confirmed": True,
-    })
-    assert r.status_code == 201, r.text
-    uid = r.json()["id"]
-    r = client.post("/auth/login", json={"username": username, "password": PW})
-    assert r.status_code == 200, r.text
-    return uid
+def _authed(settings, app, factory, username):
+    """#309: local register/login is gone — create the user directly
+    (make_user) and return (uid, client with the app's own signed
+    session cookie)."""
+    with factory() as session:
+        user = make_user(session, username, f"{username}@example.com")
+        uid = user.id
+    return uid, auth_client(app, settings, user)
 
 
 def _make_character(client, name):
@@ -98,13 +97,17 @@ def _read(path):
 # ---------- 1. logout: cookie clear + ok ----------
 
 def test_logout_clears_cookie_and_reports_ok(world):
-    settings, app, client, factory = world
-    _register_and_login(client, "logout138")
+    settings, app, _client, factory = world
+    _uid, client = _authed(settings, app, factory, "logout138")
     assert settings.api.cookie_name in client.cookies
     r = client.post("/auth/logout")
     assert r.status_code == 200
     assert r.json() == {"ok": True}
     assert "max-age=0" in r.headers["set-cookie"].lower()
+    # Logout is stateless (cookie clear only): the directly-set jar entry
+    # survives delete_cookie (attribute mismatch) — clear it explicitly
+    # before the 401 assertion (the 401 itself is the app behavior).
+    client.cookies.delete(settings.api.cookie_name)
     r = client.get("/auth/me")
     assert r.status_code == 401
 
@@ -131,16 +134,14 @@ def test_delete_account_requires_auth(world):
 # ---------- 4. delete account: confirm mismatch ----------
 
 def test_delete_account_wrong_confirm_is_409(world):
-    settings, app, client, factory = world
-    uid = _register_and_login(client, "carl138")
+    settings, app, _client, factory = world
+    uid, client = _authed(settings, app, factory, "carl138")
     r = client.post("/auth/account/delete", json={"confirm": "carl1"})
     assert r.status_code == 409
     assert r.json()["detail"] == "confirm does not match username"
-    # untouched: still authenticated, still able to log in
+    # untouched: still authenticated (#309: the "still able to log in"
+    # re-login probe is gone with local auth)
     assert client.get("/auth/me").status_code == 200
-    client.cookies.pop(settings.api.cookie_name)
-    r = client.post("/auth/login", json={"username": "carl138", "password": PW})
-    assert r.status_code == 200
     with factory() as session:
         assert session.get(User, uid) is not None
 
@@ -152,8 +153,8 @@ def test_delete_account_cascades_user_and_owned_rows(world):
     Relationship pair, DialogueSession + its DialogueMessages, and the User
     row itself. (Player characters also carry an Account row — owner_id is a
     plain string, NOT an FK, so the ledger row is preserved by design.)"""
-    settings, app, client, factory = world
-    uid = _register_and_login(client, "june138")
+    settings, app, _client, factory = world
+    uid, client = _authed(settings, app, factory, "june138")
     cid = _make_character(client, "June Test")
     wid = settings.world.world_id
     with factory() as session:
@@ -185,9 +186,12 @@ def test_delete_account_cascades_user_and_owned_rows(world):
     assert r.status_code == 200, r.text
     assert r.json() == {"ok": True}
     assert "max-age=0" in r.headers["set-cookie"].lower()
+    # The delete response clears the cookie; the directly-set jar entry
+    # survives delete_cookie (attribute mismatch) — clear it explicitly
+    # before the 401 assertion. (#309: the "re-login → 401" probe is gone
+    # with local auth.)
+    client.cookies.delete(settings.api.cookie_name)
     assert client.get("/auth/me").status_code == 401
-    r = client.post("/auth/login", json={"username": "june138", "password": PW})
-    assert r.status_code == 401
     with factory() as session:
         assert session.get(User, uid) is None
         assert session.get(Character, cid) is None
@@ -207,10 +211,11 @@ def test_delete_account_cascades_user_and_owned_rows(world):
 # ---------- 6. delete account without a character ----------
 
 def test_delete_account_without_character_ok(world):
-    settings, app, client, factory = world
-    uid = _register_and_login(client, "bare138")
+    settings, app, _client, factory = world
+    uid, client = _authed(settings, app, factory, "bare138")
     r = client.post("/auth/account/delete", json={"confirm": "bare138"})
     assert r.status_code == 200, r.text
+    client.cookies.delete(settings.api.cookie_name)
     assert client.get("/auth/me").status_code == 401
     with factory() as session:
         assert session.get(User, uid) is None
@@ -260,9 +265,10 @@ def test_delete_account_removes_visual_asset_files(tmp_path):
         session.commit()
     factory2 = sessionmaker(bind=engine2, expire_on_commit=False)
     app2 = create_app(settings, factory2)
-    client2 = TestClient(app2)
+    with factory2() as session:
+        user = make_user(session, "vis138", "vis138@example.com")
+    client2 = auth_client(app2, settings, user)
 
-    _register_and_login(client2, "vis138")
     cid = _make_character(client2, "Vis Tester")
     store = AssetStore(settings.visual)
     with factory2() as session:
@@ -290,8 +296,8 @@ def test_delete_account_admin_without_character_with_audit_rows(world):
     """Review ses_ee064 Finding 1: a user with users.id-bound rows but NO
     character (admin/moderator who audited actions) must not 500 — the
     AdminAuditLog / user-scoped DialogueSession deletes run unconditionally."""
-    _, _, client, factory = world
-    uid = _register_and_login(client, "mod138")
+    settings, app, _client, factory = world
+    uid, client = _authed(settings, app, factory, "mod138")
     with factory() as s:
         user = s.get(User, uid)
         user.role = "moderator"

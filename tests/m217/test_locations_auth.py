@@ -24,14 +24,13 @@ from fastapi.testclient import TestClient
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../../.."))
 
-from app.api.auth import hash_password  # noqa: E402
+from tests.helpers import auth_client, make_user  # noqa: E402
+
 from app.config.config import load_config  # noqa: E402
-from app.db.models import User, bootstrap, create_engine_factory  # noqa: E402
+from app.db.models import bootstrap, create_engine_factory  # noqa: E402
 
 SETTINGS = None
 FACTORY = None
-
-PW = "Correct-Horse-9!"
 
 # the wire contract of GET /locations/{loc_id} (app.py get_location)
 LOC_KEYS = {"id", "type", "name", "characters_here"}
@@ -66,18 +65,10 @@ class TestLocationsAuthGate:
             )
             # this user deliberately owns NO character: the gate must be
             # authentication, not character ownership (#217, leg d)
-            session.add(User(
-                username="w217owner", email="w217a@x.com",
-                password_hash=hash_password(PW),
-                role="player", age_confirmed=True, created_at=0,
-            ))
-            session.commit()
+            user = make_user(session, "w217owner", "w217a@x.com")
         FACTORY = sessionmaker(bind=engine, expire_on_commit=False)
         app = create_app(settings, FACTORY)
-        client = TestClient(app)
-        r = client.post("/auth/login", json={
-            "username": "w217owner", "password": PW})
-        assert r.status_code == 200, r.text
+        client = auth_client(app, settings, user)
         return client
 
     @pytest.fixture()

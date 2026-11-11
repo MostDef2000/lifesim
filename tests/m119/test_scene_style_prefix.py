@@ -29,14 +29,12 @@ ComfyUI) — fixture approach reused from tests/m234/test_reference_consume_api.
 import os
 import sys
 
-from fastapi.testclient import TestClient
-
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../../.."))
 
 from app.config.config import load_config  # noqa: E402
+from tests.helpers import auth_client, make_user  # noqa: E402
 
 SETTINGS = None
-PW = "Correct-Horse-9!"
 
 LEGACY_STORYBOOK_PHRASE = (
     "semi-realistic digital painting, warm palette, storybook realism"
@@ -64,17 +62,10 @@ def _make_settings(tmp_path):
     })
 
 
-def _register_and_login(client, username):
-    r = client.post("/auth/register", json={
-        "username": username, "email": f"{username}@x.com",
-        "password": PW, "age_confirmed": True,
-    })
-    assert r.status_code == 201, r.text
-    r = client.post("/auth/login", json={"username": username, "password": PW})
-    assert r.status_code == 200, r.text
-
-
-def _build(tmp_path):
+def _build(tmp_path, username):
+    """#309: local register/login is gone — the player user is created
+    directly (make_user) and the client carries the app's own signed
+    session cookie (auth_client)."""
     from sqlalchemy.orm import sessionmaker
 
     from app.api.app import create_app
@@ -89,7 +80,9 @@ def _build(tmp_path):
         session.commit()
     factory = sessionmaker(bind=engine, expire_on_commit=False)
     app = create_app(settings, factory)
-    client = TestClient(app)
+    with factory() as session:
+        user = make_user(session, username, f"{username}@x.com")
+    client = auth_client(app, settings, user)
     return settings, engine, factory, app, client
 
 
@@ -142,8 +135,7 @@ class TestScenePrefixComposition:
         from app.visual.descriptor import build_prompt
         from app.visual.style_presets import STORYBOOK_SCENE
 
-        settings, _engine, _factory, app, client = _build(tmp_path)
-        _register_and_login(client, "m119prefix")
+        settings, _engine, _factory, app, client = _build(tmp_path, "m119prefix")
         sink = {}
         _mount(app, sink)
         cid = _create_character(client)
@@ -160,8 +152,7 @@ class TestScenePrefixComposition:
         TestSceneRouteGuard pin)."""
         from app.visual.descriptor import build_prompt
 
-        settings, _engine, _factory, app, client = _build(tmp_path)
-        _register_and_login(client, "m119raw")
+        settings, _engine, _factory, app, client = _build(tmp_path, "m119raw")
         sink = {}
         _mount(app, sink)
         cid = _create_character(client)
@@ -178,8 +169,7 @@ class TestScenePrefixComposition:
         prepended when the descriptor carries a visual_profile."""
         from app.visual.descriptor import compose_negative
 
-        settings, _engine, _factory, app, client = _build(tmp_path)
-        _register_and_login(client, "m119neg")
+        settings, _engine, _factory, app, client = _build(tmp_path, "m119neg")
         sink = {}
         _mount(app, sink)
         cid = _create_character(client)
@@ -212,8 +202,7 @@ class TestScenePrefixComposition:
             STORYBOOK_SCENE,
         )
 
-        settings, _engine, _factory, app, client = _build(tmp_path)
-        _register_and_login(client, "m119oil")
+        settings, _engine, _factory, app, client = _build(tmp_path, "m119oil")
         sink = {}
         _mount(app, sink)
         cid = _create_character(client)
@@ -247,8 +236,7 @@ class TestScenePrefixContainment:
         bytes directly)."""
         from app.visual.descriptor import build_prompt
 
-        settings, _engine, _factory, app, client = _build(tmp_path)
-        _register_and_login(client, "m119iso")
+        settings, _engine, _factory, app, client = _build(tmp_path, "m119iso")
         sink = {}
         _mount(app, sink)
         cid = _create_character(client)

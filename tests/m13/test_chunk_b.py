@@ -10,7 +10,6 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../../.."))
 
 from fastapi.testclient import TestClient  # noqa: E402
 
-from app.api.auth import hash_password  # noqa: E402
 from app.config.config import load_config  # noqa: E402
 from app.db.models import (  # noqa: E402
     Character,
@@ -21,6 +20,7 @@ from app.db.models import (  # noqa: E402
     create_engine_factory,
 )
 from app.world.seed_world import seed_world  # noqa: E402
+from tests.helpers import auth_client, make_user  # noqa: E402
 
 SETTINGS = None
 
@@ -120,17 +120,12 @@ def env(tmp_path):
     engine = build(settings)
     factory = sessionmaker(bind=engine, expire_on_commit=False)
     with factory() as session:
-        session.add(User(
-            username="pismo", email="p@x.com",
-            password_hash=hash_password("password123"),
-            role="player", age_confirmed=True, created_at=0,
-        ))
-        session.commit()
+        # #309: local register/login gone — create the user directly and
+        # sign the app's own session cookie.
+        pismo = make_user(session, "pismo", "p@x.com")
     from app.api.app import create_app
 
-    client = TestClient(create_app(settings, factory))
-    client.post("/auth/login", json={
-        "username": "pismo", "password": "password123"})
+    client = auth_client(create_app(settings, factory), settings, pismo)
     return settings, factory, client
 
 

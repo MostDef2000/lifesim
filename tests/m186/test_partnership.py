@@ -41,7 +41,7 @@ from sqlalchemy.orm import sessionmaker
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../.."))
 
-from fastapi.testclient import TestClient  # noqa: E402
+from tests.helpers import auth_client, make_user  # noqa: E402
 
 from app.api.app import create_app  # noqa: E402
 from app.config.config import load_config  # noqa: E402
@@ -62,7 +62,6 @@ ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "../.."))
 APP_JS = os.path.join(ROOT, "backend/app/web/app.js")
 APP_CSS = os.path.join(ROOT, "backend/app/web/style.css")
 
-PW = "Correct-Horse-9!"
 SETTINGS = None
 
 
@@ -98,6 +97,12 @@ def build_world(settings, seed=42):
     return engine
 
 
+def _authed(app, settings, factory, username):
+    with factory() as s:
+        user = make_user(s, username, f"{username}@x.com")
+    return auth_client(app, settings, user)
+
+
 @pytest.fixture()
 def world(tmp_path):
     """Seeded world + app/client + a player character + one NPC target."""
@@ -105,12 +110,9 @@ def world(tmp_path):
     engine = build_world(settings)
     factory = sessionmaker(bind=engine, expire_on_commit=False)
     app = create_app(settings, factory)
-    client = TestClient(app)
-    client.post("/auth/register", json={
-        "username": "p182", "email": "p182@x.com",
-        "password": PW, "age_confirmed": True,
-    })
-    client.post("/auth/login", json={"username": "p182", "password": PW})
+    with factory() as s:
+        user = make_user(s, "p182", "p182@x.com")
+    client = auth_client(app, settings, user)
     r = client.post("/characters", json={"name": "Борис Орлов", "sex": "M", "age": 30})
     assert r.status_code == 201, r.text
     cid = r.json()["id"]
@@ -423,16 +425,12 @@ def test_already_partnered_either_side(world):
 
     # (b) target side already partnered → 422 naming the TARGET
     # (fresh player is free; npc_id is taken).
-    client.post("/auth/register", json={
-        "username": "p182b", "email": "p182b@x.com",
-        "password": PW, "age_confirmed": True,
-    })
-    client.post("/auth/login", json={"username": "p182b", "password": PW})
-    r = client.post("/characters", json={"name": "Анна Ветрова", "sex": "F", "age": 28})
+    client2 = _authed(app, settings, factory, "p182b")
+    r = client2.post("/characters", json={"name": "Анна Ветрова", "sex": "F", "age": 28})
     assert r.status_code == 201, r.text
     cid2 = r.json()["id"]
     set_affection(factory, wid, cid2, npc_id, 60.0)
-    r = client.post(f"/characters/{npc_id}/partnership")
+    r = client2.post(f"/characters/{npc_id}/partnership")
     assert r.status_code == 422
     assert "target" in r.json()["detail"]
 
@@ -465,18 +463,13 @@ def test_player_target_validation_error(world):
     """Target is another player's character → 422 (mirrors /dialogue/start)."""
     settings, app, client, factory, cid, npc_id, _, engine = world
     wid = settings.world.world_id
-    client.post("/auth/register", json={
-        "username": "p182c", "email": "p182c@x.com",
-        "password": PW, "age_confirmed": True,
-    })
-    client.post("/auth/login", json={"username": "p182c", "password": PW})
-    r = client.post("/characters", json={"name": "Игорь Тихий", "sex": "M", "age": 40})
+    client2 = _authed(app, settings, factory, "p182c")
+    r = client2.post("/characters", json={"name": "Игорь Тихий", "sex": "M", "age": 40})
     assert r.status_code == 201, r.text
     cid2 = r.json()["id"]
 
     # The ORIGINAL player proposes to the second player's character.
     set_affection(factory, wid, cid, cid2, 60.0)
-    client.post("/auth/login", json={"username": "p182", "password": PW})
     r = client.post(f"/characters/{cid2}/partnership")
     assert r.status_code == 422
     assert "player character" in r.json()["detail"]

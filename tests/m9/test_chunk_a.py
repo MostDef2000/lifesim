@@ -14,6 +14,7 @@ from fastapi.testclient import TestClient  # noqa: E402
 from app.config.config import load_config  # noqa: E402
 from app.db.models import bootstrap, create_engine_factory  # noqa: E402
 from app.world.seed_world import seed_world  # noqa: E402
+from tests.helpers import auth_client, make_user  # noqa: E402
 
 SETTINGS = None
 
@@ -24,7 +25,8 @@ def setup_module(module):
 
 
 @pytest.fixture()
-def client(tmp_path):
+def env(tmp_path):
+    """(client, settings, factory) — factory lets tests create users."""
     settings = SETTINGS.model_copy(update={
         "persistence": SETTINGS.persistence.model_copy(
             update={"db_path": str(tmp_path / "w.db")}
@@ -39,7 +41,12 @@ def client(tmp_path):
     factory = sessionmaker(bind=engine, expire_on_commit=False)
     from app.api.app import create_app
 
-    return TestClient(create_app(settings, factory))
+    return TestClient(create_app(settings, factory)), settings, factory
+
+
+@pytest.fixture()
+def client(env):
+    return env[0]
 
 
 class TestHealth:
@@ -70,7 +77,9 @@ class TestStatic:
         assert hero.status_code == 200
         assert "textContent" in js.text  # XSS-hygiene primitive present
         assert "Остров живёт, даже когда тебя нет." in js.text
-        assert "Начать жизнь на Рейнеке" in js.text
+        # #309: the landing CTA is now the «Войти» button (→ GET /auth/login);
+        # the old «Начать жизнь на Рейнеке» register-form CTA is gone.
+        assert "Войти" in js.text
         assert "Кошка-консьержка" in js.text
         assert "Добро пожаловать на Рейнеке" in js.text
         assert '"/static/static/map/world-island.jpg"' in js.text
@@ -85,8 +94,10 @@ class TestStatic:
         assert '"/static/static/landing/concierge-cat-hero.webp"' in js.text
         assert '"/static/map/landing-island.jpg"' not in js.text
         assert '"/static/static/map/landing-island.jpg"' not in js.text
-        assert 'api("/auth/register"' in js.text
-        assert 'api("/auth/login"' in js.text
+        # #309: local register/login forms are gone — the only auth surface
+        # is the CTA href to the OIDC redirect start (GET /auth/login).
+        assert '"/auth/register"' not in js.text
+        assert '"/auth/login"' in js.text
         assert 'path !== "/auth/me"' in js.text
         assert "--bg" in css.text
         assert "scale(1.02)" not in css.text
@@ -131,14 +142,13 @@ class TestApiNotShadowed:
 
 
 class TestWsToken:
-    def test_me_does_not_expose_ws_token(self, client):
+    def test_me_does_not_expose_ws_token(self, env):
         # #124: /auth/me no longer mints a session-equivalent JWT for the
         # client — WS auth rides the httpOnly cookie, so the field is gone.
-        client.post("/auth/register", json={
-            "username": "ann1", "email": "ann1@x.com",
-            "password": "password123", "age_confirmed": True,
-        })
-        client.post("/auth/login", json={"username": "ann1", "password": "password123"})
+        client, settings, factory = env
+        with factory() as session:
+            user = make_user(session, "ann1", "ann1@x.com")
+        client = auth_client(client.app, settings, user)
         me = client.get("/auth/me").json()
         assert "ws_token" not in me
         assert me["id"]
@@ -147,26 +157,24 @@ class TestWsToken:
 
 
 class TestNewEndpoints:
-    def test_locations_list(self, client):
+    def test_locations_list(self, env):
+        client, settings, factory = env
         r = client.get("/locations")
         assert r.status_code == 401  # auth-gated like the rest of the API
-        client.post("/auth/register", json={
-            "username": "bob2", "email": "bob2@x.com",
-            "password": "password123", "age_confirmed": True,
-        })
-        client.post("/auth/login", json={"username": "bob2", "password": "password123"})
+        with factory() as session:
+            user = make_user(session, "bob2", "bob2@x.com")
+        client = auth_client(client.app, settings, user)
         r = client.get("/locations")
         assert r.status_code == 200
         locs = r.json()
         assert len(locs) >= 3
         assert {"id", "type", "name"} <= set(locs[0].keys())
 
-    def test_characters_by_user(self, client):
-        client.post("/auth/register", json={
-            "username": "car3", "email": "car3@x.com",
-            "password": "password123", "age_confirmed": True,
-        })
-        client.post("/auth/login", json={"username": "car3", "password": "password123"})
+    def test_characters_by_user(self, env):
+        client, settings, factory = env
+        with factory() as session:
+            user = make_user(session, "car3", "car3@x.com")
+        client = auth_client(client.app, settings, user)
         me = client.get("/auth/me").json()
         r = client.get(f"/characters/by-user/{me['id']}")
         assert r.status_code == 200

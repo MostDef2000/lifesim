@@ -9,9 +9,9 @@ stays owner-only (``current_user`` + ``_owned_character``: 401 anonymous,
 
 Fixture: m67-style TestClient world (tests/m67/test_profile_read_model.py) —
 load_config(default.yaml), own sqlite engine per test, bootstrap + seed_world
-+ generate_population(20) + seed_social, owner User row via hash_password(PW)
-logged in through /auth/login (cookie), reader client registered + logged in
-through /auth/*.
++ generate_population(20) + seed_social, owner + reader User rows via
+make_user (tests/helpers.py) with signed session cookies (auth_client) —
+local register/login is gone (OIDC SSO, issue #309).
 
 Respect oracle notes (verified against the seed code, not assumed):
 - seed_social (world/social_seed.py:116-142) is the ONLY Relationship writer
@@ -41,24 +41,21 @@ from fastapi.testclient import TestClient
 from sqlalchemy.orm import sessionmaker
 
 from app.api.app import create_app
-from app.api.auth import hash_password
 from app.characters.generator import generate_population
 from app.characters.player import create_player_character
 from app.config.config import load_config
 from app.db.models import (
     Character,
     Relationship,
-    User,
     bootstrap,
     create_engine_factory,
 )
 from app.world.seed_world import seed_world
 from app.world.social_seed import seed_social
+from tests.helpers import auth_client, make_user
 
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "../.."))
 APP_JS = os.path.join(ROOT, "backend/app/web/app.js")
-
-PW = "Correct-Horse-9!"
 
 # (b) EXACT emitted key set, verified against the route dict literal
 # (api/app.py get_character_relationships): the 7 pre-#69 keys + respect.
@@ -108,12 +105,7 @@ def world(tmp_path):
     factory = sessionmaker(bind=engine, expire_on_commit=False)
     wid = settings.world.world_id
     with factory() as s:
-        user = User(
-            username="m69owner", email="m69@x.com",
-            password_hash=hash_password(PW), age_confirmed=True, created_at=0,
-        )
-        s.add(user)
-        s.commit()
+        user = make_user(s, "m69owner", "m69@x.com")
         pc = create_player_character(
             s, settings, wid, user,
             name="Борис Орлов", sex="M", age=30, game_timestamp=0,
@@ -134,17 +126,10 @@ def world(tmp_path):
         npc.user_id = user.id
         s.commit()
     app = create_app(settings, factory)
-    owner = TestClient(app)
-    r = owner.post("/auth/login", json={"username": "m69owner", "password": PW})
-    assert r.status_code == 200, r.text
-    reader = TestClient(app)
-    r = reader.post("/auth/register", json={
-        "username": "m69reader", "email": "m69r@x.com",
-        "password": PW, "age_confirmed": True,
-    })
-    assert r.status_code == 201, r.text
-    r = reader.post("/auth/login", json={"username": "m69reader", "password": PW})
-    assert r.status_code == 200, r.text
+    owner = auth_client(app, settings, user)
+    with factory() as s:
+        reader_user = make_user(s, "m69reader", "m69r@x.com")
+    reader = auth_client(app, settings, reader_user)
     anon = TestClient(app)  # never logs in
     return {
         "settings": settings, "factory": factory, "pc_id": pc_id,
