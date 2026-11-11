@@ -142,8 +142,26 @@ def test_creator_fields_pins():
     assert pairs == EXPECTED_FIELDS  # 12 keys + labels, order verbatim
     view = _creator_view(js)
     # Every field renders as a labelled input in the appearance grid.
+    # 020 wave 4 (#316): each cell also carries a per-field «вариант»
+    # affordance in a .creator-field-head row (label + variant button).
+    # SUPERSEDED 2026-11-11 (review fix, corrected): the variant button
+    # receives the CANONICAL server draft key via the DERIVED INVERSE of
+    # CREATOR_DRAFT_RENAME — that map is server->local (the apply path
+    # uses it that way), so the request path needs the reverse lookup:
+    # the camelCase grid keys (hairColor/extra) must reach the wire as
+    # the snake_case DRAFT_FIELDS entries (hair_color/features); the raw
+    # key was rejected server-side with "unknown draft field".
     assert view.count("...CREATOR_FIELDS.map(([key, lbl]) => {") == 1
-    assert view.count('el("div", { class: "creator-field" }, el("label", {}, lbl), input);') == 1
+    assert view.count('el("div", { class: "creator-field" },\n'
+                      '        el("div", { class: "creator-field-head" },\n'
+                      '          el("label", {}, lbl),\n'
+                      '          // the variant request carries the CANONICAL (server) draft key —\n'
+                      '          // DRAFT_FIELDS is snake_case; the local grid key is camelCase\n'
+                      '          // for hairColor/extra (the apply path maps the response back\n'
+                      '          // via CREATOR_DRAFT_RENAME; the request map is its derived\n'
+                      '          // inverse).\n'
+                      '          aiVariantBtn(CREATOR_DRAFT_RENAME_REV[key] || key)),\n'
+                      '        input);') == 1
     assert view.count('el("div", { class: "creator-appearance" },') == 1
 
 
@@ -156,16 +174,21 @@ def test_p1_persistence_contract_pins():
     # carries appearance + appearance_prompt; the empty case is omitted
     # client-side (absent == the pre-020 server behavior).
     js = _read(APP_JS)
-    # Draft state exists (module-level; P2 wired its persistence).
+    # Draft state exists (module-level; P2 wired its persistence). 020 wave 4
+    # (#316): customClothing joined the draft (free-text clothing, persisted
+    # across re-renders like every other field).
     assert js.count('const CREATOR_DRAFT = { appearance: {}, appearancePrompt: "", '
-                    'bio: "", tags: [] };') == 1
-    # POST /characters body shape (verbatim block, 020 P2 contract).
+                    'bio: "", tags: [],\n  customClothing: "" };') == 1
+    # POST /characters body shape (020 P2 contract; wave 4 #316 added
+    # outfit_mode + custom_clothing — they persist ATOMICALLY at create).
     post = ('const r = await api("/characters", { method: "POST", body: {\n'
             '          name: name.value, sex: sex.value, age: Number(age.value),\n'
             '          looks: looks.value.trim() || undefined,\n'
             '          biography: biography.value.trim() || undefined,\n'
             '          appearance: Object.keys(appearance).length ? appearance : undefined,\n'
-            '          appearance_prompt: looks.value.trim() || undefined } });')
+            '          appearance_prompt: looks.value.trim() || undefined,\n'
+            '          outfit_mode: outfit.value,\n'
+            '          custom_clothing: customClothing.value.trim() || undefined } });')
     assert js.count(post) == 1
     assert js.count('api("/characters", { method: "POST"') == 1
     # the free text rides BOTH keys (looks unchanged + appearance_prompt).
@@ -175,24 +198,28 @@ def test_p1_persistence_contract_pins():
     assert js.count("looks.value.trim() || undefined") == 3
     assert js.count("biography.value.trim() || undefined") == 1
     # The POST body key set is EXACTLY name/sex/age/looks/biography/
-    # appearance/appearance_prompt. NOTE: the ternary "appearance : undefined"
+    # appearance/appearance_prompt/outfit_mode/custom_clothing (wave 4:
+    # outfit + custom clothing are atomic at create — the old best-effort
+    # post-create PATCH is gone). NOTE: the ternary "appearance : undefined"
     # also matches the key regex — assert the SET plus first-occurrence
     # order (deduped), not the raw findall list.
     block = _body_blocks(js)
     post_block = next(b for b in block if "name: name.value" in b)
     keys = re.findall(r"(?<![\w$])(\w+)\s*:", post_block)
     assert set(keys) == {"name", "sex", "age", "looks", "biography",
-                         "appearance", "appearance_prompt"}
+                         "appearance", "appearance_prompt",
+                         "outfit_mode", "custom_clothing"}
     assert list(dict.fromkeys(keys)) == [
         "name", "sex", "age", "looks", "biography",
-        "appearance", "appearance_prompt"]
+        "appearance", "appearance_prompt", "outfit_mode", "custom_clothing"]
     # appearance is omitted ENTIRELY when every field is empty; the payload
     # builder sends filled fields only, mapped to the canonical snake_case
     # storage keys (hairColor→hair_color, extra→features).
     assert js.count("function creatorAppearancePayload() {") == 1
-    # W2: the preview panel calls the same builder for its own POST —
-    # two call sites total, the confirm-path one stays unique below.
-    assert js.count("const appearance = creatorAppearancePayload();") == 2
+    # W2: the preview panel calls the same builder for its own POST, and
+    # wave 4's creatorDraftPayload() reuses it for the variant request —
+    # three call sites total, the confirm-path one stays unique below.
+    assert js.count("const appearance = creatorAppearancePayload();") == 3
     assert js.count('const rename = { hairColor: "hair_color", extra: "features" };') == 1
     assert js.count('const v = (CREATOR_DRAFT.appearance[key] || "").trim();') == 1
     assert js.count("if (v) out[rename[key] || key] = v;") == 1
@@ -208,6 +235,8 @@ def test_outfit_contract_pins():
     # W2: the slice ends at the preview-panel comment — the preview panel
     # (its own select with its own labels) was inserted between the outfit
     # select and the tag cloud; this pin scopes the OUTFIT select only.
+    # 020 wave 4 (#316): the custom-clothing input sits between them too —
+    # still before the W2 comment, still outside the pinned select slice.
     sel = _slice(js, 'const outfit = el("select", {},',
                  "/* W2: creator preview panel", "creator outfit select")
     # Option VALUES match the backend enum, auto FIRST — the browser
@@ -220,16 +249,26 @@ def test_outfit_contract_pins():
     # "auto is default" is implemented by ORDER only — no selected attr.
     view = _creator_view(js)
     assert view.count("selected") == 0
-    # PATCH fires ONLY for an explicit non-auto choice, after the POST,
-    # against the fresh character id, with the outfit_mode body key.
-    assert view.count('if (outfit.value !== "auto") {') == 1
-    patch = ('await api(`/characters/${r.id}/outfit`, { method: "PATCH",\n'
-             '              body: { outfit_mode: outfit.value } });')
-    assert view.count(patch) == 1
-    assert view.index('if (outfit.value !== "auto") {') < view.index(patch)
+    # 020 wave 4 (#316), SUPERSEDES the post-create PATCH pins: outfit_mode
+    # + custom_clothing ride the create POST ATOMICALLY (the server sets
+    # the column before its single commit), so the creator no longer calls
+    # PATCH /characters/{id}/outfit at all — a failed second write can no
+    # longer contradict the created row. The client still carries the
+    # chosen mode onto S.character (the create response is a minimal dict
+    # without outfit_mode). The literal `outfit_mode: outfit.value,` has
+    # three sites in the view (preview POST, create POST, the variant
+    # draft payload) — the create one is pinned via its body block.
+    assert view.count('outfit_mode: outfit.value,') == 3
+    create_block = next(b for b in _body_blocks(js) if "name: name.value" in b)
+    assert create_block.count("outfit_mode: outfit.value,") == 1
+    assert create_block.count(
+        "custom_clothing: customClothing.value.trim() || undefined") == 1
     assert view.count("S.character.outfit_mode = outfit.value;") == 1
-    # The creator PATCH site is distinct from the profile one (outfitSel).
-    assert js.count("body: { outfit_mode: outfit.value }") == 1
+    assert "/outfit" not in view
+    # The creator's PATCH body site is gone; the profile PATCH (outfitSel)
+    # is untouched and stays the only `outfit_mode: outfitSel.value` site.
+    assert js.count("body: { outfit_mode: outfit.value }") == 0
+    assert js.count("body: { outfit_mode: outfitSel.value }") == 1
 
 
 # ---------- 4. tag pool + neutrality ----------
@@ -284,12 +323,13 @@ def test_draft_determinism_pins():
     assert asm.count('parts.join(". ")') == 1
     # Single consumer: the definition + the one rebuildDraft call site.
     assert js.count("creatorAssembleBio") == 2
-    # Explicit-assembly only: exactly TWO writers into biography.value —
-    # the CREATOR_DRAFT seed and rebuildDraft. Tag click / «Собрать
-    # черновик» are the only paths that reach the second one.
-    assert js.count("biography.value =") == 2
+    # Explicit-assembly only: exactly THREE writers into biography.value —
+    # the CREATOR_DRAFT seed, rebuildDraft, and (020 wave 4 #316) the AI
+    # generate apply — an explicit user action («Создать по описанию»),
+    # never an auto-assembly path (no writer runs on render/navigation).
+    assert js.count("biography.value =") == 3
     view = _creator_view(js)
-    assert view.count("biography.value =") == 2
+    assert view.count("biography.value =") == 3
     assert view.count("rebuildDraft") == 3  # def + tag click + button
     assert view.count('onclick: rebuildDraft }, "Собрать черновик"') == 1
 
@@ -322,8 +362,10 @@ def test_hash_landmine_pins():
 
 def test_creator_css_block_pins():
     css = _read(APP_CSS)
-    # The shell block exists exactly once, warm tokens mirrored.
-    assert css.count(".creator-shell {") == 1
+    # The shell block exists exactly once as the base rule, warm tokens
+    # mirrored — plus (020 wave 4 #316) ONE media-scoped override inside the
+    # wide query that widens the shell for the three-column layout.
+    assert css.count(".creator-shell {") == 2
     assert css.count(".creator-shell .panel {") == 1
     # Appearance grid 3 → 2 (≤1100px) → 1 (≤640px), profile precedent.
     assert css.count('.creator-shell .creator-appearance {\n  display: grid;\n'

@@ -66,6 +66,47 @@ visual generation — presentation layer.
   никогда simulation facts. Требует: owner-scope ассетов, retention-политику,
   решение по нескольким картинкам. В P3 входит отдельный мини-спек.
 
+### Волна 4 — AI-черновики персонажа (creator drafting, issue #316)
+
+Конституционная поправка П2 (2026-11-11): опциональные редактируемые
+предложения-черновики персонажа. LLM ПРЕДЛАГАЕТ — человек решает и
+редактирует; ручной путь создания остаётся нетронутым first-class.
+
+- **Контракт `POST /characters/draft`** (auth-only, STRICT zero DB
+  writes — ни Character/inventory/event/asset строк, ни AiRequest;
+  queued gateway сознательно НЕ используется, он пишет AiRequest):
+  одна LLM-операция на вызов через СУЩЕСТВУЮЩИЙ настроенный транспорт.
+  - `{"operation":"generate","idea":str(1..500),"revision":int}` →
+    `{"draft": <валидированный 19-ключевой draft>, "revision": ...}`.
+  - `{"operation":"variant","field":<ключ draft>,"draft":<текущий
+    полный draft>,"revision":int}` → `{"field","value","revision"}` —
+    ровно одно поле за вызов.
+  - Строгая серверная валидация КАЖДОГО значения (известные ключи,
+    типы, границы; возраст 18-99; strip/длины) — сырой вывод модели
+    никогда не доходит до клиента. Статусы: 401 неавторизован; 422
+    плохая форма запроса; 429 — лимит 5/мин на юзера (failures
+    потребляют квоту, 429 — нет) ИЛИ busy-лок (один активный запрос
+    на юзера И на процесс, finally-release на каждом пути); 502 —
+    невалидный вывод модели (нераспарсиваемый JSON, неизвестные
+    ключи, неверные типы, вне границ, отказ транспорта; AI-nude
+    никогда не проходит); 503 — LLM выключен; 504 — таймаут.
+    Исключения апстрима не протекают наружу.
+- **Storage**: appearance остаётся ПЛОСКИМ JSON'ом 12 полей;
+  custom_clothing живёт в зарезервированном ключе `_presentation`
+  (`{"version":1,"custom_clothing":...}`), собираемом ТОЛЬКО
+  сервером — публичный ввод отклоняет этот ключ через
+  validate_appearance. `POST /characters` принимает outfit_mode +
+  custom_clothing и пишет их АТОМАРНО в той же транзакции, что и
+  персонаж; отсутствие полей = байт-идентичное прежнее поведение.
+- **Precedence одежды** (портретный путь): nude_framing > worn-предметы >
+  явный enum (casual/formal) > auto+custom_clothing > пул. Сцены
+  игнорируют custom_clothing.
+- **Canvas stages (019 reopen)**: preview `canvas="creator_vertical"`
+  (512×768) — только при серверном capability-флаге (create_app kwarg →
+  app.state, дефолт OFF; никакой пользовательский флаг его не включает),
+  422 ДО транспорта при OFF, и никогда вместе с reference-изображением.
+  Без флага — байт-идентичный прежний путь.
+
 ## Data model (черновик для реализации)
 
 - `CharacterAppearance` (1:1 с Character, owner-scope): JSON-колонка или

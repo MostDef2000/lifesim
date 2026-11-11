@@ -29,3 +29,10 @@
 ## Rollout / rollback
 - Pure code, deploy lane A with the next release train; rollback = revert
   commit; adapter untouched.
+
+## Reopen note (2026-11-11, 020 wave 4 / issue #316)
+- Creator-only experimental 512×768 vertical canvas (`creator_vertical`):
+  server capability flag default OFF, evidence-gated (VRAM envelope +
+  adherence at the taller canvas), STOP on OOM/instability/adherence
+  failure, missing GPU access ⇒ BLOCKED not complete. See spec.md
+  "REOPENED" section; backend wiring lives in 020 wave 4.

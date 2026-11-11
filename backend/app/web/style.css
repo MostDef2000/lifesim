@@ -2544,6 +2544,12 @@ button.danger:hover { background: #93301f; }
   margin-bottom: 4px;
 }
 .creator-shell .creator-field { display: grid; gap: 2px; }
+/* #316 review fix: a long label word («Дополнительные») must not drive a
+   field's min-content past the ~106px side-column track — the field may
+   shrink to its track and the label word breaks instead of bleeding
+   through the panel border. */
+.creator-shell .creator-appearance .creator-field { min-width: 0; }
+.creator-shell .creator-field-head label { overflow-wrap: anywhere; }
 .creator-shell .creator-note { margin: 8px 0 0; font-size: 12px; }
 
 /* W2: creator preview panel — the generated image sits inline in the
@@ -2578,6 +2584,52 @@ button.danger:hover { background: #93301f; }
 .creator-shell .creator-bio-actions { margin: 2px 0 4px; }
 
 .creator-shell .creator-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+
+/* ---------- 020 wave 4 (#316): AI draft assistant ----------
+   Per-field «вариант» affordances, the one-click idea panel, and the
+   prompt inspector. Every selector stays shell-scoped; tokens only (the
+   --w-line count stays 4). Model-derived text reaches these nodes only
+   through textContent (app.js) — never innerHTML. */
+.creator-shell .creator-field-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 6px;
+  flex-wrap: wrap;  /* narrow tracks: the chip wraps under a long label */
+}
+.creator-shell .creator-variant {
+  padding: 1px 8px;
+  border: 1px solid var(--w-line);
+  border-radius: 999px;
+  background: var(--w-panel-deep);
+  color: var(--w-dim);
+  font-size: 11px;
+}
+.creator-shell .creator-variant:hover { color: var(--w-text); border-color: var(--w-accent); }
+.creator-shell .creator-variant:disabled { opacity: 0.5; }
+.creator-shell .creator-ai textarea { min-height: 64px; }
+.creator-shell .creator-stale { color: var(--w-accent); }
+.creator-shell .creator-prompt { margin-top: 8px; font-size: 12px; }
+.creator-shell .creator-prompt summary {
+  cursor: pointer;
+  color: var(--w-dim);
+}
+.creator-shell .creator-prompt summary:hover { color: var(--w-text); }
+.creator-shell .creator-prompt-rev { margin: 6px 0 0; }
+.creator-shell .creator-prompt-text {
+  margin: 6px 0 0;
+  padding: 8px;
+  border: 1px solid var(--w-line);
+  border-radius: 8px;
+  background: var(--w-panel-deep);
+  color: var(--w-text);
+  font-family: ui-monospace, Menlo, Consolas, monospace;
+  font-size: 11px;
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 200px;
+  overflow: auto;
+}
 
 /* responsive collapse: appearance grid 3→2 at ≤1100px (the profile-shell
    breakpoint), one per row on narrow phones */
@@ -2620,20 +2672,43 @@ button.danger:hover { background: #93301f; }
   align-items: start;
 }
 .creator-shell .creator-form { display: grid; gap: 14px; }
+/* #316: on narrow screens the preview panel comes FIRST (image first),
+   ahead of the form columns; the wide query restores DOM order. */
+.creator-shell .creator-preview { order: -1; }
 /* hidden actually hides (author display beats the UA [hidden] style) */
 .creator-shell .preview-image[hidden] { display: none; }
 .creator-shell .creator-preview-empty[hidden] { display: none; }
-/* two columns + sticky preview ONLY on sufficiently wide AND tall
-   screens; narrower or shorter keeps the normal stacked flow (the preview
-   renders in its DOM position, after «Одежда») */
+/* #316: the 512x512 source shown big — capped on narrow screens, full
+   center-column width on wide ones; contain, never crop. */
+.creator-shell .preview-image { width: min(100%, 420px); object-fit: contain; }
+/* three columns ONLY on sufficiently wide AND tall screens: the AI
+   assistant + кто вы/образ LEFT, the large preview CENTER (~2x the old
+   280px rail), биография/одежда/подтверждение RIGHT. Narrower or shorter
+   keeps the single-column stacked flow (preview first via order). The
+   preview column is taller than the old rail — sticky positioning is
+   GONE (a taller-than-viewport pinned panel would hide its bottom);
+   every column scrolls normally. */
 @media (min-width: 1100px) and (min-height: 720px) {
+  .creator-shell { max-width: 1240px; }
   .creator-shell .creator-columns {
-    grid-template-columns: minmax(0, 1fr) 280px;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 560px) minmax(0, 1fr);
   }
-  .creator-shell .creator-preview {
-    position: sticky;
-    top: 12px;
+  /* #316 follow-up: in the 3-column layout the side form columns are
+     ~300px wide — the pre-wave-4 3-column appearance grid cannot fit a
+     label + «вариант» chip in ~77px tracks (the chips bled into the
+     neighboring column). Two columns fit; the base 3-col rule stays for
+     the full-width narrow-screen form. Multi-line on purpose: the m120
+     pin counts the ONE single-line 2-col literal in the max-width ladder. */
+  .creator-shell .creator-appearance {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
+  /* review round-03: the long-label field («Дополнительные особенности»)
+     spans the full row — its 14-char label word cannot fit a ~106px track
+     without a mid-word break; overflow-wrap stays as the narrow-screen
+     fallback. */
+  .creator-shell .creator-appearance .creator-field-wide { grid-column: 1 / -1; }
+  .creator-shell .creator-preview { order: 0; }
+  .creator-shell .preview-image { width: 100%; }
 }
 
 /* 020 P3 stage 2: reference consumption row in the portrait block —

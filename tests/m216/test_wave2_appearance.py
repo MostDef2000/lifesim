@@ -243,7 +243,10 @@ class TestPreviewContract:
 
     @pytest.mark.parametrize("mode,tail", [
         ("casual", ", wearing casual clothes: a plain t-shirt and jeans, fully clothed"),
-        ("formal", ", wearing formal attire"),
+        # 020 wave 4 (issue #316): formal fragment now names the garments
+        # (superseded product decision, pin updated).
+        ("formal", ", wearing formal attire: a tailored blazer, a buttoned "
+                   "shirt and matching trousers, fully clothed"),
     ])
     def test_preview_outfit_mode_rides_the_prompt(self, tmp_path, mode, tail):
         settings, app, factory = _env(tmp_path)

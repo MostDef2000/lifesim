@@ -399,7 +399,21 @@ const CREATOR_GROUP_NAMES = { origin: "Откуда", work: "Занятия",
    re-renders once when the queued hash normalization re-enters route()
    (the viewAuth pattern), and inputs unmounted by that render would lose
    typed values. Seed on build + capture on input keeps the draft. */
-const CREATOR_DRAFT = { appearance: {}, appearancePrompt: "", bio: "", tags: [] };
+/* 020 wave 4 (#316): customClothing is the free-text clothing description —
+   persisted across re-renders like every draft field, sent to the preview
+   and to POST /characters (custom_clothing). */
+const CREATOR_DRAFT = { appearance: {}, appearancePrompt: "", bio: "", tags: [],
+  customClothing: "" };
+
+/* 020 wave 4 (#316): the ONE revision/epoch counter for AI proposals. Every
+   manual edit of the анкета bumps it; every generate/variant request carries
+   the value at dispatch, and a response applies only when the counter is
+   UNCHANGED — any keystroke between dispatch and response discards the
+   proposal. creatorResetDraft() bumps it too (epoch): the counter only ever
+   moves forward, so a response from before a logout/reset/creation can
+   never repopulate the next user's form. */
+let creatorRev = 0;
+function bumpCreatorRev() { creatorRev += 1; }
 
 /* W118-RV1 F1: the draft is per-session private input (name, bio, appearance).
    Reset it on every auth transition — logout, account deletion, successful
@@ -410,6 +424,8 @@ function creatorResetDraft() {
   CREATOR_DRAFT.appearancePrompt = "";
   CREATOR_DRAFT.bio = "";
   CREATOR_DRAFT.tags = [];
+  CREATOR_DRAFT.customClothing = "";
+  bumpCreatorRev();  // #316 epoch: an in-flight AI response can never repopulate after a reset
 }
 
 /* 020 P2: the draft's structured appearance → POST payload. Filled fields
@@ -425,6 +441,23 @@ function creatorAppearancePayload() {
   }
   return out;
 }
+
+/* 020 wave 4 (#316): the 19 draft keys of the /characters/draft contract
+   (server canon: DRAFT_FIELDS in app/characters/creator.py), in canonical
+   order. The variant request must carry the FULL current draft — the
+   server validates every key. */
+const CREATOR_DRAFT_KEYS = [
+  "name", "sex", "age", "face", "eyes", "nose", "lips", "hair", "hair_color",
+  "skin", "height", "weight", "build", "chest", "features", "supplement",
+  "biography", "outfit_mode", "custom_clothing"];
+/* the two draft keys whose creator-side (camelCase) names differ */
+const CREATOR_DRAFT_RENAME = { hair_color: "hairColor", features: "extra" };
+// The inverse (grid key -> server draft key), DERIVED so the two maps
+// cannot drift: the variant REQUEST must carry the snake_case DRAFT_FIELDS
+// key (the server rejects anything else), the apply path maps the response
+// back through CREATOR_DRAFT_RENAME.
+const CREATOR_DRAFT_RENAME_REV = Object.fromEntries(
+  Object.entries(CREATOR_DRAFT_RENAME).map(([k, v]) => [v, k]));
 
 /* 020 P1: draft assembly is deterministic TEMPLATE concatenation — no LLM
    (the world must work without one): fixed group order (the CREATOR_TAGS
@@ -452,18 +485,23 @@ function viewCreateCharacter() {
   if (S.character) { location.hash = "#/profile"; return; }
   location.hash = "#/create";
   const name = el("input", { placeholder: "Имя Фамилия" });
+  name.addEventListener("input", () => bumpCreatorRev());  // #316: a manual edit stales in-flight proposals
   const sex = el("select", {},
     el("option", { value: "F" }, "Ж"), el("option", { value: "M" }, "М"));
+  sex.addEventListener("change", () => bumpCreatorRev());  // #316: a manual edit stales in-flight proposals
   const age = el("input", { type: "number", value: "28", min: "18", max: "80" });
+  age.addEventListener("input", () => bumpCreatorRev());  // #316: a manual edit stales in-flight proposals
   const looks = el("textarea", { placeholder: "Внешность (необязательно)", maxlength: "500" });
   const biography = el("textarea", { placeholder: "Биография (необязательно)", maxlength: "2000" });
 
   // Draft persistence across re-renders: seed from CREATOR_DRAFT, capture
-  // every keystroke (the chat-draft pattern).
+  // every keystroke (the chat-draft pattern). #316: every keystroke also
+  // bumps the revision — an in-flight AI proposal becomes stale the moment
+  // the user edits the анкета.
   looks.value = CREATOR_DRAFT.appearancePrompt || "";
-  looks.addEventListener("input", () => { CREATOR_DRAFT.appearancePrompt = looks.value; });
+  looks.addEventListener("input", () => { CREATOR_DRAFT.appearancePrompt = looks.value; bumpCreatorRev(); });
   biography.value = CREATOR_DRAFT.bio || "";
-  biography.addEventListener("input", () => { CREATOR_DRAFT.bio = biography.value; });
+  biography.addEventListener("input", () => { CREATOR_DRAFT.bio = biography.value; bumpCreatorRev(); });
 
   // The ONLY draft-writing sites are this function and the two explicit
   // assembly actions (tag click / «Собрать черновик» button) below.
@@ -471,15 +509,35 @@ function viewCreateCharacter() {
     const draft = creatorAssembleBio(CREATOR_DRAFT.tags);
     biography.value = draft;
     CREATOR_DRAFT.bio = draft;
+    bumpCreatorRev();  // #316: explicit assembly is a manual edit too
   }
 
   // 12 structured appearance inputs — persisted at confirm since P2 (see CREATOR_FIELDS).
+  // #316: each field also gets a small «вариант» affordance — a per-field
+  // AI proposal applied to THAT field only (never auto-generates an image).
+  const variantBtns = [];  // every «вариант» button — disabled together while an AI request is in flight
+  const appearanceInputs = {};  // camelCase key -> input node (the AI apply path writes through it)
   const appearanceGrid = el("div", { class: "creator-appearance" },
     ...CREATOR_FIELDS.map(([key, lbl]) => {
       const input = el("input", { placeholder: lbl, "aria-label": lbl });
       input.value = CREATOR_DRAFT.appearance[key] || "";
-      input.addEventListener("input", () => { CREATOR_DRAFT.appearance[key] = input.value; });
-      return el("div", { class: "creator-field" }, el("label", {}, lbl), input);
+      appearanceInputs[key] = input;
+      input.addEventListener("input", () => { CREATOR_DRAFT.appearance[key] = input.value; bumpCreatorRev(); });
+      const field = el("div", { class: "creator-field" },
+        el("div", { class: "creator-field-head" },
+          el("label", {}, lbl),
+          // the variant request carries the CANONICAL (server) draft key —
+          // DRAFT_FIELDS is snake_case; the local grid key is camelCase
+          // for hairColor/extra (the apply path maps the response back
+          // via CREATOR_DRAFT_RENAME; the request map is its derived
+          // inverse).
+          aiVariantBtn(CREATOR_DRAFT_RENAME_REV[key] || key)),
+        input);
+      // A long-label field (in practice only «Дополнительные особенности»)
+      // spans the full row in the wide layout — its label word cannot fit
+      // a ~106px track without a mid-word break (review round-03).
+      if (lbl.length > 12) field.classList.add("creator-field-wide");
+      return field;
     }));
 
   // «Одежда» rides the EXISTING #205 outfit control (app.py enum
@@ -489,6 +547,20 @@ function viewCreateCharacter() {
     el("option", { value: "casual" }, "casual — повседневная одежда"),
     el("option", { value: "formal" }, "formal — строгая одежда"),
     el("option", { value: "nude" }, "nude — без одежды (18+)"));
+  outfit.addEventListener("change", () => bumpCreatorRev());
+
+  // 020 wave 4 (#316): free-text custom clothing — rides the preview and
+  // the create POST; persisted across re-renders via CREATOR_DRAFT.
+  // A TEXTAREA (review fix): a 500-char free-text description does not
+  // fit a single-line input — same attributes, ~2 visible rows.
+  const customClothing = el("textarea", {
+    placeholder: "Своё описание одежды (необязательно)", maxlength: "500",
+    "aria-label": "Своё описание одежды", rows: "2" });
+  const clothingCounter = el("p", { class: "muted creator-note creator-counter" },
+    "0/500");
+  customClothing.value = CREATOR_DRAFT.customClothing || "";
+  clothingCounter.textContent = `${customClothing.value.length}/500`;
+  customClothing.addEventListener("input", () => { CREATOR_DRAFT.customClothing = customClothing.value; clothingCounter.textContent = `${customClothing.value.length}/500`; bumpCreatorRev(); });
 
   /* W2: creator preview panel — POST /visual/preview with the CURRENT
      form state. In-place updates ONLY: the handler never re-renders the
@@ -516,6 +588,22 @@ function viewCreateCharacter() {
     "Предпросмотр пока не создан. Нажмите «Создать предпросмотр», чтобы увидеть образ.");
   const previewImg = el("img", {
     class: "preview-image", alt: "Предпросмотр персонажа", hidden: true });
+  // #316: «предыдущая версия» labels a RETAINED old image after a failed
+  // regeneration; «образ устарел» appears when a variant changes one field
+  // (the shown image no longer matches the form) until the next preview.
+  const previewVersion = el("p", { class: "muted creator-note", hidden: true },
+    "предыдущая версия");
+  const previewStale = el("p", { class: "muted creator-note creator-stale",
+    hidden: true }, "образ устарел — обновите предпросмотр");
+  // #316: prompt inspector — the ACTUAL prompt the endpoint returned, plus
+  // the draft revision it was made at. Text-only via textContent (the
+  // prompt is model-derived; HTML strings are forbidden).
+  const promptDetails = el("details", { class: "creator-prompt", hidden: true },
+    el("summary", {}, "Запрос предпросмотра"),
+    el("p", { class: "muted creator-note creator-prompt-rev" }),
+    el("pre", { class: "creator-prompt-text" }));
+  const promptRev = promptDetails.querySelector(".creator-prompt-rev");
+  const promptText = promptDetails.querySelector(".creator-prompt-text");
   let previewBusy = false;
   let previewOk = false;  // a preview has succeeded this session (regen lives)
 
@@ -527,24 +615,33 @@ function viewCreateCharacter() {
     previewErr.textContent = "";
     previewStatus.hidden = false;
     previewStatus.textContent = "Генерация…";
+    const rev = creatorRev;  // #316: the revision the request was composed at
     try {
       const appearance = creatorAppearancePayload();
       const r = await api("/visual/preview", { method: "POST", body: {
         sex: sex.value, age: Number(age.value),
         appearance_prompt: looks.value.trim() || undefined,
         appearance: Object.keys(appearance).length ? appearance : undefined,
-        outfit_mode: outfit.value, mode: previewMode.value,
+        outfit_mode: outfit.value,
+        custom_clothing: customClothing.value.trim() || undefined,
+        mode: previewMode.value,
       } });
       previewImg.src = `data:image/png;base64,${r.image_base64}`;
       previewImg.hidden = false;
       previewPlaceholder.hidden = true;
       previewStatus.hidden = true;
       previewOk = true;
+      previewStale.hidden = true;
+      previewVersion.hidden = true;
+      promptText.textContent = r.prompt || "";
+      promptRev.textContent = `Ревизия анкеты: ${rev}`;
+      promptDetails.hidden = false;
     } catch (e) {
       // the form is untouched: the panel owns the failure surface;
       // previewOk is deliberately NOT reset — the shown image stays the
       // last good one, so «Обновить» keeps working after a failed retry
       previewStatus.hidden = true;
+      if (previewOk) previewVersion.hidden = false;  // the retained image is the previous one
       previewErr.textContent =
         `Предпросмотр не удался: ${e.message}. Попробуйте ещё раз.`;
     } finally {
@@ -559,6 +656,172 @@ function viewCreateCharacter() {
     onclick: runPreview }, "Создать предпросмотр");
   const previewRegenBtn = el("button", { type: "button",
     onclick: runPreview, disabled: true }, "Обновить");
+
+  /* ---------- 020 wave 4 (#316): AI draft assistant ----------
+     ONE-CLICK generate + per-field variants against POST /characters/draft.
+     Guards: ONE revision counter (creatorRev) — every manual edit bumps it,
+     every request carries the value at dispatch, a response applies only
+     when the counter is UNCHANGED (else the proposal is discarded and the
+     form keeps the user's values); buttons are disabled while their request
+     is in flight; errors keep the form and the last image, never auto-retry.
+     The raw server detail never reaches the user — a RU message per class. */
+  const aiIdea = el("textarea", {
+    placeholder: "Опишите персонажа: кто это, какой характер, чем занимается",
+    maxlength: "500", "aria-label": "Описание персонажа для нейропомощника" });
+  const aiStatus = el("p", { class: "muted creator-note", hidden: true });
+  const aiErr = el("p", { class: "err-text" });
+  let aiBusy = false;
+  const AI_DISCARDED = "предложение не применено: анкета изменилась";
+
+  function creatorAiErrorText(e) {
+    if (e && e.status === 429) return "Нейропомощник занят или лимит попыток исчерпан — попробуйте через минуту.";
+    if (e && e.status === 502) return "Нейропомощник вернул некорректный ответ — попробуйте ещё раз.";
+    if (e && e.status === 503) return "Нейропомощник недоступен. Создание вручную работает как обычно.";
+    if (e && e.status === 504) return "Нейропомощник не ответил вовремя — попробуйте ещё раз.";
+    if (e && e.status === 422) return "Нейропомощник не принял запрос — проверьте описание и поля анкеты.";
+    return "Нейропомощник не ответил. Проверьте связь и попробуйте ещё раз.";
+  }
+
+  function setAiBusy(busy) {
+    aiBtn.disabled = busy;
+    for (const b of variantBtns) b.disabled = busy;
+  }
+
+  /* The CURRENT form as the full 19-key draft (the variant request shape —
+     the server validates every key). creatorAppearancePayload() supplies the
+     filled canonical appearance keys; the rest ride as empty strings. */
+  function creatorDraftPayload() {
+    const ageNum = Number(age.value);
+    const appearance = creatorAppearancePayload();
+    const draft = {
+      name: name.value.trim(), sex: sex.value,
+      age: Number.isInteger(ageNum) ? ageNum : 0,
+      face: "", eyes: "", nose: "", lips: "", hair: "", hair_color: "",
+      skin: "", height: "", weight: "", build: "", chest: "", features: "",
+      supplement: looks.value.trim(), biography: biography.value.trim(),
+      outfit_mode: outfit.value, custom_clothing: customClothing.value.trim(),
+    };
+    for (const k of Object.keys(appearance)) draft[k] = appearance[k];
+    return draft;
+  }
+
+  // ONE draft value → its form control (the variant apply path). Model
+  // values reach the DOM only through .value / textContent — never HTML.
+  function applyCreatorField(field, value) {
+    if (field === "name") { name.value = value; return; }
+    if (field === "sex") { sex.value = value; return; }
+    if (field === "age") { age.value = String(value); return; }
+    if (field === "supplement") {
+      looks.value = value; CREATOR_DRAFT.appearancePrompt = value; return; }
+    if (field === "biography") {
+      biography.value = value; CREATOR_DRAFT.bio = value; return; }
+    if (field === "outfit_mode") { outfit.value = value; return; }
+    if (field === "custom_clothing") {
+      customClothing.value = value; CREATOR_DRAFT.customClothing = value;
+      clothingCounter.textContent = `${value.length}/500`; return; }
+    const localKey = CREATOR_DRAFT_RENAME[field] || field;
+    const input = appearanceInputs[localKey];
+    if (input) {
+      input.value = value; CREATOR_DRAFT.appearance[localKey] = value;
+    }
+  }
+
+  function applyCreatorDraft(draft) {
+    for (const key of CREATOR_DRAFT_KEYS) {
+      if (draft && draft[key] !== undefined) applyCreatorField(key, draft[key]);
+    }
+  }
+
+  async function runGenerate() {
+    if (aiBusy) return;  // no double-submit while in flight
+    const idea = aiIdea.value.trim();
+    if (!idea) {
+      aiErr.textContent = "Сначала опишите персонажа — хотя бы одно предложение.";
+      return;
+    }
+    aiBusy = true;
+    setAiBusy(true);
+    aiErr.textContent = "";
+    aiStatus.hidden = false;
+    aiStatus.textContent = "Нейропомощник придумывает персонажа…";
+    const rev = creatorRev;  // the revision at dispatch
+    try {
+      const r = await api("/characters/draft", { method: "POST", body: {
+        operation: "generate", idea, revision: rev } });
+      if (rev !== creatorRev || !name.isConnected) {
+        // a manual edit (or a re-render) happened mid-flight: discard the
+        // proposal, keep the form as the user left it, NO automatic preview
+        aiStatus.hidden = true;
+        aiErr.textContent = "предложение не применено: анкета изменилась";
+        return;
+      }
+      applyCreatorDraft(r.draft);
+      aiStatus.hidden = true;
+      runPreview();  // exactly ONE automatic preview after a clean apply
+    } catch (e) {
+      aiStatus.hidden = true;
+      aiErr.textContent = creatorAiErrorText(e);
+    } finally {
+      aiBusy = false;
+      setAiBusy(false);
+    }
+  }
+
+  async function runVariant(field) {
+    if (aiBusy) return;  // no double-submit while in flight
+    // The variant request carries the FULL current draft; a missing name or
+    // an out-of-range age is a guaranteed 422 — say it locally instead.
+    const ageNum = Number(age.value);
+    if (!name.value.trim() || !Number.isInteger(ageNum)
+        || ageNum < 18 || ageNum > 99) {
+      aiErr.textContent = "Заполните имя и возраст (18–99), чтобы запросить вариант.";
+      return;
+    }
+    aiBusy = true;
+    setAiBusy(true);
+    aiErr.textContent = "";
+    aiStatus.hidden = false;
+    aiStatus.textContent = "Нейропомощник предлагает вариант…";
+    const rev = creatorRev;  // the revision at dispatch
+    try {
+      const r = await api("/characters/draft", { method: "POST", body: {
+        operation: "variant", field,
+        draft: creatorDraftPayload(), revision: rev } });
+      if (rev !== creatorRev || !name.isConnected) {
+        aiStatus.hidden = true;
+        aiErr.textContent = "предложение не применено: анкета изменилась";
+        return;
+      }
+      applyCreatorField(field, r.value);
+      aiStatus.hidden = true;
+      // the shown image no longer matches the form — never auto-regenerate
+      previewStale.hidden = false;
+    } catch (e) {
+      aiStatus.hidden = true;
+      aiErr.textContent = creatorAiErrorText(e);
+    } finally {
+      aiBusy = false;
+      setAiBusy(false);
+    }
+  }
+
+  function aiVariantBtn(field) {
+    const btn = el("button", { type: "button", class: "creator-variant",
+      title: "Предложить ИИ-вариант этого поля",
+      onclick: () => runVariant(field) }, "вариант");
+    variantBtns.push(btn);
+    return btn;
+  }
+
+  const aiBtn = el("button", { type: "button", class: "primary",
+    onclick: runGenerate }, "Создать по описанию");
+  const secAi = el("section", { class: "panel creator-ai" },
+    el("h2", {}, "Нейропомощник"),
+    el("p", { class: "muted creator-note" },
+      "Один клик — и анкета заполнена. Опишите персонажа своими словами: нейропомощник предложит имя, внешность и биографию, всё можно поправить руками."),
+    aiIdea,
+    el("div", { class: "creator-actions" }, aiBtn),
+    aiStatus, aiErr);
 
   // Tag cloud: a click toggles the ingredient AND rebuilds the draft (the
   // documented explicit-assembly path). Selection styling is restored on
@@ -600,25 +863,25 @@ function viewCreateCharacter() {
         // stays compatible). appearance_prompt carries the same free text
         // as `looks` (the looks behavior is unchanged); limits are
         // enforced server-side (422 surfaces in err).
+        // 020 wave 4 (#316): outfit_mode + custom_clothing persist
+        // ATOMICALLY in the same POST — the old best-effort post-create
+        // PATCH is gone (a failed second write can no longer contradict
+        // the created row).
         const appearance = creatorAppearancePayload();
         const r = await api("/characters", { method: "POST", body: {
           name: name.value, sex: sex.value, age: Number(age.value),
           looks: looks.value.trim() || undefined,
           biography: biography.value.trim() || undefined,
           appearance: Object.keys(appearance).length ? appearance : undefined,
-          appearance_prompt: looks.value.trim() || undefined } });
+          appearance_prompt: looks.value.trim() || undefined,
+          outfit_mode: outfit.value,
+          custom_clothing: customClothing.value.trim() || undefined } });
         creatorResetDraft();  // W118-RV1 F1: consumed draft must not leak on logout
         S.character = r;
-        // 020: outfit control through the existing #205 endpoint, only for
-        // an explicit non-default mode; best-effort — the character exists
-        // at this point, a failed PATCH must not block the arrival.
-        if (outfit.value !== "auto") {
-          try {
-            await api(`/characters/${r.id}/outfit`, { method: "PATCH",
-              body: { outfit_mode: outfit.value } });
-            S.character.outfit_mode = outfit.value;
-          } catch (e) { toast(e.message, true); }
-        }
+        // The create response is a minimal dict without outfit_mode —
+        // carry the chosen mode so the profile view shows it (the server
+        // persisted it atomically with the character row).
+        S.character.outfit_mode = outfit.value;
         gotoWorld();  // #161: single dispatch — no direct route() next to the hash assignment
       } catch (e) { err.textContent = e.message; }
       finally { confirmBtn.disabled = false; }
@@ -632,13 +895,25 @@ function viewCreateCharacter() {
   // the confirm section stays a separate full-width node below.
   const secWho = el("section", { class: "panel", tabindex: "-1" },
     el("h2", {}, "Кто вы"),
-    el("label", {}, "Имя"), name,
-    el("label", {}, "Пол"), sex,
-    el("label", {}, "Возраст"), age);
+    el("div", { class: "creator-field" },
+      el("div", { class: "creator-field-head" },
+        el("label", {}, "Имя"), aiVariantBtn("name")),
+      name),
+    el("div", { class: "creator-field" },
+      el("div", { class: "creator-field-head" },
+        el("label", {}, "Пол"), aiVariantBtn("sex")),
+      sex),
+    el("div", { class: "creator-field" },
+      el("div", { class: "creator-field-head" },
+        el("label", {}, "Возраст"), aiVariantBtn("age")),
+      age));
   const secLook = el("section", { class: "panel", tabindex: "-1" },
     el("h2", {}, "Образ"),
     appearanceGrid,
-    el("label", {}, "Внешность"), looks,
+    el("div", { class: "creator-field" },
+      el("div", { class: "creator-field-head" },
+        el("label", {}, "Внешность"), aiVariantBtn("supplement")),
+      looks),
     el("p", { class: "muted creator-note" },
       "Свободное описание — основное; отдельные поля подсказывают детали. Предпросмотр собирается по текущим полям формы по запросу — правки в саму форму не вносятся и не сбрасываются."),
     el("p", { class: "muted creator-note" },
@@ -654,12 +929,25 @@ function viewCreateCharacter() {
     tagCloud,
     el("div", { class: "creator-bio-actions" },
       el("button", { type: "button", onclick: rebuildDraft }, "Собрать черновик")),
-    el("label", {}, "Биография"), biography,
+    el("div", { class: "creator-field" },
+      el("div", { class: "creator-field-head" },
+        el("label", {}, "Биография"), aiVariantBtn("biography")),
+      biography),
     el("p", { class: "muted creator-note" },
       "Биография видна миру и помогает острову понять, кто вы."));
   const secOutfit = el("section", { class: "panel", tabindex: "-1" },
     el("h2", {}, "Одежда"),
-    el("label", {}, "Одежда"), outfit,
+    el("div", { class: "creator-field" },
+      el("div", { class: "creator-field-head" },
+        el("label", {}, "Одежда"), aiVariantBtn("outfit_mode")),
+      outfit),
+    el("div", { class: "creator-field" },
+      el("div", { class: "creator-field-head" },
+        el("label", {}, "Своё описание одежды"), aiVariantBtn("custom_clothing")),
+      customClothing,
+      clothingCounter),
+    el("p", { class: "muted creator-note" },
+      "Действует в режиме „авто“; сохраняется с персонажем для будущих портретов; это описание образа, не инвентарь."),
     el("p", { class: "muted creator-note" },
       "Как персонаж одевается по умолчанию: auto — как сегодня, остальные режимы добавляют одежду в портрет. nude — только для 18+. Изменить можно позже в профиле."));
   const secPreview = el("section", { class: "panel creator-preview", tabindex: "-1" },
@@ -670,7 +958,8 @@ function viewCreateCharacter() {
       "Это предпросмотр, а не сохранённый портрет. После изменения полей создайте его заново. Можно появиться на острове без предпросмотра."),
     el("label", {}, "Ракурс"), previewMode,
     el("div", { class: "creator-actions" }, previewBtn, previewRegenBtn),
-    previewPlaceholder, previewStatus, previewImg, previewErr);
+    previewPlaceholder, previewStatus, previewImg, previewVersion, previewStale,
+    promptDetails, previewErr);
 
   // #78: numbered section guide — a compact map of the single-page flow,
   // pinned inside the hero. Each entry scrolls its section into view and
@@ -696,13 +985,28 @@ function viewCreateCharacter() {
       guideEntry(secOutfit, "4. Одежда"),
       guideEntry(secPreview, "5. Предпросмотр")));
 
-  // #78: guided composition — hero (with the section guide), then
-  // .creator-columns: the editing sections in one column, the preview
-  // panel as a narrow right column on wide+tall screens (CSS media query;
-  // narrow/short screens keep the normal stacked flow). The preview panel
-  // is a single node — never duplicated. Confirm stays full-width below.
-  // The honest NEEDS-BACKEND rows and the post-creation disclosure sit at
-  // the decision point, above the confirm button.
+  // #316: the confirm block is a named section — on wide screens it lives
+  // in the RIGHT column (under биография/одежда); narrow screens keep it
+  // last in the stacked flow. The honest NEEDS-BACKEND rows and the
+  // post-creation disclosure sit at the decision point, above the button.
+  const secConfirm = el("section", { class: "panel creator-confirm" },
+    el("p", { class: "muted creator-note" },
+      "Структурированный выбор происхождения недоступен."),
+    el("p", { class: "muted creator-note" },
+      "Выбор игровых черт личности недоступен."),
+    el("p", { class: "muted creator-note" },
+      "Персональная сцена прибытия по вашей биографии недоступна."),
+    el("p", { class: "muted creator-note" },
+      "После создания откроется «Мир» — карта острова и первые дела. При первом посещении этого браузера кошка-консьержка может показать подсказки."),
+    err,
+    el("div", { class: "creator-actions" }, confirmBtn));
+
+  // #78 guided composition, #316 layout: hero (with the section guide),
+  // then .creator-columns — on wide+tall screens THREE columns: the AI
+  // assistant + кто вы/образ LEFT, the large preview CENTER, биография/
+  // одежда/confirm RIGHT (CSS media query; narrow/short screens keep the
+  // normal stacked flow with the preview first). The preview panel is a
+  // single node — never duplicated.
   app.replaceChildren(el("main", { class: "creator-shell" },
     el("section", { class: "panel creator-hero" },
       el("div", { class: "muted creator-eyebrow" }, "ВЛ1: Рейнеке"),
@@ -712,22 +1016,14 @@ function viewCreateCharacter() {
       sectionGuide),
     el("div", { class: "creator-columns" },
       el("div", { class: "creator-form" },
+        secAi,
         secWho,
-        secLook,
+        secLook),
+      secPreview,
+      el("div", { class: "creator-form creator-side" },
         secBio,
-        secOutfit),
-      secPreview),
-    el("section", { class: "panel creator-confirm" },
-      el("p", { class: "muted creator-note" },
-        "Структурированный выбор происхождения недоступен."),
-      el("p", { class: "muted creator-note" },
-        "Выбор игровых черт личности недоступен."),
-      el("p", { class: "muted creator-note" },
-        "Персональная сцена прибытия по вашей биографии недоступна."),
-      el("p", { class: "muted creator-note" },
-        "После создания откроется «Мир» — карта острова и первые дела. При первом посещении этого браузера кошка-консьержка может показать подсказки."),
-      err,
-      el("div", { class: "creator-actions" }, confirmBtn))));
+        secOutfit,
+        secConfirm))));
 }
 
 /* ---------- portrait + scene (014, M6 visual pipeline) ---------- */

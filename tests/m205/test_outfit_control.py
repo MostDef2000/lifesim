@@ -161,7 +161,11 @@ class TestOutfitFragments:
         # the garments and states "fully clothed" — "casual everyday clothes"
         # was too weak against the uncensored LoRA (topless renders).
         ("casual", ", wearing casual clothes: a plain t-shirt and jeans, fully clothed"),
-        ("formal", ", wearing formal attire"),
+        # 020 wave 4 (issue #316): the vague formal fragment is replaced by
+        # concrete covered garments (same lesson as #205b — named garments
+        # anchor the render); superseded product decision, pin updated.
+        ("formal", ", wearing formal attire: a tailored blazer, a buttoned "
+                   "shirt and matching trousers, fully clothed"),
         # W205d: bare ", nude" lost to the modest style phrase — concrete
         # nudity terms anchor the render.
         ("nude", ", nude, completely unclothed, wearing nothing"),
@@ -184,7 +188,8 @@ class TestOutfitFragments:
     def test_fragment_order_after_profile_sections(self):
         prompt = build_prompt({**PORTRAIT_DESCRIPTOR, "outfit_mode": "formal"})
         assert prompt.index("Chest-up portrait") < prompt.index(
-            ", wearing formal attire")
+            ", wearing formal attire: a tailored blazer, a buttoned shirt "
+            "and matching trousers, fully clothed")
 
     def test_auto_no_nude_fragment(self):
         """#205d: auto now carries a concrete-garment pool item (see the

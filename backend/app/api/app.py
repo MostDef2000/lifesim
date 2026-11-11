@@ -121,8 +121,20 @@ def _setup_app_logging():
     logger.propagate = False
 
 
-def create_app(settings, session_factory: sessionmaker):
-    """Build the FastAPI app bound to a sessionmaker and the given Settings."""
+def create_app(
+    settings,
+    session_factory: sessionmaker,
+    *,
+    creator_vertical_capability: bool = False,
+):
+    """Build the FastAPI app bound to a sessionmaker and the given Settings.
+
+    020 wave 4 (issue #316): ``creator_vertical_capability`` is a
+    SERVER-CONTROLLED capability flag (stage-2 gated experiment, default
+    OFF) — production never passes it, so the creator_vertical preview
+    canvas stays disabled; the isolated test app enables it explicitly.
+    NO user-supplied flag can enable it. Stored on app.state for the
+    visual routes."""
     # #155: both uvicorn entrypoints build the app through this factory
     # (`vl1 serve` via cli.py, `uvicorn app.run:app` via run._build), so the
     # logging setup lives here — one seam covers both entrypoints.
@@ -267,6 +279,9 @@ def create_app(settings, session_factory: sessionmaker):
         return response
 
     app.state.ws_connections = 0
+    # 020 wave 4 (issue #316): server-controlled stage-2 capability (see
+    # create_app docstring) — default OFF, never user-settable.
+    app.state.creator_vertical_capability = creator_vertical_capability
     import time as _time
 
     app.state.started_at = _time.time()
@@ -336,6 +351,13 @@ def create_app(settings, session_factory: sessionmaker):
         # absent/empty → no character_appearances row (pre-020 behavior).
         appearance: dict | None = None
         appearance_prompt: str | None = None
+        # 020 wave 4 (issue #316): outfit mode + free-text custom clothing
+        # persist ATOMICALLY with the character (today outfit rides a
+        # best-effort post-create PATCH). Absent fields → today's behavior
+        # byte-for-byte (outfit "auto" == the column default; no
+        # custom_clothing → no `_presentation` metadata).
+        outfit_mode: str = "auto"
+        custom_clothing: str | None = None
 
     class MeOut(BaseModel):
         id: int
@@ -620,7 +642,12 @@ def create_app(settings, session_factory: sessionmaker):
     ):
         from app.characters.player import create_player_character
         from app.db.models import CharacterAppearance
-        from app.visual.descriptor import validate_appearance
+        from app.visual.descriptor import (
+            _OUTFIT_MODES,
+            PRESENTATION_KEY,
+            validate_appearance,
+            validate_custom_clothing,
+        )
 
         looks = (body.looks or "").strip()
         biography = (body.biography or "").strip()
@@ -631,6 +658,19 @@ def create_app(settings, session_factory: sessionmaker):
         if len(appearance_prompt) > 500:
             raise HTTPException(
                 status_code=422, detail="appearance_prompt ≤500")
+        # 020 wave 4: same manual-enum pattern as PATCH
+        # /characters/{cid}/outfit (422) — validated BEFORE any write. The
+        # enum rides the SHARED _OUTFIT_MODES constant (descriptor.py owns
+        # the outfit vocabulary); the m120 structural pin counts exactly
+        # ONE literal occurrence of the enum check (the PATCH route).
+        if body.outfit_mode not in _OUTFIT_MODES:
+            raise HTTPException(
+                status_code=422,
+                detail="outfit_mode must be auto|casual|formal|nude")
+        try:
+            custom_clothing = validate_custom_clothing(body.custom_clothing)
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc))
         try:
             appearance = validate_appearance(body.appearance)
         except ValueError as exc:
@@ -648,14 +688,31 @@ def create_app(settings, session_factory: sessionmaker):
             detail = str(exc)
             status = 409 if ("taken" in detail or "already owns" in detail) else 422
             raise HTTPException(status_code=status, detail=detail)
+        # 020 wave 4 (issue #316): the outfit mode persists ATOMICALLY with
+        # the character — set on the ORM row BEFORE the single commit below
+        # (the column default is "auto", so the absent-field value is
+        # byte-identical to today's row). The best-effort post-create PATCH
+        # in the web client stays for older payloads but is no longer the
+        # only write path.
+        character.outfit = body.outfit_mode
         # 020 P2: canonical appearance persists in the SAME transaction as the
         # character row — create_player_character only flushes, the commit
         # below lands both (player.py owns the character insert; this
         # companion write lives here). Provided-but-empty == absent: no row.
-        if appearance is not None or appearance_prompt:
+        # 020 wave 4: custom_clothing rides the row as the RESERVED
+        # `_presentation` metadata key (server-composed ONLY — the public
+        # appearance input keeps rejecting that key via validate_appearance).
+        stored_appearance = appearance
+        if custom_clothing:
+            stored_appearance = {
+                **(appearance or {}),
+                PRESENTATION_KEY: {
+                    "version": 1, "custom_clothing": custom_clothing},
+            }
+        if stored_appearance is not None or appearance_prompt or custom_clothing:
             session.add(CharacterAppearance(
                 character_id=character.id,
-                appearance=appearance,
+                appearance=stored_appearance,
                 appearance_prompt=appearance_prompt or None,
             ))
         session.commit()
@@ -2570,6 +2627,13 @@ def create_app(settings, session_factory: sessionmaker):
     from app.api.visual_routes import register_visual_routes
 
     register_visual_routes(app, settings, session_factory)
+
+    # 020 wave 4 (issue #316): AI character-draft endpoint — PURE (no DB
+    # writes), auth-gated, per-process limits. Registered after the
+    # app.state.* assignment above (the router copies current_user from it).
+    from app.api.creator_routes import register_creator_routes
+
+    register_creator_routes(app, settings, session_factory)
 
     # M9 (§77): static web client — served last so API routes win
     from fastapi.responses import FileResponse

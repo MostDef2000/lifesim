@@ -181,11 +181,17 @@ def test_appearance_single_site_endpoint_pins():
     # POST /visual/preview: exactly 2 call sites (creator + appearance).
     assert JS.count('api("/visual/preview"') == 2
     assert block.count('api("/visual/preview"') == 1
-    # PATCH /outfit: exactly 3 sites — creator, appearance, profile; each
-    # /outfit call carries its PATCH on the same or the next line.
-    assert JS.count("/outfit`") == 3
-    assert JS.count('"PATCH"') == 3
-    assert JS.count("/characters/${r.id}/outfit`") == 1
+    # PATCH /outfit: exactly 2 sites — appearance, profile; each /outfit
+    # call carries its PATCH on the same or the next line. SUPERSEDED
+    # 2026-11-11 (020 wave 4, issue #316): the CREATOR site is gone —
+    # outfit_mode + custom_clothing persist ATOMICALLY in the create POST
+    # (the old best-effort post-create PATCH against
+    # /characters/${r.id}/outfit could contradict the created row on a
+    # partial failure); the appearance and profile PATCH sites are
+    # untouched, and the fresh-id creator PATCH must NOT come back.
+    assert JS.count("/outfit`") == 2
+    assert JS.count('"PATCH"') == 2
+    assert JS.count("/characters/${r.id}/outfit`") == 0
     assert JS.count("/characters/${S.character.id}/outfit`") == 2
     assert block.count("/outfit`") == 1
     idx, sites = 0, []

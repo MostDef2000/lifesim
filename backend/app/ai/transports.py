@@ -11,9 +11,16 @@ from app.db.models import Account, Character, OrganizationMember
 
 
 class LlmTransport(Protocol):
-    """A transport turns a prompt + schema hint into raw response text."""
+    """A transport turns a prompt + schema hint into raw response text.
 
-    def complete(self, prompt: str, schema_hint: str) -> str:  # pragma: no cover
+    020 wave 4 (issue #316): ``max_chars`` is an OPTIONAL response-size
+    bound (keyword-only, default None). Existing callers keep the
+    two-argument call — byte-identical behavior; only the creator draft
+    endpoint passes the bound."""
+
+    def complete(
+        self, prompt: str, schema_hint: str, *, max_chars: int | None = None,
+    ) -> str:  # pragma: no cover
         ...
 
 
@@ -24,7 +31,9 @@ class StubTransport:
     byte-reproducible (spec AE4'').
     """
 
-    def complete(self, prompt: str, schema_hint: str) -> str:
+    def complete(
+        self, prompt: str, schema_hint: str, *, max_chars: int | None = None,
+    ) -> str:
         if schema_hint == "decision":
             return self._decision(prompt)
         if schema_hint == "classify":
@@ -133,7 +142,9 @@ class OllamaTransport:
         self.model = model
         self.timeout_sec = timeout_sec
 
-    def complete(self, prompt: str, schema_hint: str) -> str:
+    def complete(
+        self, prompt: str, schema_hint: str, *, max_chars: int | None = None,
+    ) -> str:
         payload = json.dumps({
             "model": self.model,
             "messages": [
@@ -152,6 +163,12 @@ class OllamaTransport:
         content = body.get("message", {}).get("content")
         if not isinstance(content, str) or not content:
             raise ValueError("ollama: empty response content")
+        # 020 wave 4 (issue #316): optional bounded read — a runaway model
+        # response is rejected before parsing. Default None keeps every
+        # existing caller byte-identical (no bound).
+        if max_chars is not None and len(content) > max_chars:
+            raise ValueError(
+                f"ollama: response exceeds {max_chars} chars")
         return content
 
 
