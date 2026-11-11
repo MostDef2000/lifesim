@@ -92,19 +92,28 @@ def test_creator_section_order_pins():
     assert view.index("const secBio = ") < view.index("const secOutfit = ")
     assert view.index("const secOutfit = ") < view.index(
         "const secPreview = ")
-    # The composition: biography BEFORE outfit inside .creator-form; the
-    # preview panel AFTER the form (its DOM position on narrow screens);
-    # the confirm section full-width below the columns wrapper.
+    # The composition (020 wave 4 #316): THREE columns on wide screens —
+    # the AI assistant + кто вы/образ LEFT, the preview CENTER, биография/
+    # одежда/подтверждение RIGHT (the confirm is a named section declared
+    # before the composition). Narrow screens keep the stacked flow with
+    # the preview first (CSS order). The headings tell the same guided
+    # story, each exactly once (m120 pins).
     columns = ('el("div", { class: "creator-columns" },\n'
                '      el("div", { class: "creator-form" },\n'
+               '        secAi,\n'
                '        secWho,\n'
-               '        secLook,\n'
+               '        secLook),\n'
+               '      secPreview,\n'
+               '      el("div", { class: "creator-form creator-side" },\n'
                '        secBio,\n'
-               '        secOutfit),\n'
-               '      secPreview),')
+               '        secOutfit,\n'
+               '        secConfirm))));')
     assert view.count(columns) == 1
-    assert view.index(columns) < view.index(
-        'el("section", { class: "panel creator-confirm" },')
+    # The confirm section is a NAMED node declared before the composition
+    # (wave 4 moved it into the right column; narrow screens keep it last
+    # via DOM order inside .creator-side).
+    assert view.index('const secConfirm = el("section", '
+                      '{ class: "panel creator-confirm" },') < view.index(columns)
     # The headings tell the same story, each exactly once (m120 pins).
     assert view.index('el("h2", {}, "Кто вы")') < \
         view.index('el("h2", {}, "Образ")') < \
@@ -238,21 +247,30 @@ def test_creator_disclosure_pins():
 def test_creator_css_layout_pins():
     css = _read(APP_CSS)
     block = _creator_css(css)
-    # The columns wrapper: single column by default, two columns ONLY
-    # inside the wide+tall media query; the form column owns the section
-    # spacing (the shell grid gap only separates its direct children).
+    # The columns wrapper: single column by default (preview first via
+    # order), three columns ONLY inside the wide+tall media query; the form
+    # column owns the section spacing (the shell grid gap only separates
+    # its DIRECT children).
     assert block.count(".creator-shell .creator-columns {") == 2
     assert block.count(
         ".creator-shell .creator-form { display: grid; gap: 14px; }") == 1
     media = "@media (min-width: 1100px) and (min-height: 720px) {"
     assert block.count(media) == 1
-    # Sticky preview ONLY inside the media query (one site, after it).
-    assert block.count("position: sticky") == 1
-    assert block.index("position: sticky") > block.index(media)
-    assert "position: sticky" not in block[:block.index(media)]
-    # The narrow right column width is pinned.
+    # 020 wave 4 (#316), SUPERSEDES the sticky pin: the preview is the
+    # CENTER column (~2x the old 280px rail) — taller than the viewport,
+    # so sticky positioning is GONE (a pinned taller-than-viewport panel
+    # would hide its bottom). Assert the absence.
+    assert "position: sticky" not in block
+    # The narrow right column is gone; the three-column template is pinned
+    # (left form / 560px center preview / right form), and the shell widens
+    # only inside the media query.
     assert block.count(
-        "grid-template-columns: minmax(0, 1fr) 280px;") == 1
+        "grid-template-columns: minmax(0, 1fr) minmax(0, 560px) "
+        "minmax(0, 1fr);") == 1
+    assert block.count("grid-template-columns: minmax(0, 1fr) 280px;") == 0
+    assert block.count(".creator-shell { max-width: 1240px; }") == 1
+    # Mobile: the preview panel comes FIRST in the stacked flow.
+    assert block.count(".creator-shell .creator-preview { order: -1; }") == 1
     # Section guide styling exists, shell-scoped.
     assert block.count(
         ".creator-shell .creator-guide { margin-top: 12px; }") == 1
@@ -298,16 +316,25 @@ def test_creator_preview_on_demand_pins():
     # creator + appearance screen — m176).
     assert view.count('api("/visual/preview"') == 1
     assert js.count('api("/visual/preview"') == 2
-    # runPreview is reachable ONLY from the two explicit buttons
-    # (definition + two onclick sites) — no auto-fire path exists.
-    assert view.count("runPreview") == 3
-    # Every input listener in the creator is draft capture — none calls
-    # the preview (no auto-preview on typing).
+    # runPreview is reachable ONLY from the two explicit buttons and (020
+    # wave 4 #316) the ONE automatic post-generate call — the one-click
+    # flow fires exactly one preview after a clean apply; a variant NEVER
+    # does (definition + two onclick sites + the generate call site).
+    assert view.count("runPreview") == 4
+    # Every input listener in the creator is draft capture or the #316
+    # revision bump — none calls the preview (no auto-preview on typing).
+    # Six sites: looks, biography, the 12-field grid, custom clothing
+    # (all CREATOR_DRAFT capture) and the age + name inputs (revision
+    # bump only — neither is draft state, but a manual edit must stale
+    # in-flight proposals). SUPERSEDED 2026-11-11 (five->six): the name
+    # listener was missing — a name typed while a generate request was
+    # in flight would have been overwritten by the applied response
+    # (applyCreatorDraft writes draft.name into the input).
     input_lines = [ln for ln in view.splitlines()
                    if 'addEventListener("input"' in ln]
-    assert len(input_lines) == 3
+    assert len(input_lines) == 6
     for ln in input_lines:
-        assert "CREATOR_DRAFT" in ln, ln
+        assert "CREATOR_DRAFT" in ln or "bumpCreatorRev" in ln, ln
         assert "runPreview" not in ln, ln
 
 

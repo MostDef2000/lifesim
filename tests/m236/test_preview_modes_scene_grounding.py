@@ -281,7 +281,10 @@ class TestPreviewModes:
         assert prompt.endswith(f", {FULL_BODY_FRAMING}")
         assert FULL_BODY_CASTING in prompt
         assert "Chest-up portrait" not in prompt
-        assert ", wearing formal attire" in prompt
+        # 020 wave 4 (issue #316): formal fragment now names the garments
+        # (superseded product decision, pin updated).
+        assert (", wearing formal attire: a tailored blazer, a buttoned "
+                "shirt and matching trousers, fully clothed") in prompt
         # auto (omitted outfit_mode) also composes: pool head + framing
         r2 = client.post("/visual/preview", json={
             **PREVIEW_BODY, "mode": "full_body_outfit"})

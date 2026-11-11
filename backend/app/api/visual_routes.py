@@ -602,6 +602,15 @@ def register_visual_routes(app, settings: Settings, session_factory: sessionmake
         # preview stays write-free.
         mode: str | None = None
         reference_id: int | None = None
+        # 020 wave 4 (issue #316): optional free-text custom clothing
+        # (auto-mode precedence in build_prompt; absent → identical bytes)
+        # and the stage-2 experimental canvas request. canvas None/"legacy"
+        # = the configured image_size (byte-unchanged path);
+        # "creator_vertical" (512x768) is honored ONLY when the
+        # SERVER-CONTROLLED capability (create_app kwarg → app.state) is
+        # enabled — no user-supplied flag can enable it.
+        custom_clothing: str | None = None
+        canvas: str | None = None
 
     @app.post("/visual/preview")
     def preview_visual(
@@ -627,7 +636,9 @@ def register_visual_routes(app, settings: Settings, session_factory: sessionmake
         portrait branch (outfit mode rides the descriptor; W2 modes map
         onto the additive preview_mode key) → transport → base64 in the
         response. Response key set is exactly {"prompt", "seed",
-        "image_base64"}."""
+        "image_base64"}. 020 wave 4: canvas (creator_vertical capability
+        gate) and custom_clothing validate right after the outfit enum,
+        before any transport call."""
         gate()
         if _preview_rate_limited(request_user.id):
             raise HTTPException(status_code=429, detail="preview rate limit exceeded")
@@ -639,6 +650,38 @@ def register_visual_routes(app, settings: Settings, session_factory: sessionmake
             raise HTTPException(
                 status_code=422,
                 detail="outfit_mode must be auto|casual|formal|nude")
+        # 020 wave 4 (issue #316): stage-2 experimental canvas — validated
+        # BEFORE any transport call or reference resolution. None/"legacy"
+        # keeps the configured image_size (byte-unchanged path);
+        # "creator_vertical" (512x768) is honored ONLY when the
+        # SERVER-CONTROLLED capability flag (create_app kwarg → app.state)
+        # is on — no user-supplied flag can enable it — and never together
+        # with an uploaded reference (the vertical canvas is a
+        # creator-form framing, not an img2img target).
+        canvas = body.canvas
+        if canvas is not None and canvas != "legacy":
+            if canvas != "creator_vertical":
+                raise HTTPException(
+                    status_code=422,
+                    detail="canvas must be legacy|creator_vertical")
+            if not getattr(app.state, "creator_vertical_capability", False):
+                raise HTTPException(
+                    status_code=422,
+                    detail="creator_vertical canvas is not enabled on this server")
+            if body.reference_id is not None:
+                raise HTTPException(
+                    status_code=422,
+                    detail=("creator_vertical canvas cannot be combined "
+                            "with a reference image"))
+        # 020 wave 4: optional free-text custom clothing — the SAME
+        # server-side validation as POST /characters (strip, ≤500,
+        # empty → None). Absent → identical bytes downstream.
+        try:
+            from app.visual.descriptor import validate_custom_clothing
+
+            custom_clothing = validate_custom_clothing(body.custom_clothing)
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc))
         # W2: preview modes. Omitted (or explicit "portrait") keeps the
         # byte-identical legacy preview; the two full-body modes append
         # FULL_BODY_FRAMING after the outfit chain (full_body_clothed
@@ -733,14 +776,24 @@ def register_visual_routes(app, settings: Settings, session_factory: sessionmake
             descriptor["outfit_mode"] = "casual"  # safety override
         elif mode in ("full_body_outfit", "base_body"):
             descriptor["preview_mode"] = mode
+        # 020 wave 4: custom clothing rides the descriptor ONLY when
+        # provided — the key's absence keeps the pre-wave-4 prompt bytes
+        # identical (build_prompt's auto+custom branch reads it).
+        if custom_clothing:
+            descriptor["custom_clothing"] = custom_clothing
         prompt = build_prompt(descriptor)
         seed = _deterministic_seed("preview", body.sex, body.age, prompt)
+        # 020 wave 4: stage-2 vertical canvas — 512x768 ONLY for the
+        # creator_vertical request on a capability-enabled server
+        # (validated above); every other path keeps the configured size.
+        size = ("512x768" if canvas == "creator_vertical"
+                else visual_settings.image_size)
         # #227 2b: the preview path composes the same negative (canonical
         # from the request-built profile + composition part).
         try:
             bytes_out = _transport_generate(
                 transport_factory(), prompt, seed,
-                visual_settings.image_size,
+                size,
                 compose_negative(
                     (descriptor.get("visual_profile") or {})
                     .get("guardrail", {}).get("canonical_negative")

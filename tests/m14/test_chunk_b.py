@@ -20,8 +20,12 @@ class TestCreationForm:
         js = load_js()
         assert 'placeholder: "Внешность (необязательно)"' in js
         assert 'placeholder: "Биография (необязательно)"' in js
-        assert 'el("label", {}, "Внешность"), looks,' in js
-        assert 'el("label", {}, "Биография"), biography,' in js
+        # SUPERSEDED 2026-11-11 (020 wave 4, issue #316): the bare
+        # label+control adjacency became a .creator-field-head row —
+        # label + per-field «вариант» button (m120 pins the full
+        # field-cell structure; the textareas themselves are unchanged).
+        assert 'el("label", {}, "Внешность"), aiVariantBtn("supplement")),' in js
+        assert 'el("label", {}, "Биография"), aiVariantBtn("biography")),' in js
 
     def test_post_body_sends_fields(self):
         js = load_js()

@@ -8,3 +8,4 @@
 - [ ] T5 Full not-slow green; ruff clean.
 - [x] (Phase 2b, #227) Negative-prompt transport contract, lane A: compose_negative (canonical + composition), transport "negative" param (always-present payload key), routes pass it via the compat dispatch, repo adapter appends to its floor. Lane B (host adapter activation) — separate sysadmin step, handoff pending.
 - [ ] (Phase 2, separate spec amendment) CharacterVisualProfile table + editing + LoRA.
+- [ ] (Reopen 2026-11-11, 020 wave 4) Creator-only 512×768 vertical canvas: capability flag OFF by default; live VRAM + adherence evidence required before ON; STOP on OOM/instability/adherence fail; no GPU access ⇒ BLOCKED.

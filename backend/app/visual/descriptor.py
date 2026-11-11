@@ -45,6 +45,15 @@ _AUTO_OUTFIT_POOL = (
     "wearing a button-up shirt and trousers, fully clothed",
 )
 
+# 020 wave 4 (issue #316): the vague ", wearing formal attire" is replaced
+# by concrete covered garments — the same concrete-garment lesson as
+# #205b/W205d (named garments anchor the render against the uncensored
+# LoRA prior). Unisex wording works for both sexes; one fragment.
+_FORMAL_OUTFIT_FRAGMENT = (
+    ", wearing formal attire: a tailored blazer, a buttoned shirt and "
+    "matching trousers, fully clothed"
+)
+
 
 def _effective_outfit_mode(character) -> str:
     """#205: raw characters.outfit -> effective mode.
@@ -413,19 +422,88 @@ def validate_appearance(value) -> dict | None:
     return cleaned or None
 
 
+# 020 wave 4 (issue #316): reserved metadata key inside the STORED
+# CharacterAppearance.appearance dict. New rows carry the 12 flat anatomy
+# keys at top level PLUS this optional reserved key:
+#   {"version": 1, "custom_clothing": "<text>"}
+# It is server-composed only — validate_appearance keeps rejecting unknown
+# keys, so `_presentation` can never ride the public appearance input. All
+# readers consume the DECODED anatomy (decode_stored_appearance), so the
+# key can never leak into fragments/profile/prompt bytes. Legacy flat rows
+# read unchanged and are NEVER rewritten. Rollback semantics: old code
+# ignores `_presentation` (anatomy still renders; custom clothing falls
+# back to the outfit enum).
+PRESENTATION_KEY = "_presentation"
+
+
+def decode_stored_appearance(stored) -> tuple[dict | None, dict]:
+    """020 wave 4: stored appearance dict → (anatomy, presentation).
+
+    Splits the stored dict into the flat anatomy mapping (the 12 creator
+    keys, WITHOUT the reserved `_presentation` key) and the presentation
+    metadata dict (empty when absent/malformed). Legacy flat rows decode
+    to (same dict, {}); None/non-dict/empty input decodes to (None, {}).
+    The anatomy dict is a NEW dict — the stored row is never mutated and
+    legacy rows are never rewritten."""
+    if not isinstance(stored, dict) or not stored:
+        return None, {}
+    presentation = stored.get(PRESENTATION_KEY)
+    presentation = presentation if isinstance(presentation, dict) else {}
+    anatomy = {k: v for k, v in stored.items() if k != PRESENTATION_KEY}
+    return (anatomy or None), presentation
+
+
+def validate_custom_clothing(value) -> str | None:
+    """020 wave 4 (issue #316): shared validation for the free-text custom
+    clothing input. Used by BOTH write paths that accept it: POST
+    /characters (CharacterIn.custom_clothing) and POST /visual/preview
+    (PreviewIn.custom_clothing) — one contract, no drift. Rules: stripped;
+    empty/None → None (absent); >500 chars → ValueError (routes map to
+    422). The value is stored verbatim (user's words, never translated)
+    and rendered only through the auto-outfit precedence branch in
+    build_prompt."""
+    if value is None:
+        return None
+    if not isinstance(value, str):
+        raise ValueError("custom_clothing must be a string")
+    cleaned = value.strip()
+    if not cleaned:
+        return None
+    if len(cleaned) > 500:
+        raise ValueError("custom_clothing must be ≤500 chars")
+    return cleaned
+
+
 def _character_appearance(session: Session, character_id: str) -> dict | None:
     """020 P2: stored canonical appearance for one character (pure read).
 
-    Returns the CharacterAppearance.appearance dict when the row exists and
-    carries a non-empty structured dict, else None (pre-020 characters, or
-    a row that only holds the free-text prompt — that text already rides
-    characters.looks, so the resolver needs nothing extra)."""
+    Returns the DECODED anatomy dict (flat creator keys, reserved
+    `_presentation` metadata stripped — 020 wave 4) when the row exists
+    and carries a non-empty structured dict, else None (pre-020
+    characters, or a row that only holds the free-text prompt — that text
+    already rides characters.looks, so the resolver needs nothing extra).
+    The decode guarantees `_presentation` can never leak into
+    build_visual_profile / fragments / prompt bytes."""
     from app.db.models import CharacterAppearance
 
     row = session.get(CharacterAppearance, character_id)
     if row is None or not isinstance(row.appearance, dict) or not row.appearance:
         return None
-    return row.appearance
+    anatomy, _presentation = decode_stored_appearance(row.appearance)
+    return anatomy
+
+
+def _character_presentation(session: Session, character_id: str) -> dict:
+    """020 wave 4: stored presentation metadata for one character (pure
+    read; empty dict when absent). Portrait path only — scenes never
+    consume custom clothing (no invented inventory)."""
+    from app.db.models import CharacterAppearance
+
+    row = session.get(CharacterAppearance, character_id)
+    if row is None or not isinstance(row.appearance, dict):
+        return {}
+    _anatomy, presentation = decode_stored_appearance(row.appearance)
+    return presentation
 
 
 def _profile_field(character_like, key: str, default=None):
@@ -728,6 +806,14 @@ def build_portrait_descriptor(session: Session, world_id: str, character_id: str
         "traits": _character_traits(session, character_id),
         "worn": list(wearing),
     }, appearance=_character_appearance(session, character_id))
+    # 020 wave 4 (issue #316): stored custom clothing (the reserved
+    # `_presentation` metadata, decoded) rides the descriptor for the
+    # auto-outfit precedence branch in build_prompt. Explicit
+    # casual/formal/nude modes outrank it there; the scene path never
+    # reads this key (no invented inventory).
+    custom = _character_presentation(session, character_id).get("custom_clothing")
+    if isinstance(custom, str) and custom.strip():
+        descriptor["custom_clothing"] = custom.strip()
     return descriptor
 
 
@@ -807,19 +893,33 @@ def build_prompt(descriptor: dict, visual_config_weather: str = "clear") -> str:
                     "fully clothed"
                 )
             elif mode == "formal":
-                base += ", wearing formal attire"
+                # 020 wave 4 (issue #316): concrete covered garments replace
+                # the vague phrase (supersedes the pre-wave m205/m216/m236
+                # formal byte pins — honest pin bumps in those suites).
+                base += _FORMAL_OUTFIT_FRAGMENT
             elif mode == "nude":
                 # W205d: symmetric to the garment fix — bare "nude" lost to
                 # the modest style phrase; concrete nudity terms anchor the
                 # render.
                 base += ", nude, completely unclothed, wearing nothing"
             else:
-                # W205d: concrete garments beat generic phrasing against the
-                # LoRA prior; the route injects a seed-selected variant for
-                # variety (absent key = pool[0], keeps direct build_prompt
-                # callers deterministic).
-                variant = descriptor.get("outfit_auto_variant")
-                base += f", {variant if variant in _AUTO_OUTFIT_POOL else _AUTO_OUTFIT_POOL[0]}"
+                # 020 wave 4 (issue #316): auto + nonempty custom_clothing
+                # (descriptor key — the stored `_presentation` value via the
+                # portrait path, or the preview request field) REPLACES the
+                # auto pool: the player's explicit garments outrank the
+                # seed-selected pool item. Explicit casual/formal/nude modes
+                # above keep their precedence
+                # (worn > explicit enum > auto+custom > pool).
+                custom = (descriptor.get("custom_clothing") or "").strip()
+                if custom:
+                    base += f", wearing: {custom}, fully clothed"
+                else:
+                    # W205d: concrete garments beat generic phrasing against
+                    # the LoRA prior; the route injects a seed-selected
+                    # variant for variety (absent key = pool[0], keeps
+                    # direct build_prompt callers deterministic).
+                    variant = descriptor.get("outfit_auto_variant")
+                    base += f", {variant if variant in _AUTO_OUTFIT_POOL else _AUTO_OUTFIT_POOL[0]}"
         # W2 preview full-body modes: the framing rides AFTER the outfit
         # chain (portrait + base_body never see this suffix — preview_mode
         # is absent/None there, so the returned bytes stay pre-W2).

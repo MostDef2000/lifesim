@@ -84,6 +84,23 @@ HARDWARE-CONSTRAINED (never "passed"): no GPU upgrade is planned for this
 issue, and any future uplift REOPENS this spec with new hardware evidence.
 This section is consistent with the >512x512 exclusion in Scope above.
 
+## REOPENED (2026-11-11, 020 wave 4 / issue #316): creator-only 512×768
+
+The 020 character-creator wave 4 reopens THIS spec narrowly: an
+EXPERIMENTAL 512×768 vertical canvas (`creator_vertical`) for the
+creator preview form only — never the general portrait/scene path.
+Evidence-gated per the constraint above: the server-side capability
+flag defaults OFF; enabling it in production requires live evidence
+that 512×768 stays within the VRAM envelope and that garment/face
+adherence holds at the taller canvas. STOP conditions: OOM, renderer
+instability, or adherence failure ⇒ the flag stays OFF and this
+reopen note records the failure (the 512×512 baseline remains the
+shipped quality). Missing GPU access to produce that evidence ⇒ the
+stage stays BLOCKED, not complete. Backend wiring shipped in 020:
+`create_app(creator_vertical_capability=...)` → `app.state`, preview
+`canvas="creator_vertical"` → 422 pre-transport when OFF, "512x768"
+reaches the transport only when ON (and never with a reference image).
+
 ## Acceptance evidence
 
 - Full not-slow suite green (baseline 760 + new tests).
