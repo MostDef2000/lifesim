@@ -1,6 +1,7 @@
 """AE2 (spec R10/§118): full 30-day / 20-NPC headless run."""
 
 import pytest
+
 from helpers import load_settings, run_full_simulation
 
 pytestmark = [pytest.mark.slow]

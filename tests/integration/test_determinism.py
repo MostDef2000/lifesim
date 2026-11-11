@@ -1,8 +1,7 @@
 """AE4 (spec §119): determinism — same seed, identical event sequence."""
 
-from helpers import load_settings, run_full_simulation
-
 from app.db.models import WorldEvent
+from helpers import load_settings, run_full_simulation
 
 
 def test_determinism_same_seed(tmp_path):

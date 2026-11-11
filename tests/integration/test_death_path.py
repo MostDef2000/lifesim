@@ -8,6 +8,7 @@ mortality invariant (max_death_rate_per_day) actually flags the excess.
 """
 
 import pytest
+
 from helpers import load_settings, run_full_simulation
 
 pytestmark = [pytest.mark.slow]
