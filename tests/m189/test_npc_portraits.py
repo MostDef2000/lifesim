@@ -35,7 +35,7 @@ from sqlalchemy.orm import sessionmaker
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../../.."))
 
-from fastapi.testclient import TestClient  # noqa: E402
+from tests.helpers import auth_client, make_user  # noqa: E402
 
 import app.api.visual_routes as visual_routes  # noqa: E402
 from app.api.app import create_app  # noqa: E402
@@ -89,13 +89,10 @@ def build_world(settings, seed=42):
     return engine
 
 
-def register_and_login(client, username):
-    r = client.post("/auth/register", json={
-        "username": username, "email": f"{username}@x.com",
-        "password": "password123", "age_confirmed": True,
-    })
-    assert r.status_code == 201, r.text
-    client.post("/auth/login", json={"username": username, "password": "password123"})
+def _authed(app, settings, factory, username):
+    with factory() as s:
+        user = make_user(s, username, f"{username}@x.com")
+    return auth_client(app, settings, user)
 
 
 def pick_npc(factory, settings):
@@ -141,8 +138,7 @@ def world(tmp_path):
     engine = build_world(settings)
     factory = sessionmaker(bind=engine, expire_on_commit=False)
     app = create_app(settings, factory)
-    client = TestClient(app)
-    register_and_login(client, "m191player")
+    client = _authed(app, settings, factory, "m191player")
     r = client.post("/characters", json={"name": "Смотритель", "sex": "M", "age": 28})
     assert r.status_code == 201, r.text
     cid = r.json()["id"]
@@ -241,8 +237,7 @@ class TestGuards:
         """Privacy: GET never generates/serves another player's portrait —
         and the own-player rule is unchanged (own portraits flow through POST)."""
         settings, app, client, factory, cid, npc_id = world
-        other = TestClient(app)
-        register_and_login(other, "m191other")
+        other = _authed(app, settings, factory, "m191other")
         r = other.post("/characters", json={"name": "Чужой Художник", "sex": "F", "age": 27})
         assert r.status_code == 201, r.text
         other_cid = r.json()["id"]
@@ -352,8 +347,7 @@ class TestDisabledGate:
         engine = build_world(settings)
         factory = sessionmaker(bind=engine, expire_on_commit=False)
         app = create_app(settings, factory)
-        client = TestClient(app)
-        register_and_login(client, "m191offline")
+        client = _authed(app, settings, factory, "m191offline")
         npc_id = pick_npc(factory, settings)
 
         def _boom_factory():
@@ -372,8 +366,7 @@ class TestDisabledGate:
         engine = build_world(settings)
         factory = sessionmaker(bind=engine, expire_on_commit=False)
         app = create_app(settings, factory)
-        client = TestClient(app)
-        register_and_login(client, "m191gatepins")
+        client = _authed(app, settings, factory, "m191gatepins")
         r = client.post("/characters", json={"name": "Вратарь Гейтов", "sex": "M", "age": 31})
         assert r.status_code == 201, r.text
         own_cid = r.json()["id"]

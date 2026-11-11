@@ -33,6 +33,7 @@ from sqlalchemy.orm import sessionmaker
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../../.."))
 
 from fastapi.testclient import TestClient  # noqa: E402
+from tests.helpers import auth_client, make_user  # noqa: E402
 
 from app.api.app import create_app  # noqa: E402
 from app.config.config import load_config  # noqa: E402
@@ -79,14 +80,9 @@ def world(tmp_path):
         session.commit()
     factory = sessionmaker(bind=engine, expire_on_commit=False)
     app = create_app(settings, factory)
-    client = TestClient(app)
-    client.post("/auth/register", json={
-        "username": "m196reader",
-        "email": "m196@x.com",
-        "password": "password123",
-        "age_confirmed": True,
-    })
-    client.post("/auth/login", json={"username": "m196reader", "password": "password123"})
+    with factory() as s:
+        user = make_user(s, "m196reader", "m196@x.com")
+    client = auth_client(app, settings, user)
     r = client.post("/characters", json={"name": "Mira Source", "sex": "F", "age": 28})
     assert r.status_code == 201, r.text
     cid = r.json()["id"]

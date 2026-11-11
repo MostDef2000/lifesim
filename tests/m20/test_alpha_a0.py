@@ -62,15 +62,23 @@ def world(tmp_path):
     factory = sessionmaker(bind=engine, expire_on_commit=False)
     app = create_app(settings, factory)
     from fastapi.testclient import TestClient
-    return settings, app, TestClient(app)
+    return settings, app, TestClient(app), factory
+
+
+def _authed(settings, app, factory, username):
+    """#309: local register/login is gone — create the user directly
+    (make_user) and return a client with the app's own signed session
+    cookie."""
+    from tests.helpers import auth_client, make_user
+
+    with factory() as session:
+        user = make_user(session, username, f"{username}@x.com")
+    return auth_client(app, settings, user)
 
 def test_balance_visibility(world):
-    settings, app, client = world
+    settings, app, _client, factory = world
     # User 1
-    client.post("/auth/register", json={
-        "username": "user1", "email": "u1@x.com", "password": "password123", "age_confirmed": True,
-    })
-    client.post("/auth/login", json={"username": "user1", "password": "password123"})
+    client = _authed(settings, app, factory, "user1")
     r1 = client.post("/characters", json={"name": "Char1", "sex": "M", "age": 30})
     cid = r1.json()["id"]
 
@@ -88,22 +96,16 @@ def test_balance_visibility(world):
     assert r_owner.status_code == 200
     assert r_owner.json()["balance"] == 1500
 
-    # Non-owner doesn't see balance
-    client.post("/auth/logout")
-    client.post("/auth/register", json={
-        "username": "user2", "email": "u2@x.com", "password": "password123", "age_confirmed": True,
-    })
-    client.post("/auth/login", json={"username": "user2", "password": "password123"})
-    r_other = client.get(f"/characters/{cid}")
+    # Non-owner doesn't see balance (a second, separate client — #309:
+    # logout/register/login on one client is gone with local auth)
+    other = _authed(settings, app, factory, "user2")
+    r_other = other.get(f"/characters/{cid}")
     assert r_other.status_code == 200
     assert "balance" not in r_other.json()
 
 def test_tasks_buckets(world):
-    settings, app, client = world
-    client.post("/auth/register", json={
-        "username": "user3", "email": "u@x.com", "password": "password123", "age_confirmed": True,
-    })
-    client.post("/auth/login", json={"username": "user3", "password": "password123"})
+    settings, app, _client, factory = world
+    client = _authed(settings, app, factory, "user3")
     r = client.post("/characters", json={"name": "C", "sex": "M", "age": 30})
     cid = r.json()["id"]
 
@@ -135,11 +137,8 @@ def test_tasks_buckets(world):
     assert data["recent_terminal"][0]["task_type"] == "T5"
 
 def test_inventory_metadata(world):
-    settings, app, client = world
-    client.post("/auth/register", json={
-        "username": "user3", "email": "u@x.com", "password": "password123", "age_confirmed": True,
-    })
-    client.post("/auth/login", json={"username": "user3", "password": "password123"})
+    settings, app, _client, factory = world
+    client = _authed(settings, app, factory, "user3")
     r = client.post("/characters", json={"name": "C", "sex": "M", "age": 30})
     cid = r.json()["id"]
 
@@ -177,11 +176,8 @@ def test_inventory_metadata(world):
     assert rock["slot"] is None
 
 def test_relationships_both_orientations(world):
-    settings, app, client = world
-    client.post("/auth/register", json={
-        "username": "user3", "email": "u@x.com", "password": "password123", "age_confirmed": True,
-    })
-    client.post("/auth/login", json={"username": "user3", "password": "password123"})
+    settings, app, _client, factory = world
+    client = _authed(settings, app, factory, "user3")
     r = client.post("/characters", json={"name": "Me", "sex": "M", "age": 30})
     cid = r.json()["id"]
 

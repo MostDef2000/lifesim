@@ -37,7 +37,7 @@ from sqlalchemy.orm import sessionmaker
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../../.."))
 
-from fastapi.testclient import TestClient  # noqa: E402
+from tests.helpers import auth_client, make_user  # noqa: E402
 
 from app.api.app import create_app  # noqa: E402
 from app.config.config import load_config  # noqa: E402
@@ -63,7 +63,6 @@ from app.social.roles import derive_roles  # noqa: E402
 from app.world.seed_world import seed_world  # noqa: E402
 from app.world.social_seed import seed_social  # noqa: E402
 
-PW = "Correct-Horse-9!"
 SETTINGS = None
 DAY = 1440
 
@@ -101,14 +100,6 @@ def build_world(settings, seed=42):
     return engine
 
 
-def _register_and_login(client, username):
-    client.post("/auth/register", json={
-        "username": username, "email": f"{username}@x.com",
-        "password": PW, "age_confirmed": True,
-    })
-    client.post("/auth/login", json={"username": username, "password": PW})
-
-
 @pytest.fixture()
 def world(tmp_path):
     """Seeded world (social+org on) + app/client + a player character."""
@@ -116,8 +107,9 @@ def world(tmp_path):
     engine = build_world(settings)
     factory = sessionmaker(bind=engine, expire_on_commit=False)
     app = create_app(settings, factory)
-    client = TestClient(app)
-    _register_and_login(client, "c2player")
+    with factory() as s:
+        user = make_user(s, "c2player", "c2player@x.com")
+    client = auth_client(app, settings, user)
     r = client.post("/characters", json={"name": "Борис Орлов", "sex": "M", "age": 30})
     assert r.status_code == 201, r.text
     cid = r.json()["id"]

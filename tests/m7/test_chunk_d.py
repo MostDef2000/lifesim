@@ -7,8 +7,6 @@ from sqlalchemy.orm import sessionmaker
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../../.."))
 
-from fastapi.testclient import TestClient  # noqa: E402
-
 from app.api.app import create_app  # noqa: E402
 from app.config.config import load_config  # noqa: E402
 from app.db.models import (  # noqa: E402
@@ -18,6 +16,7 @@ from app.db.models import (  # noqa: E402
     create_engine_factory,
 )
 from app.world.seed_world import seed_world  # noqa: E402
+from tests.helpers import auth_client, make_user  # noqa: E402
 
 SETTINGS = None
 
@@ -52,16 +51,12 @@ def make_settings(tmp_path, **external_updates):
 
 
 def login_player(settings, factory, username="wanderer"):
+    # #309: local register/login gone — create the user directly and sign
+    # the app's own session cookie.
     app = create_app(settings, factory)
-    client = TestClient(app)
-    r = client.post("/auth/register", json={
-        "username": username,
-        "email": f"{username[0]}@x.com",
-        "password": "password123",
-        "age_confirmed": True,
-    })
-    assert r.status_code == 201, r.text
-    client.post("/auth/login", json={"username": username, "password": "password123"})
+    with factory() as session:
+        user = make_user(session, username, f"{username[0]}@x.com")
+    client = auth_client(app, settings, user)
     r = client.post("/characters", json={"name": f"Nomad-{username}", "sex": "F", "age": 29})
     assert r.status_code == 201, r.text
     cid = r.json()["id"]

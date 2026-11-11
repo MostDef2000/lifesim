@@ -51,7 +51,7 @@ from sqlalchemy.orm import sessionmaker
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../../.."))
 
-from fastapi.testclient import TestClient  # noqa: E402
+from tests.helpers import auth_client, make_user  # noqa: E402
 
 from app.api.app import create_app  # noqa: E402
 from app.config.config import load_config  # noqa: E402
@@ -63,6 +63,7 @@ from app.db.models import (  # noqa: E402
     DialogueSession,
     MarketOffer,
     Relationship,
+    User,
     WorldClock,
     WorldEvent,
     WorldObject,
@@ -76,7 +77,6 @@ ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "../.."))
 APP_JS = os.path.join(ROOT, "backend/app/web/app.js")
 APP_CSS = os.path.join(ROOT, "backend/app/web/style.css")
 
-PW = "Correct-Horse-9!"
 SETTINGS = None
 
 
@@ -109,12 +109,10 @@ def build_world(settings, seed=42):
     return engine
 
 
-def _register_and_login(client, username):
-    client.post("/auth/register", json={
-        "username": username, "email": f"{username}@x.com",
-        "password": PW, "age_confirmed": True,
-    })
-    client.post("/auth/login", json={"username": username, "password": PW})
+def _authed(app, settings, factory, username):
+    with factory() as s:
+        user = make_user(s, username, f"{username}@x.com")
+    return auth_client(app, settings, user)
 
 
 @pytest.fixture()
@@ -124,8 +122,7 @@ def world(tmp_path):
     engine = build_world(settings)
     factory = sessionmaker(bind=engine, expire_on_commit=False)
     app = create_app(settings, factory)
-    client = TestClient(app)
-    _register_and_login(client, "b2player")
+    client = _authed(app, settings, factory, "b2player")
     r = client.post("/characters", json={"name": "Борис Орлов", "sex": "M", "age": 30})
     assert r.status_code == 201, r.text
     cid = r.json()["id"]
@@ -192,8 +189,11 @@ def test_desire_create_and_persistence_across_restart(world):
     assert g["desire"]["interpretation"]["catalog_key"] == "relationship"
     # "restart": new app instance, same DB file
     app2 = create_app(settings, sessionmaker(bind=engine, expire_on_commit=False))
-    client2 = TestClient(app2)
-    _register_and_login(client2, "b2player")
+    # "b2player" already exists (fixture) — re-creating it would hit the
+    # UNIQUE constraint on users.email; fetch the row and reuse it.
+    with factory() as s:
+        user2 = s.query(User).filter_by(username="b2player").one()
+    client2 = auth_client(app2, settings, user2)
     g2 = client2.get(f"/characters/{cid}/desire").json()
     assert g2["desire"]["id"] == body["desire"]["id"]
     assert g2["desire"]["catalog_key"] == "relationship"
@@ -296,16 +296,19 @@ def test_desire_interpret_preview_too_long(world):
 
 
 def test_desire_interpret_preview_owner_only(world):
-    _settings, _app, client, _factory, cid, _engine = world
+    settings, app, client, factory, cid, _engine = world
     r = client.post(f"/characters/{cid}/desire/interpret",
                     json={"text": "хочу друзей"})
     assert r.status_code == 200
     # unauthenticated
     client.post("/auth/logout")
+    # Jar entry was set directly (auth_client); logout's delete_cookie
+    # doesn't match its attributes — clear it explicitly.
+    client.cookies.delete(settings.api.cookie_name)
     assert client.post(f"/characters/{cid}/desire/interpret",
                        json={"text": "х"}).status_code == 401
     # another user's character
-    _register_and_login(client, "b2interpother")
+    client = _authed(app, settings, factory, "b2interpother")
     assert client.post(f"/characters/{cid}/desire/interpret",
                        json={"text": "х"}).status_code == 403
     # unknown character id
@@ -345,16 +348,19 @@ def test_abandon_flow(world):
 
 
 def test_desire_owner_only(world):
-    _settings, _app, client, _factory, cid, _engine = world
+    settings, app, client, factory, cid, _engine = world
     r = client.post(f"/characters/{cid}/desire", json={"text": "хочу друзей"})
     assert r.status_code == 201
     # unauthenticated
     client.post("/auth/logout")
+    # Jar entry was set directly (auth_client); logout's delete_cookie
+    # doesn't match its attributes — clear it explicitly.
+    client.cookies.delete(settings.api.cookie_name)
     assert client.get(f"/characters/{cid}/desire").status_code == 401
     assert client.post(f"/characters/{cid}/desire", json={"text": "х"}).status_code == 401
     assert client.get(f"/characters/{cid}/desire/opportunities").status_code == 401
     # another user
-    _register_and_login(client, "b2other")
+    client = _authed(app, settings, factory, "b2other")
     assert client.get(f"/characters/{cid}/desire").status_code == 403
     assert client.post(f"/characters/{cid}/desire", json={"text": "хочу дела"}).status_code == 403
     assert client.delete(f"/characters/{cid}/desire").status_code == 403
@@ -686,7 +692,9 @@ def test_ui_legacy_pins_intact():
     assert js.count('} else { toast(e.message, true); }') == 2
     assert js.count('"Идти"') == 1
     assert js.count("/travel/plan") == 1
-    assert js.count("S.authProbed = false") == 2
+    # #309: the local login form (which held the second reset site) is gone —
+    # only the logout handler resets authProbed now.
+    assert js.count("S.authProbed = false") == 1
     assert js.count("S.authProbed = true") == 1
     # #74: +1 each — the Home screen reads home_location_id (outside the
     # map, per the m149 revision) and its h2 is «Дом»; deliberate

@@ -269,8 +269,9 @@ def test_external_navigation_pin():
     assert body.count('el("a", { href: "#/world" }, "К острову →")') == 1
     # …and adds NO new gotoWorld call site (the file-wide count is
     # unchanged — the submit's guarded success navigation is the only one
-    # in this body).
-    assert js.count("gotoWorld();") == 5
+    # in this body). #309: the login-success gotoWorld site is gone with
+    # local auth (count was 5).
+    assert js.count("gotoWorld();") == 4
     assert body.count("gotoWorld();") == 1
 
 

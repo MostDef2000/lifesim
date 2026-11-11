@@ -31,6 +31,8 @@ from sqlalchemy.orm import sessionmaker
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../../.."))
 
+from tests.helpers import auth_client, make_user  # noqa: E402
+
 from app.api.app import create_app  # noqa: E402
 from app.config.config import load_config  # noqa: E402
 from app.db.models import (  # noqa: E402
@@ -46,7 +48,6 @@ from app.events.events import EventType  # noqa: E402
 from app.simulation.engine import Engine  # noqa: E402
 from app.world.seed_world import seed_world  # noqa: E402
 
-PW = "Correct-Horse-9!"
 SETTINGS = None
 
 # Live-test numbers: 0.1 s real interval; time_scale 6000 → 6000 game-min
@@ -99,14 +100,14 @@ def frozen_world(tmp_path):
 
 # ---------- helpers (m151 pattern) ----------
 
-def _register_and_login(client, username):
-    r = client.post("/auth/register", json={
-        "username": username, "email": f"{username}@example.com",
-        "password": PW, "age_confirmed": True,
-    })
-    assert r.status_code == 201, r.text
-    r = client.post("/auth/login", json={"username": username, "password": PW})
-    assert r.status_code == 200, r.text
+def _authed(settings, app, factory, username):
+    """#309: local register/login is gone — create the user directly
+    (make_user) and return a client with the app's own signed session
+    cookie (the fixture's context-managed client already runs the
+    lifespan/tick driver; this client only sends requests)."""
+    with factory() as session:
+        user = make_user(session, username, f"{username}@example.com")
+    return auth_client(app, settings, user)
 
 
 def _make_character(client, name):
@@ -177,9 +178,9 @@ def _create_move(client, factory, cid, world_id, loc_type="settlement"):
 # ---------- a) ticker advances the clock and completes a MOVE ----------
 
 def test_ticker_advances_clock_and_completes_move(world):
-    settings, app, client, factory = world
+    settings, app, _client, factory = world
     wid = settings.world.world_id
-    _register_and_login(client, "ticker151")
+    client = _authed(settings, app, factory, "ticker151")
     cid = _make_character(client, "Tick Mover")
     target_id, task_id = _create_move(client, factory, cid, wid)
 
@@ -261,9 +262,9 @@ def test_tick_exception_does_not_kill_driver(world, monkeypatch):
 # ---------- e) repeated ticks never double-apply ----------
 
 def test_repeated_ticks_never_double_apply(world):
-    settings, app, client, factory = world
+    settings, app, _client, factory = world
     wid = settings.world.world_id
-    _register_and_login(client, "mono151")
+    client = _authed(settings, app, factory, "mono151")
     # Setup race guard: the live driver can tick BETWEEN POST /characters and
     # the DIRECT switch, and a fresh player character defaults to AUTONOMOUS
     # (§61) — a tick in that window legally runs its utility AI (routine

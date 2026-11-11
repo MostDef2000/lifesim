@@ -177,11 +177,12 @@ def test_no_double_dispatch_navigation():
     # is whole-file-pinned == 1 by m147/m153/m154/m156/m157 (the pollEvents
     # re-render gate); this body must not add a 2nd match.
     assert JS.count('if ("#/world" === location.hash) viewWorld();') == 1
-    # Five call sites: register success, create-character success,
-    # viewExternal depart, mapLink "Показать на карте", and — since #72 —
-    # the Place screen's «К карте» (same single-dispatch contract; the
-    # focus fields are set inline, mapLink() itself is untouched).
-    assert JS.count("gotoWorld();") == 5
+    # Four call sites: create-character success, viewExternal depart,
+    # mapLink "Показать на карте", and — since #72 — the Place screen's
+    # «К карте» (same single-dispatch contract; the focus fields are set
+    # inline, mapLink() itself is untouched). #309: the register/login
+    # success site is gone with local auth (count was 5).
+    assert JS.count("gotoWorld();") == 4
     # route() normalizes an EMPTY hash exactly once, without a second render:
     # set the hash and return — the queued hashchange re-enters route() with
     # a concrete view.

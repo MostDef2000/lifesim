@@ -60,11 +60,12 @@ import sys
 from io import BytesIO
 from pathlib import Path
 
-from fastapi.testclient import TestClient
 from PIL import Image
 from sqlalchemy.orm import sessionmaker
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../../.."))
+
+from tests.helpers import auth_client, make_user  # noqa: E402
 
 from app.api import visual_routes  # noqa: E402
 from app.api.app import create_app  # noqa: E402
@@ -88,7 +89,6 @@ from app.visual.descriptor import (  # noqa: E402
 from app.visual.transports import StubFluxTransport  # noqa: E402
 from app.world.seed_world import seed_world  # noqa: E402
 
-PW = "Correct-Horse-9!"
 SETTINGS = None
 
 
@@ -149,15 +149,13 @@ def _env(tmp_path, *, transport=None):
     return settings, app, factory, engine
 
 
-def _login(app, username):
-    client = TestClient(app)
-    r = client.post("/auth/register", json={
-        "username": username, "email": f"{username}@x.com",
-        "password": PW, "age_confirmed": True})
-    assert r.status_code == 201, r.text
-    r = client.post("/auth/login", json={"username": username, "password": PW})
-    assert r.status_code == 200, r.text
-    return client
+def _authed(settings, app, factory, username):
+    """#309: local register/login is gone — create the user directly
+    (make_user) and return a client with the app's own signed session
+    cookie."""
+    with factory() as session:
+        user = make_user(session, username, f"{username}@x.com")
+    return auth_client(app, settings, user)
 
 
 def _png_bytes():
@@ -208,11 +206,11 @@ class TestPreviewModes:
         the m216 legacy contract — exact key set, deterministic seed, stub
         PNG, and a transport call with NO mode-related payload (the mode
         never leaks toward the transport)."""
-        settings, app, _, _ = _env(tmp_path)
+        settings, app, factory, _ = _env(tmp_path)
         # hold one shared capture instance
         shared = CaptureTransport()
         app.state.flux_transport_factory = lambda: shared
-        client = _login(app, "w236legacy")
+        client = _authed(settings, app, factory, "w236legacy")
         r = client.post("/visual/preview", json=PREVIEW_BODY)
         assert r.status_code == 200, r.text
         data = r.json()
@@ -231,8 +229,8 @@ class TestPreviewModes:
     def test_mode_portrait_explicit_matches_omitted_bytes(self, tmp_path):
         """Invariant guard (green on base): mode="portrait" is an explicit
         legacy alias — byte-identical prompt AND seed to the omitted form."""
-        _, app, _, _ = _env(tmp_path)
-        client = _login(app, "w236portraitalias")
+        settings, app, factory, _ = _env(tmp_path)
+        client = _authed(settings, app, factory, "w236portraitalias")
         omitted = client.post("/visual/preview", json=PREVIEW_BODY).json()
         explicit = client.post(
             "/visual/preview", json={**PREVIEW_BODY, "mode": "portrait"}).json()
@@ -248,8 +246,8 @@ class TestPreviewModes:
         "nothing below the chest visible" overrode the framing suffixes."""
         from app.visual.style_presets import FULL_BODY_CASTING, FULL_BODY_FRAMING
 
-        _, app, _, _ = _env(tmp_path)
-        client = _login(app, "w236fbc")
+        settings, app, factory, _ = _env(tmp_path)
+        client = _authed(settings, app, factory, "w236fbc")
         r = client.post("/visual/preview", json={
             **PREVIEW_BODY, "outfit_mode": "nude",
             "mode": "full_body_clothed"})
@@ -273,8 +271,8 @@ class TestPreviewModes:
         modes (single swap point)."""
         from app.visual.style_presets import FULL_BODY_CASTING, FULL_BODY_FRAMING
 
-        _, app, _, _ = _env(tmp_path)
-        client = _login(app, "w236fbo")
+        settings, app, factory, _ = _env(tmp_path)
+        client = _authed(settings, app, factory, "w236fbo")
         r = client.post("/visual/preview", json={
             **PREVIEW_BODY, "outfit_mode": "formal",
             "mode": "full_body_outfit"})
@@ -341,8 +339,8 @@ class TestPreviewModes:
                 calls.append(1)
                 return StubFluxTransport().generate(prompt, seed, size)
 
-        _, app, _, _ = _env(tmp_path, transport=lambda: Counting())
-        client = _login(app, "w236basebodyoff")
+        settings, app, factory, _ = _env(tmp_path, transport=lambda: Counting())
+        client = _authed(settings, app, factory, "w236basebodyoff")
         r = client.post("/visual/preview", json={
             **PREVIEW_BODY, "outfit_mode": "nude", "mode": "base_body"})
         assert r.status_code == 422, r.text
@@ -357,8 +355,8 @@ class TestPreviewModes:
         the omitted-mode legacy form — keep the SHARED chest-up casting
         preset byte-for-byte; the 023r2 casting swap must never touch
         portrait/legacy paths."""
-        _, app, _, _ = _env(tmp_path)
-        client = _login(app, "w236portraitcasting")
+        settings, app, factory, _ = _env(tmp_path)
+        client = _authed(settings, app, factory, "w236portraitcasting")
         for body in (PREVIEW_BODY, {**PREVIEW_BODY, "mode": "portrait"}):
             r = client.post("/visual/preview", json=body)
             assert r.status_code == 200, r.text
@@ -385,8 +383,8 @@ class TestPreviewModes:
                 calls.append(1)
                 return StubFluxTransport().generate(prompt, seed, size)
 
-        _, app, _, _ = _env(tmp_path, transport=lambda: Counting())
-        client = _login(app, "w236underage")
+        settings, app, factory, _ = _env(tmp_path, transport=lambda: Counting())
+        client = _authed(settings, app, factory, "w236underage")
         r = client.post("/visual/preview", json={
             **PREVIEW_BODY, "age": 16, "mode": "base_body"})
         assert r.status_code == 422, r.text
@@ -402,8 +400,8 @@ class TestPreviewModes:
                 calls.append(1)
                 return StubFluxTransport().generate(prompt, seed, size)
 
-        _, app, _, _ = _env(tmp_path, transport=lambda: Counting())
-        client = _login(app, "w236badmode")
+        settings, app, factory, _ = _env(tmp_path, transport=lambda: Counting())
+        client = _authed(settings, app, factory, "w236badmode")
         r = client.post("/visual/preview", json={
             **PREVIEW_BODY, "mode": "hologram"})
         assert r.status_code == 422, r.text
@@ -417,10 +415,10 @@ class TestPreviewReference:
         """New behavior (RED on base): an owned stage-1 reference resolves
         to reference_b64 = base64(stored bytes) on the transport call and
         composes with a body mode."""
-        _, app, _, _ = _env(tmp_path)
+        settings, app, factory, _ = _env(tmp_path)
         shared = CaptureTransport()
         app.state.flux_transport_factory = lambda: shared
-        client = _login(app, "w236refok")
+        client = _authed(settings, app, factory, "w236refok")
         ref_id = _upload_reference(client)
         r = client.post("/visual/preview", json={
             **PREVIEW_BODY, "reference_id": ref_id,
@@ -433,12 +431,12 @@ class TestPreviewReference:
     def test_foreign_or_missing_reference_404_no_transport(self, tmp_path):
         """New behavior (RED on base): foreign/missing reference_id ->
         the same 404 the portrait route answers, no transport call."""
-        _, app, _, _ = _env(tmp_path)
+        settings, app, factory, _ = _env(tmp_path)
         shared = CaptureTransport()
         app.state.flux_transport_factory = lambda: shared
-        owner = _login(app, "w236refowner")
+        owner = _authed(settings, app, factory, "w236refowner")
         ref_id = _upload_reference(owner)
-        other = _login(app, "w236refother")
+        other = _authed(settings, app, factory, "w236refother")
         for bad in (ref_id, 999999):
             r = other.post("/visual/preview", json={
                 **PREVIEW_BODY, "reference_id": bad})
@@ -452,8 +450,8 @@ class TestFailureSemantics:
     def test_preview_transport_value_error_502_zero_writes(self, tmp_path):
         """Invariant guard (green on base): a transport ValueError maps to
         502 and writes NOTHING (no asset, no event, no reference, no file)."""
-        settings, app, _, engine = _env(tmp_path, transport=lambda: BoomTransport())
-        client = _login(app, "w236boompreview")
+        settings, app, factory, engine = _env(tmp_path, transport=lambda: BoomTransport())
+        client = _authed(settings, app, factory, "w236boompreview")
         before = _write_counts(settings, engine)
         r = client.post("/visual/preview", json={
             **PREVIEW_BODY, "mode": "full_body_clothed"})
@@ -464,8 +462,8 @@ class TestFailureSemantics:
     def test_portrait_transport_value_error_502_zero_writes(self, tmp_path):
         """New pin (green on base): the PORTRAIT route's ValueError -> 502
         mapping was never pinned; pin it with the zero-write proof."""
-        settings, app, _, engine = _env(tmp_path, transport=lambda: BoomTransport())
-        client = _login(app, "w236boomportrait")
+        settings, app, factory, engine = _env(tmp_path, transport=lambda: BoomTransport())
+        client = _authed(settings, app, factory, "w236boomportrait")
         # create the player character so the portrait route has an owner
         r = client.post("/characters", json={
             "name": "Бум Портретов", "sex": "F", "age": 30})
@@ -481,8 +479,8 @@ class TestFailureSemantics:
         """Invariant guard (green on base): successful previews in EVERY
         mode write nothing — no VisualAsset row, no canonical promotion,
         no storage file, no WorldEvent."""
-        settings, app, _, engine = _env(tmp_path)
-        client = _login(app, "w236nowrite")
+        settings, app, factory, engine = _env(tmp_path)
+        client = _authed(settings, app, factory, "w236nowrite")
         before = _write_counts(settings, engine)
         # 023r3: base_body is route-disabled (422) — the no-write sweep
         # covers full_body_outfit as its non-portrait representative
@@ -503,8 +501,8 @@ class TestSceneGrounding:
     def test_scene_prompt_player_worn_fragment(self, tmp_path):
         """New behavior (RED on base): the scene prompt carries the
         protagonist's worn outfit from committed state."""
-        _, app, _, engine = _env(tmp_path)
-        client = _login(app, "w236sceneworn")
+        settings, app, factory, engine = _env(tmp_path)
+        client = _authed(settings, app, factory, "w236sceneworn")
         r = client.post("/characters", json={
             "name": "Носит Куртку", "sex": "F", "age": 29})
         assert r.status_code == 201, r.text
@@ -534,8 +532,8 @@ class TestSceneGrounding:
         """New behavior (RED on base): an NPC with worn items gets a
         "worn" entry (id-ordered) and the prompt carries "NAME wears: ...";
         the player's own entry never duplicates the protagonist fragment."""
-        _, app, _, engine = _env(tmp_path)
-        client = _login(app, "w236scenenvpc")
+        settings, app, factory, engine = _env(tmp_path)
+        client = _authed(settings, app, factory, "w236scenenvpc")
         r = client.post("/characters", json={
             "name": "Игрок Сцен", "sex": "M", "age": 33})
         assert r.status_code == 201, r.text
@@ -582,8 +580,8 @@ class TestSceneGrounding:
     def test_scene_without_worn_prompt_bytes_unchanged(self, tmp_path):
         """Invariant guard (green on base): a scene where nobody wears
         anything builds the exact pre-W2 prompt (no fragment, no key)."""
-        _, app, _, engine = _env(tmp_path)
-        client = _login(app, "w236scenplain")
+        settings, app, factory, engine = _env(tmp_path)
+        client = _authed(settings, app, factory, "w236scenplain")
         r = client.post("/characters", json={
             "name": "Босый Игрок", "sex": "F", "age": 25})
         assert r.status_code == 201, r.text

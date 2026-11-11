@@ -256,19 +256,20 @@ def test_appearance_chips_fill_only_pins():
 
 def test_appearance_auth_isolation_pins():
     # APPEARANCE_DRAFT is per-session private input (W118-RV1 F1 precedent):
-    # a reset helper exists and fires at ALL THREE auth transitions — fresh
-    # login, logout, account deletion — always right after the existing
-    # creatorResetDraft() call at that site.
+    # a reset helper exists and fires at BOTH remaining auth transitions —
+    # logout, account deletion — always right after the existing
+    # creatorResetDraft() call at that site. #309: the fresh-login site is
+    # gone with local auth (OIDC SSO has no in-app login form).
     assert JS.count("function appearanceResetDraft()") == 1
-    # Definition + 3 call sites (file-wide count == 4).
-    assert JS.count("appearanceResetDraft();") == 3
-    assert JS.count("appearanceResetDraft()") == 4
+    # Definition + 2 call sites (file-wide count == 3).
+    assert JS.count("appearanceResetDraft();") == 2
+    assert JS.count("appearanceResetDraft()") == 3
     # Every call site sits IMMEDIATELY after the creatorResetDraft() call of
     # the same transition (line-scan adjacency, not byte coincidence).
     lines = JS.splitlines()
     sites = [i for i, ln in enumerate(lines)
              if "appearanceResetDraft();" in ln]
-    assert len(sites) == 3
+    assert len(sites) == 2
     for i in sites:
         assert "creatorResetDraft();" in lines[i - 1], lines[i]
     # The helper resets all four draft fields.

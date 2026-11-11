@@ -79,8 +79,8 @@ from app.visual.descriptor import (  # noqa: E402
 )
 from app.visual.transports import StubFluxTransport  # noqa: E402
 from app.world.seed_world import seed_world  # noqa: E402
+from tests.helpers import auth_client, make_user  # noqa: E402
 
-PW = "Correct-Horse-9!"
 SETTINGS = None
 
 
@@ -202,23 +202,21 @@ def _env(tmp_path, **kwargs):
     return settings, app, factory
 
 
-def _login(app, username):
-    client = TestClient(app)
-    r = client.post("/auth/register", json={
-        "username": username, "email": f"{username}@x.com",
-        "password": PW, "age_confirmed": True})
-    assert r.status_code == 201, r.text
-    r = client.post("/auth/login", json={"username": username, "password": PW})
-    assert r.status_code == 200, r.text
-    return client
+def _authed(settings, app, factory, username):
+    """#309: local register/login is gone — create the user directly
+    (make_user) and return a client with the app's own signed session
+    cookie."""
+    with factory() as session:
+        user = make_user(session, username, f"{username}@x.com")
+    return auth_client(app, settings, user)
 
 
 # ---------- preview 200 contract ----------
 
 class TestPreviewContract:
     def test_preview_200_exact_key_set_and_full_prompt_bytes(self, tmp_path):
-        settings, app, _ = _env(tmp_path)
-        client = _login(app, "w216contract")
+        settings, app, factory = _env(tmp_path)
+        client = _authed(settings, app, factory, "w216contract")
         r = client.post("/visual/preview", json=PREVIEW_BODY)
         assert r.status_code == 200, r.text
         data = r.json()
@@ -237,8 +235,8 @@ class TestPreviewContract:
         assert base64.b64decode(data["image_base64"]) == expected_png
 
     def test_preview_is_deterministic(self, tmp_path):
-        _, app, _ = _env(tmp_path)
-        client = _login(app, "w216determinism")
+        settings, app, factory = _env(tmp_path)
+        client = _authed(settings, app, factory, "w216determinism")
         first = client.post("/visual/preview", json=PREVIEW_BODY).json()
         second = client.post("/visual/preview", json=PREVIEW_BODY).json()
         assert first == second
@@ -248,21 +246,21 @@ class TestPreviewContract:
         ("formal", ", wearing formal attire"),
     ])
     def test_preview_outfit_mode_rides_the_prompt(self, tmp_path, mode, tail):
-        _, app, _ = _env(tmp_path)
-        client = _login(app, f"w216outfit_{mode}")
+        settings, app, factory = _env(tmp_path)
+        client = _authed(settings, app, factory, f"w216outfit_{mode}")
         r = client.post("/visual/preview", json={**PREVIEW_BODY, "outfit_mode": mode})
         assert r.status_code == 200, r.text
         assert r.json()["prompt"].endswith(tail)
 
     def test_preview_transport_value_error_maps_502(self, tmp_path):
-        _, app, _ = _env(tmp_path)
+        settings, app, factory = _env(tmp_path)
 
         class BoomTransport:
             def generate(self, prompt, seed, size):
                 raise ValueError("flux exploded")
 
         app.state.flux_transport_factory = lambda: BoomTransport()
-        client = _login(app, "w216boom")
+        client = _authed(settings, app, factory, "w216boom")
         r = client.post("/visual/preview", json=PREVIEW_BODY)
         assert r.status_code == 502, r.text
         assert "flux exploded" in r.json()["detail"]
@@ -273,7 +271,7 @@ class TestPreviewContract:
 class TestPreviewNoSimWrite:
     def test_preview_writes_no_sim_state_and_no_files(self, tmp_path):
         settings, app, factory = _env(tmp_path)
-        client = _login(app, "w216nowrite")
+        client = _authed(settings, app, factory, "w216nowrite")
 
         def snapshot():
             with factory() as session:
@@ -306,8 +304,8 @@ class TestPreviewNoSimWrite:
 class TestPreviewLimiter:
     def test_sixth_request_in_window_gets_429(self, tmp_path):
         # default preview_rpm == 5 (no override on this env)
-        _, app, _ = _env(tmp_path)
-        client = _login(app, "w216limiter")
+        settings, app, factory = _env(tmp_path)
+        client = _authed(settings, app, factory, "w216limiter")
         for i in range(5):
             r = client.post("/visual/preview", json=PREVIEW_BODY)
             assert r.status_code == 200, (i, r.text)
@@ -318,8 +316,8 @@ class TestPreviewLimiter:
     def test_rejected_request_does_not_consume_quota(self, tmp_path, monkeypatch):
         clock = _FakeClock()
         monkeypatch.setattr(visual_routes, "time", clock)
-        _, app, _ = _env(tmp_path)
-        client = _login(app, "w216noc")
+        settings, app, factory = _env(tmp_path)
+        client = _authed(settings, app, factory, "w216noc")
         for _ in range(5):
             assert client.post("/visual/preview", json=PREVIEW_BODY).status_code == 200
         clock.now += 30  # mid-window: quota spent, rejection must NOT append
@@ -333,9 +331,9 @@ class TestPreviewLimiter:
             assert r.status_code == 200, (i, r.text)
 
     def test_quota_is_per_user(self, tmp_path):
-        _, app, _ = _env(tmp_path)
-        user_a = _login(app, "w216usera")
-        user_b = _login(app, "w216userb")
+        settings, app, factory = _env(tmp_path)
+        user_a = _authed(settings, app, factory, "w216usera")
+        user_b = _authed(settings, app, factory, "w216userb")
         for _ in range(5):
             assert user_a.post("/visual/preview", json=PREVIEW_BODY).status_code == 200
         assert user_a.post("/visual/preview", json=PREVIEW_BODY).status_code == 429
@@ -347,8 +345,8 @@ class TestPreviewLimiter:
 
 class TestPreviewGateAndAuth:
     def test_disabled_gate_503_before_limiter_and_consumes_nothing(self, tmp_path):
-        settings, app, _ = _env(tmp_path, visual_enabled=False)
-        client = _login(app, "w216gate")
+        settings, app, factory = _env(tmp_path, visual_enabled=False)
+        client = _authed(settings, app, factory, "w216gate")
         for _ in range(6):  # > rpm: proves the limiter never ran
             r = client.post("/visual/preview", json=PREVIEW_BODY)
             assert r.status_code == 503, r.text
@@ -362,7 +360,7 @@ class TestPreviewGateAndAuth:
         assert client.post("/visual/preview", json=PREVIEW_BODY).status_code == 429
 
     def test_unauthenticated_401(self, tmp_path):
-        _, app, _ = _env(tmp_path)
+        settings, app, factory = _env(tmp_path)
         anon = TestClient(app)
         r = anon.post("/visual/preview", json=PREVIEW_BODY)
         assert r.status_code == 401
@@ -375,8 +373,8 @@ class TestPreviewValidation:
     # DO consume quota (frozen order); one env must serve the whole matrix.
     @pytest.fixture()
     def client(self, tmp_path):
-        _, app, _ = _env(tmp_path, preview_rpm=60)
-        return _login(app, "w216valid")
+        settings, app, factory = _env(tmp_path, preview_rpm=60)
+        return _authed(settings, app, factory, "w216valid")
 
     @pytest.mark.parametrize("body,detail", [
         ({"sex": "X", "age": 27}, "sex must be M|F"),
@@ -483,8 +481,8 @@ class TestResolverPriority:
 
 class TestCharactersPersistence:
     def test_appearance_row_written_cleaned_in_same_transaction(self, tmp_path):
-        _, app, factory = _env(tmp_path)
-        client = _login(app, "w216persist")
+        settings, app, factory = _env(tmp_path)
+        client = _authed(settings, app, factory, "w216persist")
         r = client.post("/characters", json={
             "name": "Канон Тест", "sex": "M", "age": 30,
             "looks": "свободный текст",
@@ -504,8 +502,8 @@ class TestCharactersPersistence:
             assert row.appearance_prompt == "свободный текст"
 
     def test_absent_appearance_writes_no_row(self, tmp_path):
-        _, app, factory = _env(tmp_path)
-        client = _login(app, "w216absent")
+        settings, app, factory = _env(tmp_path)
+        client = _authed(settings, app, factory, "w216absent")
         r = client.post("/characters", json={
             "name": "Пре Тест", "sex": "M", "age": 30})
         assert r.status_code == 201, r.text
@@ -514,15 +512,15 @@ class TestCharactersPersistence:
             assert session.get(CharacterAppearance, r.json()["id"]) is None
 
     def test_provided_but_empty_writes_no_row(self, tmp_path):
-        _, app, factory = _env(tmp_path)
-        client = _login(app, "w216empty")
+        settings, app, factory = _env(tmp_path)
+        client = _authed(settings, app, factory, "w216empty")
         r = client.post("/characters", json={
             "name": "Пусто Тест", "sex": "M", "age": 30,
             "appearance": {}, "appearance_prompt": ""})
         assert r.status_code == 201, r.text
         # whitespace-only fields clean to None == absent (second user:
         # one character per user is the pre-existing MVP limit)
-        other = _login(app, "w216empty2")
+        other = _authed(settings, app, factory, "w216empty2")
         r2 = other.post("/characters", json={
             "name": "Второй Пусто", "sex": "F", "age": 31,
             "appearance": {"face": "   "}})
@@ -533,8 +531,8 @@ class TestCharactersPersistence:
             assert session.query(CharacterAppearance).count() == 0
 
     def test_prompt_only_row_has_null_appearance(self, tmp_path):
-        _, app, factory = _env(tmp_path)
-        client = _login(app, "w216promptonly")
+        settings, app, factory = _env(tmp_path)
+        client = _authed(settings, app, factory, "w216promptonly")
         r = client.post("/characters", json={
             "name": "Промпт Тест", "sex": "F", "age": 28,
             "appearance_prompt": "только свободный текст"})
@@ -553,8 +551,8 @@ class TestCharactersPersistence:
           "third_eye": "x"}, "at most 12 fields"),
     ])
     def test_422_appearance_paths_write_nothing(self, tmp_path, appearance, detail):
-        _, app, factory = _env(tmp_path)
-        client = _login(app, "w216bad")
+        settings, app, factory = _env(tmp_path)
+        client = _authed(settings, app, factory, "w216bad")
         with factory() as session:
             chars_before = session.query(Character).count()
         r = client.post("/characters", json={
@@ -567,8 +565,8 @@ class TestCharactersPersistence:
             assert session.query(CharacterAppearance).count() == 0
 
     def test_non_dict_appearance_rejected_at_schema_layer(self, tmp_path):
-        _, app, factory = _env(tmp_path)
-        client = _login(app, "w216nondict")
+        settings, app, factory = _env(tmp_path)
+        client = _authed(settings, app, factory, "w216nondict")
         r = client.post("/characters", json={
             "name": "Строка Тест", "sex": "M", "age": 30,
             "appearance": "не объект"})
@@ -577,8 +575,8 @@ class TestCharactersPersistence:
             assert session.query(CharacterAppearance).count() == 0
 
     def test_appearance_prompt_over_500_422(self, tmp_path):
-        _, app, factory = _env(tmp_path)
-        client = _login(app, "w216longprompt")
+        settings, app, factory = _env(tmp_path)
+        client = _authed(settings, app, factory, "w216longprompt")
         with factory() as session:
             chars_before = session.query(Character).count()
         r = client.post("/characters", json={
@@ -590,8 +588,8 @@ class TestCharactersPersistence:
             assert session.query(Character).count() == chars_before
 
     def test_account_deletion_cascades_appearance_row(self, tmp_path):
-        _, app, factory = _env(tmp_path)
-        client = _login(app, "w216del")
+        settings, app, factory = _env(tmp_path)
+        client = _authed(settings, app, factory, "w216del")
         r = client.post("/characters", json={
             "name": "Каскад Тест", "sex": "F", "age": 28,
             "appearance": {"face": "мягкие черты"},

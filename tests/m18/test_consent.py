@@ -2,12 +2,10 @@
 import os
 import sys
 
-from fastapi.testclient import TestClient
 from sqlalchemy.orm import sessionmaker
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../../.."))
 
-from app.api.auth import hash_password  # noqa: E402
 from app.config.config import load_config  # noqa: E402
 from app.db.models import (  # noqa: E402
     Character,
@@ -17,6 +15,7 @@ from app.db.models import (  # noqa: E402
     create_engine_factory,
 )
 from app.world.seed_world import seed_world  # noqa: E402
+from tests.helpers import auth_client, make_user  # noqa: E402
 
 SETTINGS = None
 
@@ -78,19 +77,15 @@ class TestConsent:
         engine = build(settings)
         factory = sessionmaker(bind=engine, expire_on_commit=False)
         with factory() as session:
-            session.add(User(
-                username="laska", email="l@x.com",
-                password_hash=hash_password("password123"),
-                role="player", age_confirmed=True, created_at=0,
-            ))
-            session.commit()
+            # #309: local register/login gone — create the user row directly
+            # and sign the app's own session cookie.
+            user = make_user(session, "laska", "l@x.com")
             self._player(session, settings)
             session.commit()
+            session.refresh(user)
         from app.api.app import create_app
 
-        client = TestClient(create_app(settings, factory))
-        client.post("/auth/login", json={
-            "username": "laska", "password": "password123"})
+        client = auth_client(create_app(settings, factory), settings, user)
         with factory() as session:
             npc = self._npc(session, settings)
             npc_id = npc.id
@@ -104,12 +99,9 @@ class TestConsent:
         engine = build(settings)
         factory = sessionmaker(bind=engine, expire_on_commit=False)
         with factory() as session:
-            session.add(User(
-                username="laska", email="l@x.com",
-                password_hash=hash_password("password123"),
-                role="player", age_confirmed=True, created_at=0,
-            ))
-            session.commit()
+            # #309: local register/login gone — create the user row directly
+            # and sign the app's own session cookie.
+            user = make_user(session, "laska", "l@x.com")
             char = self._player(session, settings)
             session.commit()
             npc = self._npc(session, settings)
@@ -124,11 +116,10 @@ class TestConsent:
             session.merge(rel)
             session.commit()
             npc_id = npc.id
+            session.refresh(user)
         from app.api.app import create_app
 
-        client = TestClient(create_app(settings, factory))
-        client.post("/auth/login", json={
-            "username": "laska", "password": "password123"})
+        client = auth_client(create_app(settings, factory), settings, user)
         r1 = client.post("/interactions/romantic", json={"npc_id": npc_id})
         assert r1.status_code == 200, r1.text
         assert r1.json()["permission"] == "granted"
@@ -142,12 +133,9 @@ class TestConsent:
         engine = build(settings)
         factory = sessionmaker(bind=engine, expire_on_commit=False)
         with factory() as session:
-            session.add(User(
-                username="laska", email="l@x.com",
-                password_hash=hash_password("password123"),
-                role="player", age_confirmed=True, created_at=0,
-            ))
-            session.commit()
+            # #309: local register/login gone — create the user row directly
+            # and sign the app's own session cookie.
+            user = make_user(session, "laska", "l@x.com")
             char = self._player(session, settings)
             session.commit()
             npc = self._npc(session, settings)
@@ -163,11 +151,10 @@ class TestConsent:
             ))
             session.commit()
             char_id = char.id
+            session.refresh(user)
         from app.api.app import create_app
 
-        client = TestClient(create_app(settings, factory))
-        client.post("/auth/login", json={
-            "username": "laska", "password": "password123"})
+        client = auth_client(create_app(settings, factory), settings, user)
         r = client.post("/interactions/romantic", json={"npc_id": npc_id})
         assert r.status_code == 200
         assert r.json()["permission"] == "declined"

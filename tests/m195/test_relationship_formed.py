@@ -70,7 +70,8 @@ from sqlalchemy.orm import sessionmaker
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../../.."))
 
-from fastapi.testclient import TestClient  # noqa: E402
+
+from tests.helpers import auth_client, make_user  # noqa: E402
 
 from app.api.app import create_app  # noqa: E402
 from app.config.config import load_config  # noqa: E402
@@ -91,7 +92,6 @@ from app.world.social_seed import seed_social  # noqa: E402
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "../.."))
 APP_JS = os.path.join(ROOT, "backend/app/web/app.js")
 
-PW = "Correct-Horse-9!"
 SETTINGS = None
 
 
@@ -131,12 +131,12 @@ def make_world(tmp_path, user="b195", seed=42, initial_affection=None):
         session.commit()
     factory = sessionmaker(bind=engine, expire_on_commit=False)
     app = create_app(settings, factory)
-    client = TestClient(app)
-    client.post("/auth/register", json={
-        "username": user, "email": f"{user}@x.com",
-        "password": PW, "age_confirmed": True,
-    })
-    client.post("/auth/login", json={"username": user, "password": PW})
+    # #309: local register/login is gone — the user row is created directly
+    # (make_user) and the client carries the app's own signed session
+    # cookie (auth_client).
+    with factory() as s:
+        user_row = make_user(s, user, f"{user}@x.com")
+    client = auth_client(app, settings, user_row)
     r = client.post("/characters", json={"name": "Борис Орлов", "sex": "M", "age": 30})
     assert r.status_code == 201, r.text
     cid = r.json()["id"]

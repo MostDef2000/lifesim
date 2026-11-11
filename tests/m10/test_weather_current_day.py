@@ -24,18 +24,15 @@ from sqlalchemy.orm import sessionmaker
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../../.."))
 
-from fastapi.testclient import TestClient  # noqa: E402
-
-from app.api.auth import hash_password  # noqa: E402
 from app.config.config import load_config  # noqa: E402
 from app.db.models import (  # noqa: E402
-    User,
     WeatherState,
     WorldEvent,
     bootstrap,
     create_engine_factory,
 )
 from app.world.seed_world import seed_world  # noqa: E402
+from tests.helpers import auth_client, make_user  # noqa: E402
 
 SETTINGS = None
 
@@ -120,18 +117,14 @@ def world(tmp_path):
     with sessionmaker(bind=engine)() as session:
         bootstrap(engine, settings, seed=42)
         seed_world(session, settings, settings.world.world_id)
-        session.add(User(
-            username="wx", email="wx@x.com",
-            password_hash=hash_password("password123"),
-            role="player", age_confirmed=True, created_at=0,
-        ))
-        session.commit()
+        # #309: local register/login gone — create the user directly and
+        # sign the app's own session cookie.
+        wx = make_user(session, "wx", "wx@x.com")
     factory = sessionmaker(bind=engine, expire_on_commit=False)
     from app.api.app import create_app
 
     app = create_app(settings, factory)
-    client = TestClient(app)
-    client.post("/auth/login", json={"username": "wx", "password": "password123"})
+    client = auth_client(app, settings, wx)
     return settings, factory, client
 
 

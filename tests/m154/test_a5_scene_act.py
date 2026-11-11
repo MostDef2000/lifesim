@@ -32,6 +32,7 @@ from sqlalchemy.orm import sessionmaker
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../../.."))
 
 from fastapi.testclient import TestClient  # noqa: E402
+from tests.helpers import auth_client, make_user  # noqa: E402
 
 from app.api.app import create_app  # noqa: E402
 from app.config.config import load_config  # noqa: E402
@@ -50,7 +51,6 @@ from app.world.seed_world import seed_world  # noqa: E402
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "../.."))
 APP_JS = os.path.join(ROOT, "backend/app/web/app.js")
 
-PW = "Correct-Horse-9!"
 SETTINGS = None
 
 
@@ -83,17 +83,16 @@ def build_world(settings, seed=42):
 
 
 def make_player(settings, engine, username="actor87", direct=True):
-    """App + client + registered player with a character (DIRECT by default —
-    players spawn AUTONOMOUS per §61, and /scene/act refuses AUTONOMOUS)."""
+    """App + client + player with a character (DIRECT by default —
+    players spawn AUTONOMOUS per §61, and /scene/act refuses AUTONOMOUS).
+    #309: local register/login is gone — the user row is created directly
+    (make_user) and the client carries the app's own signed session
+    cookie (auth_client)."""
     factory = sessionmaker(bind=engine, expire_on_commit=False)
     app = create_app(settings, factory)
-    client = TestClient(app)
-    r = client.post("/auth/register", json={
-        "username": username, "email": f"{username[0]}@x.com",
-        "password": PW, "age_confirmed": True,
-    })
-    assert r.status_code == 201, r.text
-    client.post("/auth/login", json={"username": username, "password": PW})
+    with factory() as session:
+        user = make_user(session, username, f"{username[0]}@x.com")
+    client = auth_client(app, settings, user)
     r = client.post("/characters", json={
         "name": "Scene Tester", "sex": "M", "age": 30,
     })

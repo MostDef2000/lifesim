@@ -26,6 +26,8 @@ from sqlalchemy.orm import sessionmaker
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../../.."))
 
+from tests.helpers import auth_client, make_user  # noqa: E402
+
 from app.actions.lifecycle import progress_tick  # noqa: E402
 from app.api.app import create_app  # noqa: E402
 from app.config.config import load_config  # noqa: E402
@@ -44,7 +46,6 @@ ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "../.."))
 APP_JS = os.path.join(ROOT, "backend/app/web/app.js")
 APP_CSS = os.path.join(ROOT, "backend/app/web/style.css")
 
-PW = "Correct-Horse-9!"
 SETTINGS = None
 
 
@@ -70,16 +71,13 @@ def world(tmp_path):
     return settings, app, TestClient(app), factory
 
 
-def _register_and_login(client, username):
-    r = client.post("/auth/register", json={
-        "username": username, "email": f"{username}@example.com",
-        "password": PW, "age_confirmed": True,
-    })
-    assert r.status_code == 201, r.text
-    uid = r.json()["id"]
-    r = client.post("/auth/login", json={"username": username, "password": PW})
-    assert r.status_code == 200, r.text
-    return uid
+def _authed(settings, app, factory, username):
+    """#309: local register/login is gone — create the user directly
+    (make_user) and return a client with the app's own signed session
+    cookie."""
+    with factory() as session:
+        user = make_user(session, username, f"{username}@example.com")
+    return auth_client(app, settings, user)
 
 
 def _make_character(client, name):
@@ -118,7 +116,7 @@ def test_move_task_completes_with_arrival_and_event(world):
     without moving the character and without CHARACTER_MOVED."""
     settings, app, client, factory = world
     wid = settings.world.world_id
-    _register_and_login(client, "mover82")
+    client = _authed(settings, app, factory, "mover82")
     cid = _make_character(client, "Mover Test")
     _to_direct(client, cid)
 
@@ -179,7 +177,7 @@ def test_move_task_completes_with_arrival_and_event(world):
 def test_move_impossible_route_is_422_without_mutation(world):
     settings, app, client, factory = world
     wid = settings.world.world_id
-    _register_and_login(client, "caver82")
+    client = _authed(settings, app, factory, "caver82")
     cid = _make_character(client, "Cave Tester")
     _to_direct(client, cid)
 
@@ -211,7 +209,7 @@ def test_move_impossible_route_is_422_without_mutation(world):
 def test_travel_plan_grounds_alias_and_creates_move(world):
     settings, app, client, factory = world
     wid = settings.world.world_id
-    _register_and_login(client, "sailer82")
+    client = _authed(settings, app, factory, "sailer82")
     cid = _make_character(client, "Sailer Test")
     _to_direct(client, cid)
 
@@ -242,7 +240,7 @@ def test_travel_plan_grounds_alias_and_creates_move(world):
 
 def test_travel_plan_exact_display_name(world):
     settings, app, client, factory = world
-    _register_and_login(client, "exact82")
+    client = _authed(settings, app, factory, "exact82")
     cid = _make_character(client, "Exact Tester")
     _to_direct(client, cid)
     r = client.post("/travel/plan", json={"text": "Main Pier"})
@@ -254,7 +252,7 @@ def test_travel_plan_exact_display_name(world):
 
 def test_travel_plan_ambiguous_returns_options_without_task(world):
     settings, app, client, factory = world
-    _register_and_login(client, "ambig82")
+    client = _authed(settings, app, factory, "ambig82")
     cid = _make_character(client, "Ambig Tester")
     _to_direct(client, cid)
 
@@ -281,7 +279,7 @@ def test_travel_plan_ambiguous_returns_options_without_task(world):
 
 def test_travel_plan_unknown_destination(world):
     settings, app, client, factory = world
-    _register_and_login(client, "lost82")
+    client = _authed(settings, app, factory, "lost82")
     cid = _make_character(client, "Lost Tester")
     _to_direct(client, cid)
 
@@ -300,7 +298,7 @@ def test_travel_plan_requires_auth_and_character(world):
     r = client.post("/travel/plan", json={"text": "Main Pier"})
     assert r.status_code == 401
     # Authenticated but characterless → 422 (existing convention).
-    _register_and_login(client, "bare82")
+    client = _authed(settings, app, factory, "bare82")
     r = client.post("/travel/plan", json={"text": "Main Pier"})
     assert r.status_code == 422
 
@@ -310,7 +308,7 @@ def test_travel_plan_requires_auth_and_character(world):
 def test_direct_map_click_move_still_creates_task(world):
     settings, app, client, factory = world
     wid = settings.world.world_id
-    _register_and_login(client, "clicker82")
+    client = _authed(settings, app, factory, "clicker82")
     cid = _make_character(client, "Clicker Tester")
     _to_direct(client, cid)
 
@@ -344,7 +342,9 @@ def test_ui_travel_bar_pins_without_damaging_existing_pins():
     # Carry-forward pins (m146/m149/m150 lineage) must survive.
     assert js.count("innerHTML") == 0
     assert js.count('location.hash = "#/profile";') == 3
-    assert js.count("S.authProbed = false") == 2
+    # #309: the login-success authProbed reset site is gone
+    # with local auth — the flag is cleared at logout only.
+    assert js.count("S.authProbed = false") == 1
     assert js.count('"Выйти"') == 1
     assert js.count('"Удалить аккаунт"') == 1
     assert js.count("/auth/account/delete") == 1
@@ -364,7 +364,7 @@ def test_travel_plan_is_deterministic_without_llm(world):
     assert SETTINGS.llm.enabled is False, "slice 1 is deterministic only"
     settings, app, client, factory = world
     assert settings.llm.enabled is False
-    _register_and_login(client, "det82")
+    client = _authed(settings, app, factory, "det82")
     cid = _make_character(client, "Det Tester")
     _to_direct(client, cid)
     r = client.post("/travel/plan", json={"text": "идти к причалу"})
@@ -375,8 +375,8 @@ def test_travel_plan_is_deterministic_without_llm(world):
 def test_move_without_location_id_is_422(world):
     """Review F1: destination-less MOVE (client POST with empty params) used
     to enqueue a silent no-op task — reject it, don't accept."""
-    _, _, client, factory = world
-    _register_and_login(client, "nof138")
+    settings, app, _client, factory = world
+    client = _authed(settings, app, factory, "nof138")
     cid = _make_character(client, "Nof Dest")
     _to_direct(client, cid)
     r = client.post("/actions", json={
@@ -391,8 +391,8 @@ def test_move_without_location_id_is_422(world):
 def test_move_to_current_location_is_422(world):
     """Review F5: same-location MOVE would produce a 0-minute no-op with a
     spurious CHARACTER_MOVED — the server guards what the client guards."""
-    settings, _, client, factory = world
-    _register_and_login(client, "here138")
+    settings, app, _client, factory = world
+    client = _authed(settings, app, factory, "here138")
     cid = _make_character(client, "Here Already")
     _to_direct(client, cid)
     with factory() as s:

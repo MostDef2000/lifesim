@@ -277,10 +277,11 @@ def test_hygiene_and_neighbour_pins_untouched():
     assert js.count("S.visualDisabled = true") == 1
     assert js.count("S.visualDisabled = false") == 1
     # m162 WS/navigation hard pins survive the #175 edits. (#72: the Place
-    # screen's «К карте» is a 5th gotoWorld() call site — same
-    # single-dispatch contract; `location.hash = "#/world";` stays at 4.)
+    # screen's «К карте» is a gotoWorld() call site — same single-dispatch
+    # contract; `location.hash = "#/world";` stays at 4.) #309: the
+    # login-success gotoWorld site is gone with local auth (count was 5).
     assert js.count('location.hash = "#/world";') == 4
-    assert js.count("gotoWorld();") == 5
+    assert js.count("gotoWorld();") == 4
     # #258: the hello-deadline retire adds a third S.ws = null; site
     # (stopFeed detach, deadline-retire, guarded onclose) and a second
     # identity-guarded site (same #161 pattern as the onclose cleanup).

@@ -24,6 +24,7 @@ from app.api.app import create_app  # noqa: E402
 from app.config.config import load_config  # noqa: E402
 from app.db.models import bootstrap, create_engine_factory  # noqa: E402
 from app.world.seed_world import seed_world  # noqa: E402
+from tests.helpers import auth_client, make_user  # noqa: E402
 
 SETTINGS = None
 
@@ -53,7 +54,6 @@ def _build(tmp_path, settings=None):
         seed_social(session, settings, settings.world.world_id, rng)
         session.commit()
     factory = sessionmaker(bind=engine, expire_on_commit=False)
-    from fastapi.testclient import TestClient
 
     app = create_app(settings, factory)
     return settings, app, TestClient(app), engine, factory
@@ -61,11 +61,11 @@ def _build(tmp_path, settings=None):
 
 @pytest.fixture()
 def world(tmp_path):
-    settings, app, client, engine, factory = _build(tmp_path)
-    client.post("/auth/register", json={
-        "username": "e2e", "email": "e2e@x.com", "password": "password123", "age_confirmed": True,
-    })
-    client.post("/auth/login", json={"username": "e2e", "password": "password123"})
+    settings, app, _, engine, factory = _build(tmp_path)
+    # #309: no local register/login — direct row + signed session cookie
+    with factory() as session:
+        e2e = make_user(session, "e2e", "e2e@x.com")
+    client = auth_client(app, settings, e2e)
     r = client.post("/characters", json={"name": "Eve Adams", "sex": "F", "age": 33})
     cid = r.json()["id"]
     from app.db.models import Character
@@ -172,15 +172,11 @@ def test_ae1_e2e_scenario(world):
     assert len(r.json()["suggested_responses"]) == 3
 
     # 7. foreign control → 403
-    client.post("/auth/logout")
-    client.post("/auth/register", json={
-        "username": "raider",
-        "email": "rd@x.com",
-        "password": "password123",
-        "age_confirmed": True,
-    })
-    client.post("/auth/login", json={"username": "raider", "password": "password123"})
-    r = client.post(f"/characters/{cid}/control", json={"mode": "DIRECT"})
+    # #309: second user via direct row + signed session cookie
+    with factory() as session:
+        raider = make_user(session, "raider", "rd@x.com")
+    client2 = auth_client(app, settings, raider)
+    r = client2.post(f"/characters/{cid}/control", json={"mode": "DIRECT"})
     assert r.status_code == 403
 
 
@@ -239,12 +235,9 @@ def test_ae2_keystone_headless_identity(tmp_path):
 # ---------- AE3''': negatives ----------
 
 def test_ae3_negatives(world):
-    _, _, client, cid, *_ = world
-    # short password
-    r = client.post("/auth/register", json={
-        "username": "shorty", "email": "sh@x.com", "password": "short", "age_confirmed": True,
-    })
-    assert r.status_code == 422
+    settings, app, client, cid, npc_id, engine, factory = world
+    # #309: the "short password" register negative is gone with the endpoint
+    # (POST /auth/register → 404; no password field left to validate).
     # unknown action type
     client.post(f"/characters/{cid}/control", json={"mode": "DIRECT"})
     r = client.post("/actions", json={"character_id": cid, "action_type": "TELEPORT"})
@@ -256,34 +249,30 @@ def test_ae3_negatives(world):
     r = client.post("/characters/plr_9999/control", json={"mode": "DIRECT"})
     assert r.status_code == 404
     # goals of another user
-    client.post("/auth/logout")
-    client.post("/auth/register", json={
-        "username": "outsider",
-        "email": "o@x.com",
-        "password": "password123",
-        "age_confirmed": True,
-    })
-    client.post("/auth/login", json={"username": "outsider", "password": "password123"})
-    assert client.get(f"/characters/{cid}/goals").status_code == 403
-    assert client.get(f"/characters/{cid}/inventory").status_code == 403
+    # #309: second user via direct row + signed session cookie
+    with factory() as session:
+        outsider = make_user(session, "outsider", "o@x.com")
+    client2 = auth_client(app, settings, outsider)
+    assert client2.get(f"/characters/{cid}/goals").status_code == 403
+    assert client2.get(f"/characters/{cid}/inventory").status_code == 403
 
 
 # ---------- AE4''': persistence across restarts ----------
 
 def test_ae4_persistence(tmp_path):
-    settings, app1, client1, engine, factory = _build(tmp_path)
-    client1.post("/auth/register", json={
-        "username": "peter", "email": "p@x.com", "password": "password123", "age_confirmed": True,
-    })
-    client1.post("/auth/login", json={"username": "peter", "password": "password123"})
+    settings, app1, _, engine, factory = _build(tmp_path)
+    # #309: no local register/login — direct row + signed session cookie.
+    # The token is stateless HMAC (same secret + session_generation), so the
+    # SAME cookie authenticates against the restarted app instance.
+    with factory() as session:
+        peter = make_user(session, "peter", "p@x.com")
+    client1 = auth_client(app1, settings, peter)
     r = client1.post("/characters", json={"name": "Peter Pan", "sex": "M", "age": 22})
     cid = r.json()["id"]
 
     # "restart": new app instance, same DB (file-backed)
     app2 = create_app(settings, sessionmaker(bind=engine, expire_on_commit=False))
-    client2 = TestClient(app2)
-    r = client2.post("/auth/login", json={"username": "peter", "password": "password123"})
-    assert r.status_code == 200
+    client2 = auth_client(app2, settings, peter)
     r = client2.get(f"/characters/{cid}")
     assert r.status_code == 200
     assert r.json()["name"] == "Peter Pan"

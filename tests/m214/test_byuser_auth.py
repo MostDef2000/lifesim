@@ -23,13 +23,12 @@ from fastapi.testclient import TestClient
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../../.."))
 
-from app.api.auth import hash_password  # noqa: E402
+from tests.helpers import auth_client, make_user  # noqa: E402
+
 from app.config.config import load_config  # noqa: E402
-from app.db.models import User, bootstrap, create_engine_factory  # noqa: E402
+from app.db.models import bootstrap, create_engine_factory  # noqa: E402
 
 SETTINGS = None
-
-PW = "Correct-Horse-9!"
 
 
 def setup_module(module):
@@ -59,33 +58,24 @@ class TestByUserAuthGate:
                 session, settings, random.Random(42),
                 settings.world.world_id, 20,
             )
-            session.add(User(
-                username="w214owner", email="w214a@x.com",
-                password_hash=hash_password(PW),
-                role="player", age_confirmed=True, created_at=0,
-            ))
-            session.add(User(
-                username="w214other", email="w214b@x.com",
-                password_hash=hash_password(PW),
-                role="player", age_confirmed=True, created_at=0,
-            ))
-            session.commit()
-            user_a = session.query(User).filter_by(username="w214owner").one()
+            user_a = make_user(
+                session, "w214owner", "w214a@x.com", role="player")
+            user_b = make_user(
+                session, "w214other", "w214b@x.com", role="player")
             create_player_character(
                 session, settings, settings.world.world_id,
                 user_a, "Айдор Тест", "F", 30, 0,
             )
             session.commit()
+            # The commit above expires ORM attributes (expire_on_commit);
+            # reload them while the session is still open so the detached
+            # instances stay usable by auth_client after the with-block.
+            session.refresh(user_a)
+            session.refresh(user_b)
         app = create_app(settings, sessionmaker(bind=engine))
-        client_a = TestClient(app)
-        r = client_a.post("/auth/login", json={
-            "username": "w214owner", "password": PW})
-        assert r.status_code == 200, r.text
+        client_a = auth_client(app, settings, user_a)
         me = client_a.get("/auth/me").json()
-        client_b = TestClient(app)
-        r = client_b.post("/auth/login", json={
-            "username": "w214other", "password": PW})
-        assert r.status_code == 200, r.text
+        client_b = auth_client(app, settings, user_b)
         return client_a, client_b, me["id"]
 
     @pytest.fixture()

@@ -37,7 +37,7 @@ from sqlalchemy.orm import sessionmaker
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../../.."))
 
-from fastapi.testclient import TestClient  # noqa: E402
+from tests.helpers import auth_client, make_user  # noqa: E402
 
 from app.ai.memory import select_memories  # noqa: E402
 from app.ai.prompts import (  # noqa: E402
@@ -56,7 +56,6 @@ from app.db.models import (  # noqa: E402
     Job,
     Organization,
     OrganizationMember,
-    User,
     WorldClock,
     bootstrap,
     create_engine_factory,
@@ -85,7 +84,6 @@ DIALOGUE_ROLELESS_SHA = (
     "d7928f7003e9e87b563e0026e8f3b8af235e44fa361736cc642985915e32d5a7"
 )
 
-PW = "Correct-Horse-9!"
 SETTINGS = None
 
 
@@ -132,10 +130,7 @@ def world(tmp_path):
     factory = sessionmaker(bind=engine, expire_on_commit=False)
     wid = settings.world.world_id
     with factory() as s:
-        user = User(username="m61player", email="m61@x.com",
-                    password_hash="x" * 20, age_confirmed=True, created_at=0)
-        s.add(user)
-        s.commit()
+        user = make_user(s, "m61player", "m61@x.com")
         from app.characters.player import create_player_character
 
         pc = create_player_character(
@@ -152,12 +147,9 @@ def world(tmp_path):
         )
         pc_id, npc_id = pc.id, npc.id
     app = create_app(settings, factory)
-    client = TestClient(app)
-    client.post("/auth/register", json={
-        "username": "m61reader", "email": "m61r@x.com",
-        "password": PW, "age_confirmed": True,
-    })
-    client.post("/auth/login", json={"username": "m61reader", "password": PW})
+    with factory() as s:
+        reader = make_user(s, "m61reader", "m61r@x.com")
+    client = auth_client(app, settings, reader)
     return settings, app, client, factory, wid, pc_id, npc_id
 
 

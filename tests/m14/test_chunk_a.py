@@ -7,8 +7,6 @@ from sqlalchemy.orm import sessionmaker
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../../.."))
 
-from fastapi.testclient import TestClient  # noqa: E402
-
 from app.config.config import load_config  # noqa: E402
 from app.db.models import (  # noqa: E402
     Character,
@@ -16,6 +14,7 @@ from app.db.models import (  # noqa: E402
     create_engine_factory,
 )
 from app.world.seed_world import seed_world  # noqa: E402
+from tests.helpers import auth_client, make_user  # noqa: E402
 
 SETTINGS = None
 
@@ -58,14 +57,11 @@ def env(tmp_path):
     factory = sessionmaker(bind=engine, expire_on_commit=False)
     from app.api.app import create_app
 
-    client = TestClient(create_app(settings, factory))
-    r = client.post("/auth/register", json={
-        "username": "bio14", "email": "b@x.com",
-        "password": "password123", "age_confirmed": True,
-    })
-    assert r.status_code in (200, 201), r.text
-    client.post("/auth/login", json={
-        "username": "bio14", "password": "password123"})
+    with factory() as session:
+        # #309: local register/login gone — create the user directly and
+        # sign the app's own session cookie.
+        bio14 = make_user(session, "bio14", "b@x.com")
+    client = auth_client(create_app(settings, factory), settings, bio14)
     return settings, factory, client
 
 

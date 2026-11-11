@@ -4,10 +4,11 @@ import sys
 
 import pytest
 import yaml
-from fastapi.testclient import TestClient
 from sqlalchemy.orm import sessionmaker
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../../.."))
+
+from tests.helpers import auth_client, make_user
 
 from app.api.app import create_app
 from app.config.config import load_config
@@ -43,12 +44,9 @@ def world(tmp_path):
         session.commit()
     factory = sessionmaker(bind=engine, expire_on_commit=False)
     app = create_app(settings, factory)
-    client = TestClient(app)
-    client.post("/auth/register", json={
-        "username": "user1", "email": "u1@x.com",
-        "password": "password123", "age_confirmed": True})
-    client.post("/auth/login", json={
-        "username": "user1", "password": "password123"})
+    with factory() as s:
+        user = make_user(s, "user1", "u1@x.com")
+    client = auth_client(app, settings, user)
     r = client.post("/characters", json={"name": "Test Hero", "sex": "M", "age": 25})
     assert r.status_code in (200, 201), f"character creation failed: {r.status_code} {r.text}"
     return settings, factory, client

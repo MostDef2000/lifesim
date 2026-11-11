@@ -14,6 +14,7 @@ from app.api.app import create_app  # noqa: E402
 from app.config.config import load_config  # noqa: E402
 from app.db.models import bootstrap, create_engine_factory  # noqa: E402
 from app.world.seed_world import seed_world  # noqa: E402
+from tests.helpers import auth_client, make_user  # noqa: E402
 
 SETTINGS = None
 
@@ -53,17 +54,12 @@ def world(tmp_path):
 
     factory = sessionmaker(bind=engine, expire_on_commit=False)
     app = create_app(settings, factory)
-    from fastapi.testclient import TestClient
 
-    client = TestClient(app)
-    r = client.post("/auth/register", json={
-        "username": "artfan",
-        "email": "a@x.com",
-        "password": "password123",
-        "age_confirmed": True,
-    })
-    assert r.status_code == 201, r.text
-    client.post("/auth/login", json={"username": "artfan", "password": "password123"})
+    # #309: local register/login gone — create the user directly and sign
+    # the app's own session cookie.
+    with factory() as session:
+        artfan = make_user(session, "artfan", "a@x.com")
+    client = auth_client(app, settings, artfan)
     r = client.post("/characters", json={"name": "Pablo", "sex": "M", "age": 25})
     assert r.status_code == 201, r.text
     cid = r.json()["id"]
@@ -162,15 +158,9 @@ class TestScenes:
 class TestAccess:
     def test_portrait_requires_owner(self, world):
         settings, factory, client, cid, _ = world
-        other = TestClient(create_app(settings, factory))
-        r = other.post("/auth/register", json={
-            "username": "intruder",
-            "email": "i@x.com",
-            "password": "password123",
-            "age_confirmed": True,
-        })
-        assert r.status_code == 201, r.text
-        other.post("/auth/login", json={"username": "intruder", "password": "password123"})
+        with factory() as session:
+            intruder = make_user(session, "intruder", "i@x.com")
+        other = auth_client(create_app(settings, factory), settings, intruder)
         r = other.post(f"/visual/portraits/{cid}")
         assert r.status_code == 403
 
@@ -190,8 +180,10 @@ class TestAccess:
         off_settings = settings.model_copy(update={
             "visual": settings.visual.model_copy(update={"enabled": False})
         })
-        off_client = TestClient(create_app(off_settings, factory))
-        off_client.post("/auth/login", json={"username": "artfan", "password": "password123"})
+        # #309: local login gone — create a user directly and sign the cookie.
+        with factory() as session:
+            artfan2 = make_user(session, "artfan2", "a2@x.com")
+        off_client = auth_client(create_app(off_settings, factory), off_settings, artfan2)
         for method, url in [
             ("POST", f"/visual/portraits/{cid}"),
             ("POST", "/visual/scenes"),

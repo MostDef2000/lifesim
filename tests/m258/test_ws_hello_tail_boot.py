@@ -31,11 +31,12 @@ import sys
 import threading
 
 import pytest
-from fastapi.testclient import TestClient
 from sqlalchemy import func
 from sqlalchemy.orm import sessionmaker
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../../.."))
+
+from tests.helpers import auth_client, make_user  # noqa: E402
 
 from app.api.app import create_app  # noqa: E402
 from app.config.config import load_config  # noqa: E402
@@ -94,13 +95,12 @@ def _build_unseeded(tmp_path):
 @pytest.fixture()
 def work(tmp_path):
     settings, app, engine, factory = _build(tmp_path)
-    # WS auth rides the httpOnly session cookie set by /auth/login (#124).
-    client = TestClient(app)
-    client.post("/auth/register", json={
-        "username": "cursor", "email": "c@x.com", "password": "password123",
-        "age_confirmed": True,
-    })
-    client.post("/auth/login", json={"username": "cursor", "password": "password123"})
+    # WS auth rides the httpOnly session cookie (#124). #309: local
+    # register/login is gone — the user row is created directly (make_user)
+    # and the client carries the app's own signed session cookie.
+    with factory() as session:
+        user = make_user(session, "cursor", "c@x.com")
+    client = auth_client(app, settings, user)
     return settings, app, client, engine, factory
 
 
@@ -187,12 +187,9 @@ def test_hello_carries_per_world_tail(work):
 def test_hello_empty_world_cursor_zero(tmp_path):
     # empty world: MAX(WorldEvent.id) is NULL -> the hello cursor is 0
     settings, app, engine, factory = _build_unseeded(tmp_path)
-    client = TestClient(app)
-    client.post("/auth/register", json={
-        "username": "cursor", "email": "c@x.com", "password": "password123",
-        "age_confirmed": True,
-    })
-    client.post("/auth/login", json={"username": "cursor", "password": "password123"})
+    with factory() as session:
+        user = make_user(session, "cursor", "c@x.com")
+    client = auth_client(app, settings, user)
     with client.websocket_connect("/ws") as ws:
         hello = ws.receive_json()
         assert hello == {"type": "hello", "cursor": 0}

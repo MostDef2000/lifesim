@@ -27,9 +27,9 @@ import os
 import random
 import sys
 
-from fastapi.testclient import TestClient
-
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../../.."))
+
+from tests.helpers import auth_client, make_user  # noqa: E402
 
 from app.config.config import load_config  # noqa: E402
 from app.db.models import (  # noqa: E402
@@ -41,7 +41,6 @@ from app.db.models import (  # noqa: E402
 from app.world.seed_world import seed_world  # noqa: E402
 
 SETTINGS = None
-PW = "Correct-Horse-9!"
 
 
 def setup_module(module):
@@ -63,14 +62,13 @@ def _make_settings(tmp_path):
     })
 
 
-def _register_and_login(client, username):
-    r = client.post("/auth/register", json={
-        "username": username, "email": f"{username}@x.com",
-        "password": PW, "age_confirmed": True,
-    })
-    assert r.status_code == 201, r.text
-    r = client.post("/auth/login", json={"username": username, "password": PW})
-    assert r.status_code == 200, r.text
+def _authed(app, settings, factory, username):
+    """#309: local register/login is gone — create the user directly
+    (make_user) and return a fresh client with the app's own signed
+    session cookie."""
+    with factory() as session:
+        user = make_user(session, username, f"{username}@x.com")
+    return auth_client(app, settings, user)
 
 
 def _create_character(client, name):
@@ -97,8 +95,7 @@ def _build(tmp_path):
         session.commit()
     factory = sessionmaker(bind=engine, expire_on_commit=False)
     app = create_app(settings, factory)
-    owner = TestClient(app)
-    _register_and_login(owner, "w219owner")
+    owner = _authed(app, settings, factory, "w219owner")
     return settings, engine, factory, owner
 
 
@@ -198,10 +195,9 @@ class TestSceneReferencePrivacy:
         """(a) NPC + foreign player co-located with the caller, all with
         canonical portraits → references contain ONLY the NPC's and the
         caller's own canonical ids."""
-        settings, engine, _, owner = _build(tmp_path)
+        settings, engine, factory, owner = _build(tmp_path)
         owner_cid = _create_character(owner, "Хозяйка")
-        other = TestClient(owner.app)
-        _register_and_login(other, "w219foreign")
+        other = _authed(owner.app, settings, factory, "w219foreign")
         foreign_cid = _create_character(other, "Чужак")
 
         loc = _owner_location(engine, owner_cid)
@@ -230,10 +226,9 @@ class TestSceneReferencePrivacy:
     def test_b_prompt_carries_only_allowed_ids(self, tmp_path):
         """(b) the prompt fragment "reference portraits: [...]" carries only
         the allowed ids; the foreign canonical id is absent from the bytes."""
-        settings, engine, _, owner = _build(tmp_path)
+        settings, engine, factory, owner = _build(tmp_path)
         owner_cid = _create_character(owner, "Хозяин")
-        other = TestClient(owner.app)
-        _register_and_login(other, "w219foreignb")
+        other = _authed(owner.app, settings, factory, "w219foreignb")
         foreign_cid = _create_character(other, "Гость")
 
         loc = _owner_location(engine, owner_cid)
@@ -263,8 +258,8 @@ class TestSceneReferencePrivacy:
     def test_c_all_npc_scene_references_unchanged(self, tmp_path):
         """(c) all-NPC scene (caller has no character): both NPC canonicals
         are collected as before — the filter must not over-prune."""
-        settings, engine, _, user = _build(tmp_path)
-        _register_and_login(user, "w219npcviewer")
+        settings, engine, factory, _owner = _build(tmp_path)
+        user = _authed(_owner.app, settings, factory, "w219npcviewer")
 
         # Two alive NPCs co-located at the first NPC's location, each with a
         # canonical portrait (real #191 lazy-generation path).
@@ -305,10 +300,9 @@ class TestSceneReferencePrivacy:
         """(d) caller + foreign player co-located (no NPC canonicals):
         references are exactly [caller's canonical id] — the foreign id is
         absent from references and prompt."""
-        settings, engine, _, owner = _build(tmp_path)
+        settings, engine, factory, owner = _build(tmp_path)
         owner_cid = _create_character(owner, "Дома")
-        other = TestClient(owner.app)
-        _register_and_login(other, "w219foreignd")
+        other = _authed(owner.app, settings, factory, "w219foreignd")
         foreign_cid = _create_character(other, "Пришелец")
 
         loc = _owner_location(engine, owner_cid)

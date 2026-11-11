@@ -42,14 +42,12 @@ import sys
 from io import BytesIO
 from pathlib import Path
 
-from fastapi.testclient import TestClient
-
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../../.."))
 
 from app.config.config import load_config  # noqa: E402
+from tests.helpers import auth_client, make_user  # noqa: E402
 
 SETTINGS = None
-PW = "Correct-Horse-9!"
 NUDE_FRAMING_PHRASE = "artistic nude figure study"
 
 
@@ -73,17 +71,10 @@ def _make_settings(tmp_path):
     })
 
 
-def _register_and_login(client, username):
-    r = client.post("/auth/register", json={
-        "username": username, "email": f"{username}@x.com",
-        "password": PW, "age_confirmed": True,
-    })
-    assert r.status_code == 201, r.text
-    r = client.post("/auth/login", json={"username": username, "password": PW})
-    assert r.status_code == 200, r.text
-
-
-def _build(tmp_path):
+def _build(tmp_path, username):
+    """#309: local register/login is gone — the player user is created
+    directly (make_user) and the client carries the app's own signed
+    session cookie (auth_client)."""
     from sqlalchemy.orm import sessionmaker
 
     from app.api.app import create_app
@@ -98,7 +89,9 @@ def _build(tmp_path):
         session.commit()
     factory = sessionmaker(bind=engine, expire_on_commit=False)
     app = create_app(settings, factory)
-    client = TestClient(app)
+    with factory() as session:
+        user = make_user(session, username, f"{username}@x.com")
+    client = auth_client(app, settings, user)
     return settings, engine, factory, app, client
 
 
@@ -193,8 +186,7 @@ class TestRegenerateChainsCanonicalFace:
         canonical is STILL pinned after the regen (no demotion anywhere in
         the path) and the old row is unchanged (a plain repeat still
         reuses it)."""
-        settings, engine, factory, app, client = _build(tmp_path)
-        _register_and_login(client, "m119w4chain")
+        settings, engine, factory, app, client = _build(tmp_path, "m119w4chain")
         sink = {}
         _mount(app, sink)
         cid, canonical_id = _make_canonical(client)
@@ -234,8 +226,7 @@ class TestRegenerateChainsCanonicalFace:
         """(B) regenerate=True + explicit reference_id -> the explicit
         reference rides; the canonical bytes are NOT consumed (the captured
         reference_b64 equals the uploaded ref's bytes, not the canonical's)."""
-        settings, engine, factory, app, client = _build(tmp_path)
-        _register_and_login(client, "m119w4explicit")
+        settings, engine, factory, app, client = _build(tmp_path, "m119w4explicit")
         original = _png_bytes()
         ref_id = _upload_reference(client, original)
         sink = {}
@@ -263,8 +254,7 @@ class TestRegenerateChainsCanonicalFace:
         reference-less generation: the transport receives NO reference
         (byte-identical legacy body — no reference_id key was sent) and the
         answer is 201."""
-        settings, engine, factory, app, client = _build(tmp_path)
-        _register_and_login(client, "m119w4nocanon")
+        settings, engine, factory, app, client = _build(tmp_path, "m119w4nocanon")
         sink = {}
         _mount(app, sink)
         cid = _create_character(client)
@@ -284,8 +274,7 @@ class TestRegenerateChainsCanonicalFace:
         (no VisualAsset row added) and the canonical stays canonical
         (owner intent: the face must persist or the regen must not
         happen)."""
-        settings, engine, factory, app, client = _build(tmp_path)
-        _register_and_login(client, "m119w4orphan")
+        settings, engine, factory, app, client = _build(tmp_path, "m119w4orphan")
         sink = {}
         _mount(app, sink)
         cid, canonical_id = _make_canonical(client)
@@ -320,8 +309,7 @@ class TestRegenerateChainsCanonicalFace:
         UI path (style select + regen button coexist): the canonical STILL
         chains (the transport receives the canonical bytes as
         reference_b64) AND the oil preset prefix rides the prompt; 201."""
-        settings, engine, factory, app, client = _build(tmp_path)
-        _register_and_login(client, "m119w4oil")
+        settings, engine, factory, app, client = _build(tmp_path, "m119w4oil")
         sink = {}
         _mount(app, sink)
         cid, canonical_id = _make_canonical(client)
@@ -356,8 +344,7 @@ class TestLegacyBehaviorUntouched:
         """(A) regenerate absent or false + canonical -> the §70 reuse
         fast-path answers 200 reused=true with the canonical itself and no
         transport call (byte-identical legacy behavior)."""
-        settings, engine, factory, app, client = _build(tmp_path)
-        _register_and_login(client, "m119w4legacy")
+        settings, engine, factory, app, client = _build(tmp_path, "m119w4legacy")
         sink = {}
         _mount(app, sink)
         cid, canonical_id = _make_canonical(client)
@@ -381,10 +368,8 @@ class TestLegacyBehaviorUntouched:
         """(B) the seed formula is untouched: seed = _deterministic_seed(
         world_id, character_id, asset_type, existing_count) — the first
         generation and the regen differ ONLY by the existing-count input."""
-        settings, engine, factory, app, client = _build(tmp_path)
+        settings, engine, factory, app, client = _build(tmp_path, "m119w4seed")
         from app.api.visual_routes import _deterministic_seed
-
-        _register_and_login(client, "m119w4seed")
         sink = {}
         _mount(app, sink)
         cid = _create_character(client)
@@ -421,8 +406,7 @@ class TestNudeRegenerate:
         nude policy governs PINNING, not referencing) AND the nude framing
         applies; the backend does not auto-promote the fresh asset — the
         previous canonical stays pinned (pinning is UI-side)."""
-        settings, engine, factory, app, client = _build(tmp_path)
-        _register_and_login(client, "m119w4nude")
+        settings, engine, factory, app, client = _build(tmp_path, "m119w4nude")
         sink = {}
         _mount(app, sink)
         cid, canonical_id = _make_canonical(client)

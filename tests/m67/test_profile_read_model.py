@@ -11,9 +11,10 @@ keep their semantics.
 
 Fixture: m61-style TestClient world (tests/m61/test_roles_context.py) —
 load_config(default.yaml), own sqlite engine per test, bootstrap +
-seed_world + generate_population(20) + seed_social, owner User row via
-hash_password(PW) logged in through /auth/login (cookie), reader client
-registered + logged in as m67reader through /auth/*. The player character
+seed_world + generate_population(20) + seed_social, owner + reader User
+rows via make_user (tests/helpers.py) with signed session cookies
+(auth_client) — local register/login is gone (OIDC SSO, issue #309). The
+player character
 is created with EXPLICIT looks/biography (the defaults are None, so a
 non-None value proves the endpoint reads Character, not an invented
 default).
@@ -23,11 +24,9 @@ import os
 import random
 
 import pytest
-from fastapi.testclient import TestClient
 from sqlalchemy.orm import sessionmaker
 
 from app.api.app import create_app
-from app.api.auth import hash_password
 from app.characters.generator import generate_population
 from app.characters.player import create_player_character
 from app.config.config import load_config
@@ -35,16 +34,15 @@ from app.db.models import (
     CharacterHealth,
     CharacterJob,
     Job,
-    User,
     bootstrap,
     create_engine_factory,
 )
 from app.world.seed_world import seed_world
 from app.world.social_seed import seed_social
+from tests.helpers import auth_client, make_user
 
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "../.."))
 
-PW = "Correct-Horse-9!"
 LOOKS = "test looks"
 BIOGRAPHY = "test bio"
 NEW_KEYS = ("looks", "biography", "home_location_id", "traits", "health")
@@ -89,12 +87,7 @@ def world(tmp_path):
     factory = sessionmaker(bind=engine, expire_on_commit=False)
     wid = settings.world.world_id
     with factory() as s:
-        user = User(
-            username="m67owner", email="m67@x.com",
-            password_hash=hash_password(PW), age_confirmed=True, created_at=0,
-        )
-        s.add(user)
-        s.commit()
+        user = make_user(s, "m67owner", "m67@x.com")
         pc = create_player_character(
             s, settings, wid, user,
             name="Борис Орлов", sex="M", age=30, game_timestamp=0,
@@ -112,17 +105,10 @@ def world(tmp_path):
         expected_job = job_row[1].title
         pc_id = pc.id
     app = create_app(settings, factory)
-    owner = TestClient(app)
-    r = owner.post("/auth/login", json={"username": "m67owner", "password": PW})
-    assert r.status_code == 200, r.text
-    reader = TestClient(app)
-    r = reader.post("/auth/register", json={
-        "username": "m67reader", "email": "m67r@x.com",
-        "password": PW, "age_confirmed": True,
-    })
-    assert r.status_code == 201, r.text
-    r = reader.post("/auth/login", json={"username": "m67reader", "password": PW})
-    assert r.status_code == 200, r.text
+    owner = auth_client(app, settings, user)
+    with factory() as s:
+        reader_user = make_user(s, "m67reader", "m67r@x.com")
+    reader = auth_client(app, settings, reader_user)
     return settings, owner, reader, factory, pc_id, expected_home, expected_job
 
 

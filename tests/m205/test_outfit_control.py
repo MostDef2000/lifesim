@@ -13,9 +13,11 @@ Contract under test:
   nude — an explicitly worn item means dressed).
 - Guardrail phrase / canonical_negative are never touched by this field
   (#119 invariant); visual_profile key set stays frozen (m119 pin).
-- nude requires the OWNING user's age_confirmed (П4 18+); NPCs never render
-  nude. PATCH endpoint: owner-only 403, unknown 404, unauthenticated 401,
-  enum 422, nude-without-age-confirmation 422.
+- nude is UNCONDITIONAL (owner decision 2026-11-10, issue #309: the П4 18+
+  registration gate died with local registration — the mode is the
+  character owner's per-character choice, enforced nowhere else; no NPC
+  carve-out either). PATCH endpoint: owner-only 403, unknown 404,
+  unauthenticated 401, enum 422.
 - Schema migration: no alembic exists in this repo — the additive column is
   created by create_all on fresh DBs and healed onto pre-#205 DBs by
   models.ensure_outfit_column (the repo's own "alpha schema self-heal"
@@ -31,11 +33,9 @@ from sqlalchemy import text
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../../.."))
 
-from app.api.auth import hash_password  # noqa: E402
 from app.config.config import load_config  # noqa: E402
 from app.db.models import (  # noqa: E402
     Character,
-    User,
     bootstrap,
     create_engine_factory,
     ensure_outfit_column,
@@ -46,6 +46,7 @@ from app.visual.descriptor import (  # noqa: E402
     build_prompt,
     build_visual_profile,
 )
+from tests.helpers import auth_client, make_user  # noqa: E402
 
 SETTINGS = None
 
@@ -254,8 +255,10 @@ class TestOutfitFragments:
         assert ", nude" not in prompt
 
 
-class TestDescriptorAgeGate:
-    """The effective-mode resolver: nude needs an age-confirmed OWNER."""
+class TestDescriptorModeResolver:
+    """The effective-mode resolver: nude is UNCONDITIONAL (#309 — the П4
+    18+ gate died with local registration; no user lookup, no NPC
+    carve-out)."""
 
     def _add_character(self, session, world_id, cid, *, outfit="auto", user_id=None):
         from app.db.models import Location
@@ -272,15 +275,10 @@ class TestDescriptorAgeGate:
         session.commit()
         return cid
 
-    def test_nude_owner_age_confirmed(self, session, world_id):
-        from app.db.models import User
-
-        user = User(
-            username="w205adult", email="w205a@x.com",
-            password_hash="x", age_confirmed=True, created_at=0,
-        )
-        session.add(user)
-        session.commit()
+    def test_nude_owner_unconditional(self, session, world_id):
+        """#309: the П4 18+ gate is gone — a stored "nude" stays "nude"
+        for the owning user, no confirmation state involved."""
+        user = make_user(session, "w205adult", "w205a@x.com")
         cid = self._add_character(
             session, world_id, "w205_nude_ok", outfit="nude", user_id=user.id)
         descriptor = build_portrait_descriptor(session, world_id, cid)
@@ -289,28 +287,29 @@ class TestDescriptorAgeGate:
         assert build_prompt(descriptor).endswith(
             ", nude, completely unclothed, wearing nothing")
 
-    def test_nude_owner_not_age_confirmed_collapses_to_auto(self, session, world_id):
-        from app.db.models import User
+    def test_nude_resolver_unconditional(self, session, world_id):
+        """#309: the resolver takes ONLY the character — no session/user
+        lookup, so there is no age state to collapse on. A stored "nude"
+        resolves to "nude" regardless of the owning user row."""
+        from app.visual.descriptor import _effective_outfit_mode
 
-        user = User(
-            username="w205minor", email="w205n@x.com",
-            password_hash="x", age_confirmed=False, created_at=0,
-        )
-        session.add(user)
-        session.commit()
+        user = make_user(session, "w205nobody", "w205n@x.com")
         cid = self._add_character(
             session, world_id, "w205_nude_no", outfit="nude", user_id=user.id)
+        character = session.get(Character, cid)
+        assert _effective_outfit_mode(character) == "nude"
         descriptor = build_portrait_descriptor(session, world_id, cid)
-        assert descriptor["outfit_mode"] == "auto"
-        prompt = build_prompt(descriptor)
-        assert ", nude" not in prompt
+        assert descriptor["outfit_mode"] == "nude"
+        assert ", nude" in build_prompt(descriptor)
 
-    def test_nude_npc_collapses_to_auto(self, session, world_id):
+    def test_nude_npc_unconditional(self, session, world_id):
+        """#309: no NPC carve-out either — the mode is stored per character
+        and the resolver never looks at ownership."""
         cid = self._add_character(
             session, world_id, "w205_nude_npc", outfit="nude", user_id=None)
         descriptor = build_portrait_descriptor(session, world_id, cid)
-        assert descriptor["outfit_mode"] == "auto"
-        assert ", nude" not in build_prompt(descriptor)
+        assert descriptor["outfit_mode"] == "nude"
+        assert ", nude" in build_prompt(descriptor)
 
     def test_visual_profile_schema_frozen(self, session, world_id):
         """m119 pin honesty: outfit NEVER leaks into visual_profile."""
@@ -320,15 +319,10 @@ class TestDescriptorAgeGate:
             "face", "body", "style", "scenes", "guardrail", "lora"}
 
     def test_worn_items_win_through_db_path(self, session, world_id):
-        from app.db.models import User, WorldObject
+        from app.db.models import WorldObject
         from app.social.clothing import toggle_wear
 
-        user = User(
-            username="w205worn", email="w205w@x.com",
-            password_hash="x", age_confirmed=True, created_at=0,
-        )
-        session.add(user)
-        session.commit()
+        user = make_user(session, "w205worn", "w205w@x.com")
         cid = self._add_character(
             session, world_id, "w205_worn", outfit="nude", user_id=user.id)
         location_id = session.get(Character, cid).location_id
@@ -352,11 +346,10 @@ class TestDescriptorAgeGate:
 
 
 class TestOutfitAPI:
-    """PATCH /characters/{cid}/outfit — owner-only, enum, 18+ nude gate."""
+    """PATCH /characters/{cid}/outfit — owner-only, enum, nude
+    unconditional (#309)."""
 
-    PW = "Correct-Horse-9!"
-
-    def _build(self, tmp_path, *, owner_age_confirmed=True):
+    def _build(self, tmp_path):
         from sqlalchemy.orm import sessionmaker
 
         from app.api.app import create_app
@@ -376,15 +369,9 @@ class TestOutfitAPI:
                 session, settings, random.Random(42),
                 settings.world.world_id, 20,
             )
-            session.add(User(
-                username="w205owner", email="w205@x.com",
-                password_hash=hash_password(self.PW),
-                role="player", age_confirmed=owner_age_confirmed, created_at=0,
-            ))
-            session.commit()
+            user = make_user(session, "w205owner", "w205@x.com", role="user")
             from app.characters.player import create_player_character
 
-            user = session.query(User).filter_by(username="w205owner").one()
             char = create_player_character(
                 session, settings, settings.world.world_id,
                 user, "Одежда Тест", "M", 30, 0,
@@ -393,19 +380,19 @@ class TestOutfitAPI:
             char_id = char.id
             # Fresh player character defaults to the column default.
             assert char.outfit == "auto"
+            # m11 pitfall: the commit above expires the user row — refresh
+            # before the session closes (auth_client reads detached attrs).
+            session.refresh(user)
         factory = sessionmaker(bind=engine, expire_on_commit=False)
-        client = TestClient(create_app(settings, factory))
-        r = client.post("/auth/login", json={
-            "username": "w205owner", "password": self.PW})
-        assert r.status_code == 200, r.text
-        return client, factory, settings.world.world_id, char_id
+        client = auth_client(create_app(settings, factory), settings, user)
+        return client, factory, settings, settings.world.world_id, char_id
 
     @pytest.fixture()
     def world(self, tmp_path):
         return self._build(tmp_path)
 
     def test_patch_owner_sets_mode_and_read_model(self, world):
-        client, factory, world_id, cid = world
+        client, factory, _, world_id, cid = world
         r = client.patch(f"/characters/{cid}/outfit",
                          json={"outfit_mode": "casual"})
         assert r.status_code == 200, r.text
@@ -426,32 +413,27 @@ class TestOutfitAPI:
         assert r.json()["outfit_mode"] == "auto"
 
     def test_default_is_auto(self, world):
-        client, _, _, cid = world
+        client, _, _, _, cid = world
         assert client.get(f"/characters/{cid}").json()["outfit_mode"] == "auto"
 
     def test_unauthenticated_401(self, world):
-        client, _, _, cid = world
+        client, _, _, _, cid = world
         anon = TestClient(client.app)
         r = anon.patch(f"/characters/{cid}/outfit",
                        json={"outfit_mode": "casual"})
         assert r.status_code == 401
 
     def test_unknown_character_404(self, world):
-        client, _, _, _ = world
+        client, _, _, _, _ = world
         r = client.patch("/characters/plr_9999/outfit",
                          json={"outfit_mode": "casual"})
         assert r.status_code == 404
 
     def test_non_owner_403(self, world):
-        client, factory, _, cid = world
-        r = client.post("/auth/register", json={
-            "username": "w205other", "email": "w205o@x.com",
-            "password": self.PW, "age_confirmed": True})
-        assert r.status_code == 201, r.text
-        other = TestClient(client.app)
-        r = other.post("/auth/login", json={
-            "username": "w205other", "password": self.PW})
-        assert r.status_code == 200, r.text
+        client, factory, settings, _, cid = world
+        with factory() as session:
+            other_user = make_user(session, "w205other", "w205o@x.com")
+        other = auth_client(client.app, settings, other_user)
         r = other.patch(f"/characters/{cid}/outfit",
                         json={"outfit_mode": "casual"})
         assert r.status_code == 403
@@ -460,28 +442,26 @@ class TestOutfitAPI:
             assert session.get(Character, cid).outfit == "auto"
 
     def test_invalid_enum_422(self, world):
-        client, _, _, cid = world
+        client, _, _, _, cid = world
         for bad in ("beachwear", "AUTO", "", "nudity"):
             r = client.patch(f"/characters/{cid}/outfit",
                              json={"outfit_mode": bad})
             assert r.status_code == 422, (bad, r.text)
 
-    def test_nude_requires_age_confirmed_owner(self, tmp_path):
-        client, factory, world_id, cid = self._build(
-            tmp_path, owner_age_confirmed=False)
+    def test_nude_unconditional_for_owner(self, world):
+        """#309: the 18+ gate is gone — an owner can set "nude"
+        unconditionally (no 422, no collapse to auto)."""
+        client, factory, settings, world_id, cid = world
         r = client.patch(f"/characters/{cid}/outfit",
                          json={"outfit_mode": "nude"})
-        assert r.status_code == 422, r.text
+        assert r.status_code == 200, r.text
+        assert r.json() == {"id": cid, "outfit_mode": "nude"}
         with factory() as session:
-            assert session.get(Character, cid).outfit != "nude"
+            assert session.get(Character, cid).outfit == "nude"
         # the read-model block stays owner-only for a registered reader
-        r = client.post("/auth/register", json={
-            "username": "w205reader", "email": "w205r@x.com",
-            "password": self.PW, "age_confirmed": True})
-        assert r.status_code == 201, r.text
-        reader = TestClient(client.app)
-        reader.post("/auth/login", json={
-            "username": "w205reader", "password": self.PW})
+        with factory() as session:
+            reader_user = make_user(session, "w205reader", "w205r@x.com")
+        reader = auth_client(client.app, settings, reader_user)
         data = reader.get(f"/characters/{cid}").json()
         assert "outfit_mode" not in data  # owner-only key (m67 discipline)
 
@@ -495,7 +475,7 @@ class TestOutfitAPI:
         (covered by test_patch_owner_sets_mode_and_read_model).
         Regression pin: the payload stays outfit-free for the
         authenticated owner."""
-        client, factory, _, cid = world
+        client, _, _, _, cid = world
         # owner sets a non-default mode, then lists their own rows
         r = client.patch(f"/characters/{cid}/outfit",
                          json={"outfit_mode": "formal"})
@@ -512,7 +492,7 @@ class TestOutfitAPI:
 
     def test_patch_npc_character_403(self, world):
         """F4: NPCs have no owning user — a PATCH can never be authorized."""
-        client, factory, world_id, _ = world
+        client, factory, _, world_id, _ = world
         with factory() as session:
             npc = (
                 session.query(Character)
@@ -533,7 +513,7 @@ class TestOutfitAPI:
         clock is bumped between the two PATCHes so a broken no-op branch
         WOULD visibly move updated_at (both _world_now calls returning the
         same 0 would make the assertion trivially true)."""
-        client, factory, world_id, cid = world
+        client, factory, _, world_id, cid = world
         r = client.patch(f"/characters/{cid}/outfit",
                          json={"outfit_mode": "casual"})
         assert r.status_code == 200, r.text
@@ -624,7 +604,7 @@ class TestSchemaSelfHeal:
             from app.visual.descriptor import _effective_outfit_mode
 
             legacy = session.get(Character, "w205_legacy")
-            assert _effective_outfit_mode(session, legacy) == "auto"
+            assert _effective_outfit_mode(legacy) == "auto"
 
     def test_schema_meta_version_unchanged(self, tmp_path):
         """SchemaMeta stays 0.15.0 (pinned in m2/m4/m8/m186 — no bump)."""

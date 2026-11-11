@@ -14,17 +14,15 @@ import random
 import sys
 
 import pytest
-from fastapi.testclient import TestClient
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../../.."))
 
-from app.api.auth import hash_password  # noqa: E402
+from tests.helpers import auth_client, make_user  # noqa: E402
+
 from app.config.config import load_config  # noqa: E402
-from app.db.models import User, bootstrap, create_engine_factory  # noqa: E402
+from app.db.models import bootstrap, create_engine_factory  # noqa: E402
 
 SETTINGS = None
-
-PW = "Correct-Horse-9!"
 
 
 def setup_module(module):
@@ -52,18 +50,10 @@ def _build(tmp_path):
             session, settings, random.Random(42),
             settings.world.world_id, 20,
         )
-        session.add(User(
-            username="w291owner", email="w291a@x.com",
-            password_hash=hash_password(PW),
-            role="player", age_confirmed=True, created_at=0,
-        ))
-        session.commit()
+        user = make_user(session, "w291owner", "w291a@x.com", role="user")
     factory = sessionmaker(bind=engine, expire_on_commit=False)
     app = create_app(settings, factory)
-    client = TestClient(app)
-    r = client.post("/auth/login", json={
-        "username": "w291owner", "password": PW})
-    assert r.status_code == 200, r.text
+    client = auth_client(app, settings, user)
     return settings, factory, client
 
 

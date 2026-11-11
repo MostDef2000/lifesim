@@ -43,10 +43,11 @@ from fastapi.testclient import TestClient
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../../.."))
 
+from tests.helpers import auth_client, make_user  # noqa: E402
+
 from app.config.config import load_config  # noqa: E402
 
 SETTINGS = None
-PW = "Correct-Horse-9!"
 PNG_MAGIC = b"\x89PNG\r\n\x1a\n"
 
 OIL_PREFIX = "oil painting, "
@@ -76,14 +77,13 @@ def _make_settings(tmp_path):
     })
 
 
-def _register_and_login(client, username):
-    r = client.post("/auth/register", json={
-        "username": username, "email": f"{username}@x.com",
-        "password": PW, "age_confirmed": True,
-    })
-    assert r.status_code == 201, r.text
-    r = client.post("/auth/login", json={"username": username, "password": PW})
-    assert r.status_code == 200, r.text
+def _authed(app, settings, factory, username):
+    """#309: local register/login is gone — create the user directly
+    (make_user) and return a client with the app's own signed session
+    cookie."""
+    with factory() as session:
+        user = make_user(session, username, f"{username}@x.com")
+    return auth_client(app, settings, user)
 
 
 def _build(tmp_path):
@@ -166,7 +166,7 @@ class TestPortraitStylePresets:
         """(A) style="oil" -> the transport prompt starts with the OIL
         preset prefix (literal bytes + the style_presets constant)."""
         settings, engine, factory, app, client = _build(tmp_path)
-        _register_and_login(client, "m234oil")
+        client = _authed(app, settings, factory, "m234oil")
         sink = {}
         _mount(app, sink)
         cid = _create_character(client)
@@ -186,7 +186,7 @@ class TestPortraitStylePresets:
     def test_b_watercolor_prefixes_the_positive_prompt(self, tmp_path):
         """(B) style="watercolor" -> the WATERCOLOR preset prefix."""
         settings, engine, factory, app, client = _build(tmp_path)
-        _register_and_login(client, "m234water")
+        client = _authed(app, settings, factory, "m234water")
         sink = {}
         _mount(app, sink)
         cid = _create_character(client)
@@ -209,7 +209,7 @@ class TestPortraitStylePresets:
         """(C) default (style="" or absent) -> no preset prefix, the plain
         portrait prompt starts with "Portrait of "."""
         settings, engine, factory, app, client = _build(tmp_path)
-        _register_and_login(client, "m234plain")
+        client = _authed(app, settings, factory, "m234plain")
         sink = {}
         _mount(app, sink)
         cid = _create_character(client)
@@ -226,7 +226,7 @@ class TestPortraitStylePresets:
     def test_d_unknown_style_is_422_before_generation(self, tmp_path):
         """(D) style outside {"", "oil", "watercolor"} -> 422, no transport."""
         settings, engine, factory, app, client = _build(tmp_path)
-        _register_and_login(client, "m234badstyle")
+        client = _authed(app, settings, factory, "m234badstyle")
         sink = {}
         _mount(app, sink)
         cid = _create_character(client)
@@ -241,7 +241,7 @@ class TestPortraitStylePresets:
         """(E) backward-compat pin: the body is OPTIONAL — the historical
         no-body POST /visual/portraits/{cid} keeps answering 201."""
         settings, engine, factory, app, client = _build(tmp_path)
-        _register_and_login(client, "m234nobody")
+        client = _authed(app, settings, factory, "m234nobody")
         sink = {}
         _mount(app, sink)
         cid = _create_character(client)
@@ -258,7 +258,7 @@ class TestNudeFlag:
         """(A) nude=True -> the intentional fine-art nude framing phrase and
         NO clothing terms anywhere in the positive prompt."""
         settings, engine, factory, app, client = _build(tmp_path)
-        _register_and_login(client, "m234nude")
+        client = _authed(app, settings, factory, "m234nude")
         sink = {}
         _mount(app, sink)
         cid = _create_character(client)
@@ -283,7 +283,7 @@ class TestNudeFlag:
         """(B) nude=False -> unchanged behavior: no nude framing, the
         clothed auto-outfit fragment stays."""
         settings, engine, factory, app, client = _build(tmp_path)
-        _register_and_login(client, "m234clothed")
+        client = _authed(app, settings, factory, "m234clothed")
         sink = {}
         _mount(app, sink)
         cid = _create_character(client)
@@ -305,7 +305,7 @@ class TestReferenceConsumption:
         """(A) reference_id that does not exist -> the SAME 404 JSON shape
         as the stage-1 file endpoint, and the transport is never called."""
         settings, engine, factory, app, client = _build(tmp_path)
-        _register_and_login(client, "m234miss")
+        client = _authed(app, settings, factory, "m234miss")
         sink = {}
         _mount(app, sink)
         cid = _create_character(client)
@@ -330,13 +330,12 @@ class TestReferenceConsumption:
         """(B) reference_id owned by ANOTHER user -> the same 404 (no
         existence leak) + no transport call."""
         settings, engine, factory, app, client = _build(tmp_path)
-        _register_and_login(client, "m234own")
+        client = _authed(app, settings, factory, "m234own")
         foreign_ref = _upload_reference(client)
         sink = {}
         _mount(app, sink)
 
-        other = TestClient(app)
-        _register_and_login(other, "m234intruder")
+        other = _authed(app, settings, factory, "m234intruder")
         other_cid = _create_character(other)
         stage1 = other.get(f"/visual/references/{foreign_ref}/file")
         assert stage1.status_code == 404, stage1.text
@@ -360,7 +359,7 @@ class TestReferenceConsumption:
         reference_b64 equals base64 of the STORED file bytes (the stage-1
         serving endpoint is the storage oracle)."""
         settings, engine, factory, app, client = _build(tmp_path)
-        _register_and_login(client, "m234flow")
+        client = _authed(app, settings, factory, "m234flow")
         original = _png_bytes()
         ref_id = _upload_reference(client, original)
         sink = {}
@@ -382,7 +381,7 @@ class TestReferenceConsumption:
     def test_d_non_int_reference_id_is_422(self, tmp_path):
         """(D) reference_id is int|None: a non-int value is a 422."""
         settings, engine, factory, app, client = _build(tmp_path)
-        _register_and_login(client, "m234refint")
+        client = _authed(app, settings, factory, "m234refint")
         sink = {}
         _mount(app, sink)
         cid = _create_character(client)
@@ -401,7 +400,7 @@ class TestScenes:
         """(A) POST /visual/scenes: the positive prompt ALWAYS contains the
         server-side storybook suffix (no user-facing style param)."""
         settings, engine, factory, app, client = _build(tmp_path)
-        _register_and_login(client, "m234scene")
+        client = _authed(app, settings, factory, "m234scene")
         sink = {}
         _mount(app, sink)
         cid = _create_character(client)
@@ -424,7 +423,7 @@ class TestScenes:
         """(B) scenes accept reference_id with the same 404 semantics as
         portraits (uniform stage-1 shape, no transport call)."""
         settings, engine, factory, app, client = _build(tmp_path)
-        _register_and_login(client, "m234sceneref")
+        client = _authed(app, settings, factory, "m234sceneref")
         sink = {}
         _mount(app, sink)
         cid = _create_character(client)
@@ -448,7 +447,7 @@ class TestScenes:
         """(C) a real stage-1 upload consumed by scene generation: the
         captured reference_b64 equals base64 of the stored file bytes."""
         settings, engine, factory, app, client = _build(tmp_path)
-        _register_and_login(client, "m234sceneflow")
+        client = _authed(app, settings, factory, "m234sceneflow")
         original = _png_bytes()
         ref_id = _upload_reference(client, original)
         sink = {}
@@ -470,7 +469,7 @@ class TestAuthUnchanged:
         """(A) auth rules unchanged: no token -> 401, even with the new
         fields in the body."""
         settings, engine, factory, app, client = _build(tmp_path)
-        _register_and_login(client, "m234auth")
+        client = _authed(app, settings, factory, "m234auth")
         ref_id = _upload_reference(client)
         anon = TestClient(app)
 

@@ -28,6 +28,8 @@ from sqlalchemy.orm import sessionmaker  # noqa: E402
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../../.."))
 
+from tests.helpers import auth_client, make_user  # noqa: E402
+
 from app.api.app import create_app  # noqa: E402
 from app.config.config import load_config  # noqa: E402
 from app.db.models import (  # noqa: E402
@@ -40,7 +42,6 @@ from app.db.models import (  # noqa: E402
 from app.world.seed_world import seed_world  # noqa: E402
 
 SETTINGS = None
-PW = "Correct-Horse-9!"
 
 
 def setup_module(module):
@@ -70,19 +71,17 @@ def build_world(settings, seed=42):
     return engine
 
 
-def _register_and_login(client, username):
-    client.post("/auth/register", json={
-        "username": username, "email": f"{username}@x.com",
-        "password": PW, "age_confirmed": True,
-    })
-    client.post("/auth/login", json={"username": username, "password": PW})
+def _authed(app, settings, factory, username):
+    with factory() as s:
+        user = make_user(s, username, f"{username}@x.com")
+    return auth_client(app, settings, user)
 
 
-def _make_player(client, username, name):
-    _register_and_login(client, username)
+def _make_player(app, settings, factory, username, name):
+    client = _authed(app, settings, factory, username)
     r = client.post("/characters", json={"name": name, "sex": "M", "age": 30})
     assert r.status_code == 201, r.text
-    return r.json()["id"]
+    return client, r.json()["id"]
 
 
 def _give_item(factory, settings, cid, object_type="food_bread", qty=1,
@@ -118,8 +117,7 @@ def shop_world(tmp_path):
     engine = build_world(settings)
     factory = sessionmaker(bind=engine, expire_on_commit=False)
     app = create_app(settings, factory)
-    client = TestClient(app)
-    cid = _make_player(client, "b2shop", "Борис Орлов")
+    client, cid = _make_player(app, settings, factory, "b2shop", "Борис Орлов")
     return {
         "settings": settings, "app": app, "client": client,
         "factory": factory, "cid": cid, "engine": engine,
@@ -232,8 +230,7 @@ def test_offers_seller_name_uses_seller_character(shop_world):
     factory, app = shop_world["factory"], shop_world["app"]
     # A SECOND player lists an item: seller_name must be the seller's name,
     # not the requester's.
-    other = TestClient(app)
-    other_cid = _make_player(other, "b2second", "Анна Ветрова")
+    other, other_cid = _make_player(app, settings, factory, "b2second", "Анна Ветрова")
     oid = _give_item(factory, settings, other_cid, "boots")
     _list(other, oid, price=9)
     offers = client.get("/market/offers").json()

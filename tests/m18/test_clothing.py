@@ -2,12 +2,10 @@
 import os
 import sys
 
-from fastapi.testclient import TestClient
 from sqlalchemy.orm import sessionmaker
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../../.."))
 
-from app.api.auth import hash_password  # noqa: E402
 from app.config.config import load_config  # noqa: E402
 from app.db.models import (  # noqa: E402
     Character,
@@ -17,6 +15,7 @@ from app.db.models import (  # noqa: E402
     create_engine_factory,
 )
 from app.world.seed_world import seed_world  # noqa: E402
+from tests.helpers import auth_client, make_user  # noqa: E402
 
 SETTINGS = None
 
@@ -69,12 +68,9 @@ class TestClothing:
         engine = build(settings)
         factory = sessionmaker(bind=engine, expire_on_commit=False)
         with factory() as session:
-            session.add(User(
-                username="odezhda", email="o@x.com",
-                password_hash=hash_password("password123"),
-                role="player", age_confirmed=True, created_at=0,
-            ))
-            session.commit()
+            # #309: local register/login gone — create the user row directly
+            # and sign the app's own session cookie.
+            user = make_user(session, "odezhda", "o@x.com")
             char = self._player(session, settings)
             session.commit()
             npc = (
@@ -97,11 +93,12 @@ class TestClothing:
                            object_type="jacket").one().id
             )
             npc_id = npc.id
+            # the last commit expired the user row — refresh before the
+            # session closes (DetachedInstanceError in auth_client otherwise).
+            session.refresh(user)
         from app.api.app import create_app
 
-        client = TestClient(create_app(settings, factory))
-        client.post("/auth/login", json={
-            "username": "odezhda", "password": "password123"})
+        client = auth_client(create_app(settings, factory), settings, user)
 
         # baseline portrait: no worn items — #205c (owner feedback
         # 2026-10-16) means the auto clothing anchor IS present now; the
@@ -148,12 +145,9 @@ class TestClothing:
         engine = build(settings)
         factory = sessionmaker(bind=engine, expire_on_commit=False)
         with factory() as session:
-            session.add(User(
-                username="odezhda", email="o@x.com",
-                password_hash=hash_password("password123"),
-                role="player", age_confirmed=True, created_at=0,
-            ))
-            session.commit()
+            # #309: local register/login gone — create the user row directly
+            # and sign the app's own session cookie.
+            user = make_user(session, "odezhda", "o@x.com")
             char = self._player(session, settings)
             session.commit()
             npc = (
@@ -187,11 +181,12 @@ class TestClothing:
                 .filter_by(owner_character_id=char.id,
                            object_type="food_bread").one().id
             )
+            # the last commit expired the user row — refresh before the
+            # session closes (DetachedInstanceError in auth_client otherwise).
+            session.refresh(user)
         from app.api.app import create_app
 
-        client = TestClient(create_app(settings, factory))
-        client.post("/auth/login", json={
-            "username": "odezhda", "password": "password123"})
+        client = auth_client(create_app(settings, factory), settings, user)
         assert client.post(
             "/wear", json={"object_id": hat_id}).status_code == 404
         assert client.post(

@@ -29,10 +29,11 @@ from fastapi.testclient import TestClient
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../../.."))
 
+from tests.helpers import auth_client, make_user  # noqa: E402
+
 from app.config.config import load_config  # noqa: E402
 
 SETTINGS = None
-PW = "Correct-Horse-9!"
 
 PNG_MAGIC = b"\x89PNG\r\n\x1a\n"
 JPEG_MAGIC = b"\xff\xd8\xff"
@@ -60,14 +61,13 @@ def _make_settings(tmp_path, visual_extra=None):
     })
 
 
-def _register_and_login(client, username):
-    r = client.post("/auth/register", json={
-        "username": username, "email": f"{username}@x.com",
-        "password": PW, "age_confirmed": True,
-    })
-    assert r.status_code == 201, r.text
-    r = client.post("/auth/login", json={"username": username, "password": PW})
-    assert r.status_code == 200, r.text
+def _authed(app, settings, factory, username):
+    """#309: local register/login is gone — create the user directly
+    (make_user) and return a client with the app's own signed session
+    cookie."""
+    with factory() as session:
+        user = make_user(session, username, f"{username}@x.com")
+    return auth_client(app, settings, user)
 
 
 def _build(tmp_path, visual_extra=None):
@@ -120,7 +120,7 @@ class TestReferenceUpload:
         """(A) upload PNG → 201 + id; list shows 1; file served image/png;
         DELETE → 204; file after delete → 404."""
         settings, engine, factory, app, client = _build(tmp_path)
-        _register_and_login(client, "m233a")
+        client = _authed(app, settings, factory, "m233a")
         r = _upload(client, _png_bytes())
         assert r.status_code == 201, r.text
         body = r.json()
@@ -147,7 +147,7 @@ class TestReferenceUpload:
     def test_b_wrong_magic_rejected(self, tmp_path):
         """(B) text bytes → 422 unsupported reference format."""
         settings, engine, factory, app, client = _build(tmp_path)
-        _register_and_login(client, "m233b")
+        client = _authed(app, settings, factory, "m233b")
         r = _upload(client, b"just some text, definitely not an image")
         assert r.status_code == 422, r.text
         assert "unsupported reference format" in r.text
@@ -155,7 +155,7 @@ class TestReferenceUpload:
     def test_c_png_magic_corrupt_body_rejected(self, tmp_path):
         """(C) valid magic + garbage → 422 (full decode check rejects)."""
         settings, engine, factory, app, client = _build(tmp_path)
-        _register_and_login(client, "m233c")
+        client = _authed(app, settings, factory, "m233c")
         r = _upload(client, _corrupt_png_body())
         assert r.status_code == 422, r.text
         assert "unsupported reference format" in r.text
@@ -163,7 +163,7 @@ class TestReferenceUpload:
     def test_d_oversized_rejected_nothing_stored(self, tmp_path):
         """(D) >5 MiB body → 422 reference too large; nothing stored."""
         settings, engine, factory, app, client = _build(tmp_path)
-        _register_and_login(client, "m233d")
+        client = _authed(app, settings, factory, "m233d")
         body = PNG_MAGIC + b"\x00" * (settings.visual.reference_max_bytes + 1)
         r = _upload(client, body)
         assert r.status_code == 422, r.text
@@ -174,7 +174,7 @@ class TestReferenceUpload:
     def test_e_quota(self, tmp_path):
         """(E) 5 uploads ok, 6th → 422 quota; after one delete 6th → 201."""
         settings, engine, factory, app, client = _build(tmp_path)
-        _register_and_login(client, "m233e")
+        client = _authed(app, settings, factory, "m233e")
         ids = []
         for i in range(5):
             r = _upload(client, _png_bytes(), filename=f"q{i}.png")
@@ -192,13 +192,12 @@ class TestReferenceUpload:
     def test_f_foreign_access_is_404(self, tmp_path):
         """(F) user B GETs/DELETEs user A's reference → 404 (no leak)."""
         settings, engine, factory, app, client = _build(tmp_path)
-        _register_and_login(client, "m233fa")
+        client = _authed(app, settings, factory, "m233fa")
         r = _upload(client, _png_bytes())
         assert r.status_code == 201, r.text
         ref_id = r.json()["id"]
 
-        other = TestClient(app)
-        _register_and_login(other, "m233fb")
+        other = _authed(app, settings, factory, "m233fb")
         r = other.get(f"/visual/references/{ref_id}/file")
         assert r.status_code == 404, r.text
         r = other.delete(f"/visual/references/{ref_id}")
@@ -224,7 +223,7 @@ class TestReferenceUpload:
     def test_h_jpeg_happy_path(self, tmp_path):
         """(H) JPEG upload served as image/jpeg."""
         settings, engine, factory, app, client = _build(tmp_path)
-        _register_and_login(client, "m233h")
+        client = _authed(app, settings, factory, "m233h")
         r = _upload(client, _jpeg_bytes(), filename="p.jpg", mime="image/jpeg")
         assert r.status_code == 201, r.text
         body = r.json()
@@ -237,13 +236,12 @@ class TestReferenceUpload:
     def test_i_lists_are_user_scoped(self, tmp_path):
         """(I) two users: each list shows only own references."""
         settings, engine, factory, app, client = _build(tmp_path)
-        _register_and_login(client, "m233ia")
+        client = _authed(app, settings, factory, "m233ia")
         r = _upload(client, _png_bytes())
         assert r.status_code == 201, r.text
         a_id = r.json()["id"]
 
-        other = TestClient(app)
-        _register_and_login(other, "m233ib")
+        other = _authed(app, settings, factory, "m233ib")
         r = other.post("/visual/references", files={
             "file": ("b.jpg", _jpeg_bytes(), "image/jpeg")})
         assert r.status_code == 201, r.text
@@ -258,7 +256,7 @@ class TestReferenceUpload:
         """(J) same original filename twice → both stored, distinct ids,
         no collision: storage path is always {ref_id}.{ext}."""
         settings, engine, factory, app, client = _build(tmp_path)
-        _register_and_login(client, "m233j")
+        client = _authed(app, settings, factory, "m233j")
         r1 = _upload(client, _png_bytes(), filename="same-name.png")
         r2 = _upload(client, _jpeg_bytes(), filename="same-name.png")
         assert r1.status_code == 201, r1.text
@@ -274,7 +272,7 @@ class TestReferenceUpload:
         gate as the rest of /visual."""
         settings, engine, factory, app, client = _build(
             tmp_path, visual_extra={"enabled": False})
-        _register_and_login(client, "m233k")
+        client = _authed(app, settings, factory, "m233k")
         r = _upload(client, _png_bytes())
         assert r.status_code == 503, r.text
         assert "visual generation disabled" in r.text
@@ -283,7 +281,7 @@ class TestReferenceUpload:
         """(L) client part content-type is never trusted: PNG bytes with a
         lying image/jpeg part → stored/served as image/png."""
         settings, engine, factory, app, client = _build(tmp_path)
-        _register_and_login(client, "m233l")
+        client = _authed(app, settings, factory, "m233l")
         r = _upload(client, _png_bytes(), filename="lie.png",
                     mime="image/jpeg")
         assert r.status_code == 201, r.text
@@ -298,7 +296,7 @@ class TestReferenceUpload:
         """(M) file missing on disk: GET file → 404 'reference file
         missing'; DELETE still 204 and removes the row."""
         settings, engine, factory, app, client = _build(tmp_path)
-        _register_and_login(client, "m233m")
+        client = _authed(app, settings, factory, "m233m")
         r = _upload(client, _png_bytes())
         assert r.status_code == 201, r.text
         ref_id = r.json()["id"]
@@ -324,7 +322,7 @@ class TestReferenceUpload:
         assert len(body) < 5 * 1024 * 1024  # size cap is not what fires
 
         settings, engine, factory, app, client = _build(tmp_path)
-        _register_and_login(client, "m233n")
+        client = _authed(app, settings, factory, "m233n")
         r = _upload(client, body)
         assert r.status_code == 422, r.text
         assert "unsupported reference format" in r.text

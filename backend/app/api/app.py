@@ -204,9 +204,16 @@ def create_app(settings, session_factory: sessionmaker):
         _hits: dict[tuple[str, str], collections.deque] = {}
 
         def _client_ip(request: Request) -> str:
-            forwarded = request.headers.get("x-forwarded-for")
-            if forwarded:
-                return forwarded.split(",")[0].strip()
+            # #309 ИБ-этап: behind Caddy the proxy APPENDS the real client
+            # IP to any client-supplied X-Forwarded-For, so the LAST entry
+            # is the only one the client cannot forge. Taking the FIRST
+            # entry let an attacker rotate fake XFF values to get a fresh
+            # rate-limit bucket per request. A client may also send several
+            # X-Forwarded-For lines (headers.get reads only the first), so
+            # all lines are joined before taking the last entry.
+            lines = request.headers.getlist("x-forwarded-for")
+            if lines:
+                return ", ".join(lines).split(",")[-1].strip()
             return request.client.host if request.client else "unknown"
 
         @app.middleware("http")

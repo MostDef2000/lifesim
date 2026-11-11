@@ -40,7 +40,7 @@ from sqlalchemy.orm import sessionmaker
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../../.."))
 
-from fastapi.testclient import TestClient  # noqa: E402
+from tests.helpers import auth_client, make_user  # noqa: E402
 
 from app.api.app import create_app  # noqa: E402
 from app.config.config import load_config  # noqa: E402
@@ -60,7 +60,6 @@ from app.desire.llm_interpret import (  # noqa: E402
 from app.world.seed_world import seed_world  # noqa: E402
 from app.world.social_seed import seed_social  # noqa: E402
 
-PW = "Correct-Horse-9!"
 SETTINGS = None
 
 
@@ -95,12 +94,10 @@ def build_world(settings, seed=42):
     return engine
 
 
-def _register_and_login(client, username):
-    client.post("/auth/register", json={
-        "username": username, "email": f"{username}@x.com",
-        "password": PW, "age_confirmed": True,
-    })
-    client.post("/auth/login", json={"username": username, "password": PW})
+def _authed(app, settings, factory, username):
+    with factory() as s:
+        user = make_user(s, username, f"{username}@x.com")
+    return auth_client(app, settings, user)
 
 
 @pytest.fixture()
@@ -110,8 +107,7 @@ def world(tmp_path):
     engine = build_world(settings)
     factory = sessionmaker(bind=engine, expire_on_commit=False)
     app = create_app(settings, factory)
-    client = TestClient(app)
-    _register_and_login(client, "m188player")
+    client = _authed(app, settings, factory, "m188player")
     r = client.post("/characters", json={"name": "Борис Орлов", "sex": "M", "age": 30})
     assert r.status_code == 201, r.text
     cid = r.json()["id"]
@@ -125,8 +121,7 @@ def world_llm(tmp_path):
     engine = build_world(settings)
     factory = sessionmaker(bind=engine, expire_on_commit=False)
     app = create_app(settings, factory)
-    client = TestClient(app)
-    _register_and_login(client, "m188llmplayer")
+    client = _authed(app, settings, factory, "m188llmplayer")
     r = client.post("/characters", json={"name": "Арина Ветрова", "sex": "F", "age": 28})
     assert r.status_code == 201, r.text
     cid = r.json()["id"]

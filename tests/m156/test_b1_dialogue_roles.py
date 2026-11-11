@@ -59,8 +59,6 @@ from sqlalchemy.orm import sessionmaker
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../../.."))
 
-from fastapi.testclient import TestClient  # noqa: E402
-
 from app.api.app import create_app  # noqa: E402
 from app.config.config import load_config  # noqa: E402
 from app.db.models import (  # noqa: E402
@@ -78,12 +76,12 @@ from app.db.models import (  # noqa: E402
 )
 from app.world.seed_world import seed_world  # noqa: E402
 from app.world.social_seed import seed_social  # noqa: E402
+from tests.helpers import auth_client, make_user, session_cookie  # noqa: E402
 
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "../.."))
 APP_JS = os.path.join(ROOT, "backend/app/web/app.js")
 APP_CSS = os.path.join(ROOT, "backend/app/web/style.css")
 
-PW = "Correct-Horse-9!"
 SETTINGS = None
 
 
@@ -126,12 +124,9 @@ def world(tmp_path):
     engine = build_world(settings)
     factory = sessionmaker(bind=engine, expire_on_commit=False)
     app = create_app(settings, factory)
-    client = TestClient(app)
-    client.post("/auth/register", json={
-        "username": "b1reader", "email": "b1@x.com",
-        "password": PW, "age_confirmed": True,
-    })
-    client.post("/auth/login", json={"username": "b1reader", "password": PW})
+    with factory() as s:
+        user = make_user(s, "b1reader", "b1@x.com")
+    client = auth_client(app, settings, user)
     r = client.post("/characters", json={"name": "Борис Орлов", "sex": "M", "age": 30})
     assert r.status_code == 201, r.text
     cid = r.json()["id"]
@@ -144,7 +139,7 @@ def world(tmp_path):
             .first()
         )
         npc_id = npc.id
-    return settings, app, client, factory, cid, npc_id, engine
+    return settings, app, client, factory, cid, npc_id, engine, user
 
 
 def _roles_of(factory, world_id, cid):
@@ -164,7 +159,7 @@ def _set_clock(factory, world_id, ts):
 # ---------- 1. derive_roles: catalog + no-false-positive (#89) ----------
 
 def test_newcomer_present_at_world_start_and_absent_after_threshold(world):
-    settings, _, _, factory, cid, npc_id, _ = world
+    settings, _, _, factory, cid, npc_id, _, user = world
     wid = settings.world.world_id
     # World clock at 0, npc created_at=0 → 0 days in world < 7 → newcomer.
     roles = _roles_of(factory, wid, npc_id)
@@ -186,7 +181,7 @@ def test_newcomer_present_at_world_start_and_absent_after_threshold(world):
 
 
 def test_occupation_role_from_job_and_absent_without_job(world):
-    settings, _, _, factory, cid, npc_id, _ = world
+    settings, _, _, factory, cid, npc_id, _, user = world
     wid = settings.world.world_id
     roles = _roles_of(factory, wid, npc_id)
     occ = [r for r in roles if r["id"] == "occupation"]
@@ -221,7 +216,7 @@ def test_occupation_role_from_job_and_absent_without_job(world):
 
 
 def test_org_leader_and_member_roles_from_membership(world):
-    settings, _, _, factory, cid, npc_id, _ = world
+    settings, _, _, factory, cid, npc_id, _, user = world
     wid = settings.world.world_id
     with factory() as s:
         org = s.query(Organization).order_by(Organization.id).first()
@@ -274,7 +269,7 @@ def test_org_leader_and_member_roles_from_membership(world):
 def test_offender_role_reported_only(world):
     """Public roles: an UNREPORTED crime is not a public fact — the offender
     role appears only for reported/resolved authoritative crime rows."""
-    settings, _, _, factory, cid, npc_id, _ = world
+    settings, _, _, factory, cid, npc_id, _, user = world
     wid = settings.world.world_id
     with factory() as s:
         s.add(Crime(
@@ -300,7 +295,7 @@ def test_offender_role_reported_only(world):
 
 
 def test_roles_deterministic_same_state_same_roles(world):
-    settings, _, _, factory, cid, npc_id, _ = world
+    settings, _, _, factory, cid, npc_id, _, user = world
     wid = settings.world.world_id
     a = _roles_of(factory, wid, npc_id)
     b = _roles_of(factory, wid, npc_id)
@@ -318,7 +313,7 @@ def test_roles_deterministic_same_state_same_roles(world):
 
 
 def test_roles_distinct_from_internal_traits(world):
-    settings, _, _, factory, cid, npc_id, _ = world
+    settings, _, _, factory, cid, npc_id, _, user = world
     wid = settings.world.world_id
     with factory() as s:
         trait_keys = {
@@ -340,7 +335,7 @@ def test_partner_role_excluded_no_authoritative_source(world):
 
     assert "partner" in roles_module.EXCLUDED_ROLES
     assert roles_module.EXCLUDED_ROLES["partner"]
-    settings, _, _, factory, cid, npc_id, _ = world
+    settings, _, _, factory, cid, npc_id, _, user = world
     wid = settings.world.world_id
     roles = _roles_of(factory, wid, npc_id)
     assert "partner" not in [r["id"] for r in roles]
@@ -352,7 +347,7 @@ def test_role_traceability_via_source_row_timestamps(world):
     timestamp (characters.created_at, character_jobs.started_at,
     organization_members.joined_at, crimes.day). Pinned here so the model
     stays honest instead of inventing a mutation-heavy role store."""
-    settings, _, _, factory, cid, npc_id, _ = world
+    settings, _, _, factory, cid, npc_id, _, user = world
     wid = settings.world.world_id
     with factory() as s:
         char = s.get(Character, npc_id)
@@ -369,18 +364,21 @@ def test_role_traceability_via_source_row_timestamps(world):
 # ---------- 2. GET /characters/{cid}/roles read model ----------
 
 def test_roles_endpoint_auth_and_unknown(world):
-    settings, app, client, factory, cid, npc_id, _ = world
+    settings, app, client, factory, cid, npc_id, _, user = world
     # The fixture client is logged in — drop the cookie for the 401 check.
     client.post("/auth/logout")
+    # Jar entry was set directly (auth_client); logout's delete_cookie
+    # doesn't match its attributes — clear it explicitly.
+    client.cookies.delete(settings.api.cookie_name)
     r = client.get(f"/characters/{npc_id}/roles")
     assert r.status_code == 401
-    client.post("/auth/login", json={"username": "b1reader", "password": PW})
+    client.cookies.set(settings.api.cookie_name, session_cookie(settings, user))
     r = client.get("/characters/who-is-this/roles")
     assert r.status_code == 404
 
 
 def test_roles_endpoint_public_shape(world):
-    settings, app, client, factory, cid, npc_id, _ = world
+    settings, app, client, factory, cid, npc_id, _, user = world
     r = client.get(f"/characters/{npc_id}/roles")
     assert r.status_code == 200, r.text
     body = r.json()
@@ -390,12 +388,10 @@ def test_roles_endpoint_public_shape(world):
         assert set(role.keys()) == {"id", "title", "source", "reason"}
         assert role["id"] and role["title"] and role["source"]
     # Public read model: ANOTHER authenticated user may read public roles.
-    client.post("/auth/register", json={
-        "username": "b1other", "email": "b1o@x.com",
-        "password": PW, "age_confirmed": True,
-    })
-    client.post("/auth/login", json={"username": "b1other", "password": PW})
-    r2 = client.get(f"/characters/{npc_id}/roles")
+    with factory() as s:
+        other = make_user(s, "b1other", "b1o@x.com")
+    client2 = auth_client(app, settings, other)
+    r2 = client2.get(f"/characters/{npc_id}/roles")
     assert r2.status_code == 200
     assert r2.json()["roles"] == body["roles"]
 
@@ -403,7 +399,7 @@ def test_roles_endpoint_public_shape(world):
 # ---------- 3. Dialogue context consumes roles (#89 → #88) ----------
 
 def test_build_context_includes_public_roles(world):
-    settings, app, client, factory, cid, npc_id, _ = world
+    settings, app, client, factory, cid, npc_id, _, user = world
     from app.api.dialogue import build_context
     from app.social.roles import derive_roles
 
@@ -419,7 +415,7 @@ def test_build_context_includes_public_roles(world):
 
 
 def test_message_source_fallback_when_llm_off(world):
-    settings, app, client, factory, cid, npc_id, _ = world
+    settings, app, client, factory, cid, npc_id, _, user = world
     assert settings.llm.enabled is False
     sid = client.post("/dialogue/start", json={"npc_id": npc_id}).json()["session_id"]
     r = client.post(f"/dialogue/{sid}/message", json={"content": "Привет!"})
@@ -434,7 +430,7 @@ def test_message_source_fallback_when_llm_off(world):
 def test_message_source_llm_via_stubbed_seam_receives_roles(
     world, monkeypatch
 ):
-    settings, app, client, factory, cid, npc_id, _ = world
+    settings, app, client, factory, cid, npc_id, _, user = world
     captured = {}
 
     def fake_llm_reply(session, settings_, world_id, row, history, context,
@@ -460,7 +456,7 @@ def test_dialogue_encounter_affection_once_per_window(world, monkeypatch):
     once per DIALOGUE_ENCOUNTER_COOLDOWN_MIN (30 game minutes) per pair,
     via the shared SOCIALIZE rule (app.social.affection). Affection-ONLY:
     every other scalar stays byte-identical across all exchanges."""
-    settings, app, client, factory, cid, npc_id, _ = world
+    settings, app, client, factory, cid, npc_id, _, user = world
     wid = settings.world.world_id
 
     def fake_llm_reply(session, settings_, world_id, row, history, context,

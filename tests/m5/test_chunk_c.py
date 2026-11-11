@@ -18,6 +18,7 @@ from app.api.dialogue import (  # noqa: E402
 from app.config.config import load_config  # noqa: E402
 from app.db.models import bootstrap, create_engine_factory  # noqa: E402
 from app.world.seed_world import seed_world  # noqa: E402
+from tests.helpers import auth_client, make_user  # noqa: E402
 
 SETTINGS = None
 
@@ -50,16 +51,11 @@ def world(tmp_path):
         session.commit()
     factory = sessionmaker(bind=engine, expire_on_commit=False)
     app = create_app(settings, factory)
-    from fastapi.testclient import TestClient
-
-    client = TestClient(app)
-    client.post("/auth/register", json={
-        "username": "reader",
-        "email": "r@x.com",
-        "password": "password123",
-        "age_confirmed": True,
-    })
-    client.post("/auth/login", json={"username": "reader", "password": "password123"})
+    # #309: no local register/login — create the user row directly and
+    # sign the app's own v2 session cookie.
+    with factory() as session:
+        reader = make_user(session, "reader", "r@x.com")
+    client = auth_client(app, settings, reader)
     r = client.post("/characters", json={"name": "Rita Ora", "sex": "F", "age": 28})
     assert r.status_code == 201, r.text
     cid = r.json()["id"]
@@ -120,7 +116,7 @@ def test_get_world_events_limit_cap(world):
 
 
 def test_get_character_public_vs_owner(world):
-    _, _, client, cid, *_ = world
+    settings, app, client, cid, npc_id, engine, factory = world
     r = client.get(f"/characters/{cid}")
     assert r.status_code == 200
     body = r.json()
@@ -129,15 +125,10 @@ def test_get_character_public_vs_owner(world):
     assert body["control_mode"] == "AUTONOMOUS"
 
     # second user sees public view without needs
-    client.post("/auth/logout")
-    client.post("/auth/register", json={
-        "username": "viewer",
-        "email": "v@x.com",
-        "password": "password123",
-        "age_confirmed": True,
-    })
-    client.post("/auth/login", json={"username": "viewer", "password": "password123"})
-    r = client.get(f"/characters/{cid}")
+    with factory() as session:
+        viewer = make_user(session, "viewer", "v@x.com")
+    client2 = auth_client(app, settings, viewer)
+    r = client2.get(f"/characters/{cid}")
     assert r.status_code == 200
     assert r.json()["is_owner"] is False
     assert "needs" not in r.json()
@@ -172,7 +163,7 @@ def test_get_location(world):
 # ---------- Dialogue / chat (R7, llm-off fallback) ----------
 
 def test_dialogue_start_and_message(world):
-    settings, _, client, cid, npc_id, *_ = world
+    settings, app, client, cid, npc_id, engine, factory = world
     r = client.post("/dialogue/start", json={"npc_id": npc_id})
     assert r.status_code == 201, r.text
     sid = r.json()["session_id"]
@@ -184,18 +175,13 @@ def test_dialogue_start_and_message(world):
     assert len(body["suggested_responses"]) == 3
 
     # fallback is deterministic
-    client.post("/auth/logout")
-    client.post("/auth/register", json={
-        "username": "reader2",
-        "email": "r2@x.com",
-        "password": "password123",
-        "age_confirmed": True,
-    })
-    client.post("/auth/login", json={"username": "reader2", "password": "password123"})
-    client.post("/characters", json={"name": "Rita Ortega", "sex": "F", "age": 33})
-    r2 = client.post("/dialogue/start", json={"npc_id": npc_id})
+    with factory() as session:
+        reader2 = make_user(session, "reader2", "r2@x.com")
+    client2 = auth_client(app, settings, reader2)
+    client2.post("/characters", json={"name": "Rita Ortega", "sex": "F", "age": 33})
+    r2 = client2.post("/dialogue/start", json={"npc_id": npc_id})
     sid2 = r2.json()["session_id"]
-    r2 = client.post(f"/dialogue/{sid2}/message", json={"content": "Привет! Как дела?"})
+    r2 = client2.post(f"/dialogue/{sid2}/message", json={"content": "Привет! Как дела?"})
     assert r2.json()["npc_reply"] == body["npc_reply"]
 
 
@@ -238,32 +224,23 @@ def test_dialogue_unknown_npc_404(world):
 
 
 def test_dialogue_requires_owned_character(world):
-    _, _, client, cid, npc_id, *_ = world
-    # user without a character
-    client.post("/auth/logout")
-    client.post("/auth/register", json={
-        "username": "charless",
-        "email": "ch@x.com",
-        "password": "password123",
-        "age_confirmed": True,
-    })
-    client.post("/auth/login", json={"username": "charless", "password": "password123"})
-    r = client.post("/dialogue/start", json={"npc_id": npc_id})
+    settings, app, client, cid, npc_id, engine, factory = world
+    # #309: user without a character — direct row + signed session cookie
+    with factory() as session:
+        charless = make_user(session, "charless", "ch@x.com")
+    client2 = auth_client(app, settings, charless)
+    r = client2.post("/dialogue/start", json={"npc_id": npc_id})
     assert r.status_code == 422
 
 
 def test_dialogue_foreign_session_404(world):
-    _, _, client, cid, npc_id, *_ = world
+    settings, app, client, cid, npc_id, engine, factory = world
     sid = client.post("/dialogue/start", json={"npc_id": npc_id}).json()["session_id"]
-    client.post("/auth/logout")
-    client.post("/auth/register", json={
-        "username": "peeker",
-        "email": "pk@x.com",
-        "password": "password123",
-        "age_confirmed": True,
-    })
-    client.post("/auth/login", json={"username": "peeker", "password": "password123"})
-    r = client.get(f"/dialogue/{sid}")
+    # #309: a different user cannot read the session
+    with factory() as session:
+        peeker = make_user(session, "peeker", "pk@x.com")
+    client2 = auth_client(app, settings, peeker)
+    r = client2.get(f"/dialogue/{sid}")
     assert r.status_code == 404
 
 

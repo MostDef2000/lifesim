@@ -31,7 +31,8 @@ observable artifact.
   joiners ", " / ". "; the biography textarea has exactly TWO writers
   (seed + rebuildDraft) — assembly is explicit-action only.
 - Hash landmines (m128/m162 shared pins): #/profile stays 3, #/world
-  stays 4, gotoWorld stays 5; the route() guard line is byte-identical;
+  stays 4, gotoWorld stays 4 (#309: the login-success site is gone with
+  local auth); the route() guard line is byte-identical;
   the creator normalizes its own hash to #/create and redirects a
   with-character visitor to #/profile.
 - CSS: .creator-shell block exists, EVERY .creator-* selector is shell-
@@ -304,9 +305,11 @@ def test_hash_landmine_pins():
     # Shared counts (m128/m162) must stay honest after the wave:
     assert js.count('location.hash = "#/profile";') == 3
     assert js.count('location.hash = "#/world";') == 4
-    # #72: the Place screen's «К карте» is a 5th gotoWorld() call site
-    # (same single-dispatch contract; the hash assignment count is unchanged).
-    assert js.count("gotoWorld();") == 5
+    # #72: the Place screen's «К карте» is a gotoWorld() call site (same
+    # single-dispatch contract; the hash assignment count is unchanged).
+    # #309: the login-success gotoWorld site is gone with local auth —
+    # the count drops from 5 to 4.
+    assert js.count("gotoWorld();") == 4
     # The creator never assigns #/world directly and never re-enters
     # route() next to a hash assignment (#161 single-dispatch rule).
     view = _creator_view(js)
@@ -368,8 +371,10 @@ def test_creator_hygiene_pins():
 
 def test_creator_draft_reset_pins():
     """F1: the creator draft is per-session private input — it must be reset
-    on every auth transition (login, logout, account deletion) and consumed
-    on successful creation, so the next browser user never inherits it."""
+    on every auth transition (logout, account deletion) and consumed on
+    successful creation, so the next browser user never inherits it.
+    #309: the login-success reset site is gone with local auth (OIDC SSO has
+    no in-app login form to reset from)."""
     js = _read(APP_JS)
     # the helper exists next to the draft singleton and clears every field
     assert js.count("function creatorResetDraft()") == 1
@@ -377,22 +382,20 @@ def test_creator_draft_reset_pins():
                     "function viewCreateCharacter", "reset helper")
     for field in ("appearance", "appearancePrompt", "bio", "tags"):
         assert f"CREATOR_DRAFT.{field} = " in helper, field
-    # exactly four call sites, one per auth/creation transition
-    assert js.count("creatorResetDraft();") == 4
-    # each site is in the right neighborhood: login success, creator confirm,
-    # logout, account deletion
-    assert "fresh login must not inherit" in js
+    # exactly three call sites, one per auth/creation transition
+    assert js.count("creatorResetDraft();") == 3
+    # each site is in the right neighborhood: creator confirm, logout,
+    # account deletion
     assert "consumed draft must not leak" in js
     assert "logout clears the creator draft" in js
     assert "deletion clears the creator draft" in js
     # the logout + deletion sites sit in the profile view (after the creator
-    # block), the login + confirm sites before it
+    # block), the confirm site inside it
     logout_i = js.index("logout clears the creator draft")
     delete_i = js.index("deletion clears the creator draft")
-    login_i = js.index("fresh login must not inherit")
     confirm_i = js.index("consumed draft must not leak")
     creator_block_i = js.index("/* ---------- character creation (020")
-    assert login_i < creator_block_i < confirm_i < logout_i < delete_i
+    assert creator_block_i < confirm_i < logout_i < delete_i
 
 
 # ---------- 12. W2 preview panel: regenerate availability ----------
