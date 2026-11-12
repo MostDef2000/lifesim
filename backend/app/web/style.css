@@ -3128,6 +3128,90 @@ button.danger:hover { background: #93301f; }
   .settings-shell .settings-hero { padding: 16px; }
 }
 
+/* ---------- #306: game-shell tokens & primitives ----------
+   Foundation only (no screen migration yet): the §27 warm palette lives on
+   a .game-shell scope, mirroring how .world-shell scopes its local --w-*
+   family — the global :root dark legacy tokens are intentionally untouched.
+   Typography canon is expressed ONLY here: headers Georgia 400, body
+   system-ui 16px/1.55. Spacing scale 4/8/12/20/28, radii 12/8, interactive
+   targets >= 44px. The app.js helpers (gameHeader/contextPanel/actionButton/
+   actionStatus + gameEmpty/gameLoading/gameError) emit exactly these class
+   names. Deliberately NO mirror of the pinned warm line token here — the
+   pinned token count stays 4 (m170/m173/m175). */
+.game-shell {
+  --game-bg: #F3ECDF;
+  --game-panel: #FFF9EF;
+  --game-ink: #30271F;
+  --game-dim: #69594C;
+  --game-accent: #86551E;
+  --game-accent-hover: #6E4519;
+  --game-critical: #A13D32;
+  --game-success: #42613E;
+  --game-border: rgba(48, 39, 31, 0.14);
+  --game-focus: rgba(134, 85, 30, 0.45);
+  --game-warm: rgba(134, 85, 30, 0.12);
+  background: var(--game-bg);
+  color: var(--game-ink);
+  font: 16px/1.55 system-ui, sans-serif;
+}
+.game-shell h1, .game-shell h2, .game-shell h3 {
+  font-family: Georgia, "Times New Roman", serif;
+  font-weight: 400;
+  color: var(--game-ink);
+}
+
+/* header primitive: Georgia-400 title + dim meta line */
+.game-header { margin: 0 0 12px; }
+.game-shell .game-header-title { margin: 0; font-size: 20px; }
+.game-header-meta { margin-top: 4px; color: var(--game-dim); font-size: 14px; }
+
+/* context panel primitive: warm card, radius 12, scale spacing */
+.game-panel {
+  background: var(--game-panel);
+  border: 1px solid var(--game-border);
+  border-radius: 12px;
+  padding: 12px 20px;
+}
+.game-shell .game-panel-title { margin: 0 0 8px; font-size: 16px; color: var(--game-dim); }
+
+/* action button primitive: >= 44px target, token-driven hover/focus */
+.game-action {
+  background: var(--game-panel);
+  color: var(--game-ink);
+  border: 1px solid var(--game-border);
+  border-radius: 8px;
+  padding: 12px 20px;
+  min-height: 44px;
+  font: inherit;
+  cursor: pointer;
+}
+.game-action:hover { border-color: var(--game-accent); background: var(--game-warm); }
+.game-action:focus-visible { outline: 2px solid var(--game-focus); outline-offset: 2px; }
+.game-action:disabled { opacity: 0.55; cursor: default; }
+.game-action-primary { background: var(--game-accent); border-color: var(--game-accent); color: var(--game-panel); }
+.game-action-primary:hover { background: var(--game-accent-hover); border-color: var(--game-accent-hover); }
+.game-action-danger { color: var(--game-critical); border-color: var(--game-critical); }
+.game-action-danger:hover { background: rgba(161, 61, 50, 0.10); border-color: var(--game-critical); }
+
+/* action status primitive: inline feedback line under an action row */
+.game-status { margin-top: 4px; font-size: 14px; color: var(--game-dim); }
+.game-status-ok { color: var(--game-success); }
+.game-status-err { color: var(--game-critical); }
+
+/* empty / loading / error states (game-shell styling of the #93 pattern) */
+.game-state {
+  padding: 20px;
+  border: 1px dashed var(--game-border);
+  border-radius: 12px;
+  color: var(--game-dim);
+  text-align: center;
+}
+.game-state-error { color: var(--game-critical); border-color: rgba(161, 61, 50, 0.4); }
+/* explicit hooks for the empty/loading modifiers (dim today, free to
+   diverge later without touching the helpers) */
+.game-state-empty, .game-state-loading { color: var(--game-dim); }
+.game-state .game-action { margin-top: 8px; }
+
 /* #175: connection banner — persistent offline signal driven by consecutive
    pollEvents failures (WS close is routine on navigation, never drives it).
    Warm-warn family on the dark panel bg; fixed top-center, below nothing —
