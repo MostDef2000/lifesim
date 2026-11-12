@@ -4,6 +4,7 @@ import urllib.request
 from unittest.mock import patch
 
 import pytest
+from pydantic import ValidationError
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
@@ -74,6 +75,29 @@ def test_config_without_llm_section_uses_defaults(tmp_path):
     assert settings.llm.transport == "stub"
 
 
+@pytest.mark.parametrize("enabled", [True, False])
+@pytest.mark.parametrize("bad", ["ollma", "Stub", ""])
+def test_llm_config_rejects_unknown_transport(bad, enabled):
+    # Validation applies regardless of the enabled flag: a typo like
+    # "ollma" must fail at config load, not silently route to a transport.
+    with pytest.raises(ValidationError) as exc:
+        LlmConfig(enabled=enabled, transport=bad)
+    msg = str(exc.value)
+    assert "stub" in msg and "ollama" in msg
+
+
+def test_config_yaml_invalid_llm_transport_rejected(tmp_path):
+    base = load_config("config/default.yaml").model_dump()
+    base["llm"]["transport"] = "ollma"
+    base["persistence"]["db_path"] = ":memory:"
+    p = tmp_path / "bad_transport.yaml"
+    import yaml
+    p.write_text(yaml.safe_dump(base))
+    with pytest.raises(ValidationError) as exc:
+        load_config(str(p))
+    assert exc.value.errors()[0]["loc"] == ("llm", "transport")
+
+
 # --- StubTransport determinism -------------------------------------------
 
 def test_stub_decision_picks_first_available_action():
@@ -127,6 +151,18 @@ def test_build_transport_dispatch():
     assert isinstance(build_transport(settings), StubTransport)
     settings = LlmConfig(enabled=False, transport="ollama")
     assert isinstance(build_transport(settings), StubTransport)
+
+
+def test_build_transport_raises_on_unknown_transport():
+    # model_construct bypasses pydantic validation — the factory is the
+    # last line of defense: unknown transport must raise, never fall
+    # through to a default transport.
+    settings = LlmConfig.model_construct(enabled=True, transport="ollma")
+    with pytest.raises(ValueError) as exc:
+        build_transport(settings)
+    msg = str(exc.value)
+    assert "ollma" in msg
+    assert "stub" in msg and "ollama" in msg
 
 
 # --- OllamaTransport contract (network mocked, CI-safe) -------------------

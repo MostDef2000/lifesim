@@ -3,7 +3,7 @@ import pathlib
 from typing import Any, Dict, List, Optional
 
 import yaml
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 
 class WorldConfig(BaseModel):
@@ -229,6 +229,13 @@ class LlmConfig(BaseModel):
     timeout_sec: int = 30
     retry: int = 1
     memory: AiMemoryConfig = Field(default_factory=AiMemoryConfig)
+
+    @field_validator("transport")
+    @classmethod
+    def validate_transport(cls, value: str) -> str:
+        if value not in ("stub", "ollama"):
+            raise ValueError("llm transport must be stub or ollama")
+        return value
 
 class OidcConfig(BaseModel):
     """OIDC SSO (Authentik): local auth replaced by the provider flow.
