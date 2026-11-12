@@ -116,11 +116,17 @@ def test_stub_dialogue_and_summarize():
 def test_build_transport_dispatch():
     settings = LlmConfig(transport="stub")
     assert isinstance(build_transport(settings), StubTransport)
-    settings = LlmConfig(transport="ollama", base_url="http://x:1",
+    settings = LlmConfig(enabled=True, transport="ollama", base_url="http://x:1",
                          model_tier2="m", timeout_sec=5)
     t = build_transport(settings)
     assert isinstance(t, OllamaTransport)
     assert t.model == "m" and t.timeout_sec == 5
+    # Explicit pins: enabled+stub honors stub selection (spec 004-llm R12);
+    # disabled+ollama still hits the disabled gate (no network).
+    settings = LlmConfig(enabled=True, transport="stub")
+    assert isinstance(build_transport(settings), StubTransport)
+    settings = LlmConfig(enabled=False, transport="ollama")
+    assert isinstance(build_transport(settings), StubTransport)
 
 
 # --- OllamaTransport contract (network mocked, CI-safe) -------------------
