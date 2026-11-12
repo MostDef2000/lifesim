@@ -181,6 +181,11 @@ def build_transport(llm_config) -> LlmTransport:
         return OllamaTransport(
             llm_config.base_url, llm_config.model_tier2,
             llm_config.timeout_sec)
+    if llm_config.enabled and llm_config.transport == "stub":
+        # Explicit stub selection (spec 004-llm R12/R71-73): llm-on(stub)
+        # runs are deterministic and network-free — must not fall through
+        # to the Ollama catch-all below.
+        return StubTransport()
     if llm_config.enabled:
         # Fallback: local Ollama tunnel (server must have it up at base_url).
         return OllamaTransport(
