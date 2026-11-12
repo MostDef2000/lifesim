@@ -173,10 +173,18 @@ class OllamaTransport:
 
 
 def build_transport(llm_config) -> LlmTransport:
-    """Accepts the LlmConfig sub-object (settings.llm)."""
-    if llm_config.transport == "ollama":
+    """Accepts the LlmConfig sub-object (settings.llm).
+
+    Defaults to Ollama chat endpoint (fallback = local tunnel to 127.0.0.1:11434).
+    """
+    if llm_config.enabled and llm_config.transport == "ollama":
         return OllamaTransport(
             llm_config.base_url, llm_config.model_tier2,
+            llm_config.timeout_sec)
+    if llm_config.enabled:
+        # Fallback: local Ollama tunnel (server must have it up at base_url).
+        return OllamaTransport(
+            llm_config.base_url, llm_config.model_tier1,
             llm_config.timeout_sec)
     return StubTransport()
 
