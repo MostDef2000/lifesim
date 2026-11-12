@@ -107,6 +107,9 @@ def build_generate_prompt(idea: str) -> str:
         '- "outfit_mode": "auto", "casual" or "formal" (never "nude")\n'
         '- "custom_clothing": concrete ENGLISH garments, ≤500 characters; '
         "may be empty\n"
+        "# Face guard: if \"face\" field is missing or blank, the generator must "
+        "explicitly supply a face description (e.g. \"blonde\", \"red hair\"). "
+        "AI must never output a bare face prompt.\n"
         "Rules: every character is a fictional adult (18+). Reply with the "
         "JSON object only."
     )
@@ -219,6 +222,11 @@ _FIELD_VALIDATORS = {
     "outfit_mode": _validate_outfit_mode,
     "custom_clothing": _validate_custom_clothing,
 }
+
+# Helper: force the generator to always hand over an explicit face description.
+def build_face_prompt(face: str) -> dict:
+    """Return the 'face' entry required by image-generation prompts."""
+    return {"face": face}
 
 
 def validate_field_value(field: str, value):
