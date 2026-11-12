@@ -54,6 +54,64 @@ function loadRetryNode(loading, retry) {
     el("button", { type: "button", onclick: retry }, "Повторить"));
 }
 
+/* ---------- #306: game-shell primitives (foundation only) ----------
+   Reusable DOM builders for the upcoming game-shell screens; no existing
+   screen is rewired yet. They build on el()/appendKids (textContent-only
+   rendering — API data is never interpolated into HTML strings) and emit
+   the .game-* classes styled in the #306 section of style.css. Plain args
+   in, DOM nodes out. Usage contract: an adopting screen carries the
+   .game-shell class itself — these helpers emit primitives only, never
+   the shell. */
+
+/* Screen header: Georgia-400 title + optional dim meta line (day/time…). */
+function gameHeader(title, meta) {
+  return el("header", { class: "game-header" },
+    el("h2", { class: "game-header-title" }, title),
+    meta == null ? null : el("div", { class: "game-header-meta" }, meta));
+}
+
+/* Context panel: warm card with an optional title and body children. */
+function contextPanel(title, ...kids) {
+  return el("section", { class: "game-panel" },
+    title == null ? null : el("h3", { class: "game-panel-title" }, title),
+    kids);
+}
+
+/* Action button: >= 44px target; opts = { kind: "primary"|"danger",
+   disabled, title }. */
+function actionButton(label, onclick, opts = {}) {
+  opts = opts || {};  // null-safe: default params only cover undefined
+  const attrs = { type: "button",
+    class: "game-action" + (opts.kind ? " game-action-" + opts.kind : ""),
+    onclick };
+  if (opts.disabled) attrs.disabled = "";
+  if (opts.title) attrs.title = opts.title;
+  return el("button", attrs, label);
+}
+
+/* Inline feedback line under an action row; kind = "ok" | "err". */
+function actionStatus(text, kind) {
+  return el("div", { class: "game-status" + (kind ? " game-status-" + kind : "") },
+    text);
+}
+
+/* Empty / loading / error states (game-shell styling of the #93 pattern).
+   Unlike loadRetryNode — which fills an existing node — these RETURN a node
+   so new screens can compose them inline; retry is optional. */
+function gameEmpty(text) {
+  return el("div", { class: "game-state game-state-empty" }, text);
+}
+
+function gameLoading(text) {
+  return el("div", { class: "game-state game-state-loading" }, text || "Загрузка…");
+}
+
+function gameError(text, retry) {
+  return el("div", { class: "game-state game-state-error" },
+    text,
+    retry ? actionButton("Повторить", retry) : null);
+}
+
 /* #295: display dictionaries for internal codes that reach UI surfaces
    (task rows, profile/career job, taskRow source/object_type). Mirrors the
    backend canons: TASK_TYPE/OBJECT_TYPE — app/events/labels.py; job titles —
