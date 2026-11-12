@@ -175,7 +175,10 @@ class OllamaTransport:
 def build_transport(llm_config) -> LlmTransport:
     """Accepts the LlmConfig sub-object (settings.llm).
 
-    Defaults to Ollama chat endpoint (fallback = local tunnel to 127.0.0.1:11434).
+    Explicit dispatch: enabled+ollama -> Ollama chat endpoint (tier2),
+    enabled+stub -> deterministic StubTransport, anything else enabled ->
+    ValueError (LlmConfig validates transport, but model_construct bypasses
+    it), disabled -> StubTransport (no network).
     """
     if llm_config.enabled and llm_config.transport == "ollama":
         return OllamaTransport(
@@ -183,14 +186,13 @@ def build_transport(llm_config) -> LlmTransport:
             llm_config.timeout_sec)
     if llm_config.enabled and llm_config.transport == "stub":
         # Explicit stub selection (spec 004-llm R12/R71-73): llm-on(stub)
-        # runs are deterministic and network-free — must not fall through
-        # to the Ollama catch-all below.
+        # runs are deterministic and network-free — never falls through
+        # to the ollama branch above.
         return StubTransport()
     if llm_config.enabled:
-        # Fallback: local Ollama tunnel (server must have it up at base_url).
-        return OllamaTransport(
-            llm_config.base_url, llm_config.model_tier1,
-            llm_config.timeout_sec)
+        raise ValueError(
+            f"unknown llm transport: {llm_config.transport}; "
+            "valid values: stub, ollama")
     return StubTransport()
 
 
