@@ -234,7 +234,7 @@ llm:
   enabled: true
   transport: ollama
   base_url: http://localhost:11434
-  model_tier1: qwen3:4b
+  model_tier1: dolphin3:8b
   model_tier2: qwen3:14b
   timeout_sec: 120
   retry: 1
