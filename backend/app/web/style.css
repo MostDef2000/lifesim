@@ -3055,8 +3055,9 @@ button.danger:hover { background: #93301f; }
    Warm family screen like the other outside-the-shell screens, with the
    same token-mirror precedent: NO --w-line definition here — the
    pinned token count stays 4 and the :root fallback (#172) carries the
-   identical value. One scrolling composition: hero → actions → selector →
-   overview → people → events → details; section headings, no tabs. */
+   identical value. One scrolling composition; the #303 game-shell layout
+   (screen topbar → stage + context grid) lives in the #303 block at the
+   file tail. Section headings, no tabs. */
 .place-shell {
   --w-bg: #0a1016;
   --w-panel: rgba(23, 33, 42, 0.72);
@@ -3108,30 +3109,17 @@ button.danger:hover { background: #93301f; }
 .place-hero-text { display: grid; gap: 2px; }
 .place-hero-note { font-size: 12px; }
 
-/* read-only action row + compact location selector. */
+/* contextual action row — current place only (#303); the buttons reuse the
+   World action vocabulary. */
 .place-actions {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
   align-items: center;
 }
-.place-chat-link {
-  color: var(--w-warm-ink);
-  background: var(--w-accent);
-  border: 1px solid var(--w-accent);
-  border-radius: 8px;
-  padding: 6px 12px;
-}
-.place-selector {
-  display: flex;
-  gap: 8px;
-  align-items: center;
-  color: var(--w-dim);
-  font-size: 13px;
-}
-.place-selector select { max-width: 100%; }
 
-/* people roster — name + kind rows, one per occupant. */
+/* people roster — name + kind rows, one per occupant (reference level
+   inside «О месте» since #303). */
 .place-roster { display: grid; gap: 2px; }
 .place-roster-row {
   display: flex;
@@ -3152,8 +3140,8 @@ button.danger:hover { background: #93301f; }
   font-size: 13px;
 }
 
-/* details — label/value grid over authoritative catalog fields. */
-.place-details { display: grid; gap: 2px; }
+/* details — label/value rows over authoritative catalog fields (the
+   collapsible .place-about shell is #303's, at the file tail). */
 .place-detail-row {
   display: flex;
   justify-content: space-between;
@@ -3431,6 +3419,108 @@ button.danger:hover { background: #93301f; }
   .world-panel:not(.world-panel--expanded) .world-sub { margin-top: 0; }
   .world-panel:not(.world-panel--expanded) .world-collapsible { display: none; }
   .world-panel-expand { display: inline-flex; }
+}
+
+/* ---------- #303: Place game-shell layout — the screen becomes a game
+   shell: a screen topbar (back + title) over a two-column grid (large
+   static stage left, context panel right); ≤720px stacks the stage above
+   the panel. One scrolling composition — no inner scroll containers. The
+   wide shell is scoped to .place-game so the #74 Home screen's narrower
+   .place-shell column is untouched. Inserted BEFORE the #175 conn-banner
+   block — the appended-only tail convention (m175 and friends) pins
+   .conn-banner.hidden as the file's last rule. */
+.place-game { max-width: 1060px; }
+.place-topbar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.place-topbar-title { color: var(--w-text); font-weight: 600; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* #303: grid items default to min-width:auto — the nowrap topbar title
+   gives .place-topbar a ~512px min-content floor and the whole place
+   screen overflows narrow viewports (observed live at 390px). Children
+   must be shrinkable for the title ellipsis to ever engage. */
+.place-shell > * { min-width: 0; }
+/* #303: the back button stays on one line; the title keeps the ellipsis duty. */
+.place-topbar button { white-space: nowrap; flex: 0 0 auto; }
+.place-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 340px;
+  gap: 12px;
+  align-items: start;
+}
+/* stage — large static placeholder: warm gradient, decorative type glyph,
+   honest photo note; no imagery is implied and none is fetched (#312 owns
+   the asset lifecycle). */
+.place-stage {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  min-height: 280px;
+  border: 1px solid var(--w-warm-line);
+  border-radius: 12px;
+  background:
+    linear-gradient(135deg, var(--w-warm), rgba(12, 19, 25, 0.6) 70%),
+    var(--w-panel-deep);
+}
+.place-stage-icon { font-size: 56px; line-height: 1; color: var(--w-accent); }
+.place-stage-note { font-size: 12px; }
+.place-context { display: grid; gap: 8px; align-content: start; }
+.place-context-name { font-size: 18px; font-weight: 600; color: var(--w-text); }
+.place-badge {
+  justify-self: start;
+  padding: 3px 10px;
+  border: 1px solid var(--w-line);
+  border-radius: 999px;
+  font-size: 12px;
+  color: var(--w-dim);
+}
+.place-badge-here {
+  color: var(--w-warm-ink);
+  background: var(--w-accent);
+  border-color: var(--w-accent);
+}
+.place-cta {
+  justify-self: start;
+  color: var(--w-warm-ink);
+  background: var(--w-accent);
+  border: 1px solid var(--w-accent);
+  border-radius: 8px;
+  padding: 6px 12px;
+}
+.place-nearby-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 0;
+  border-bottom: 1px solid var(--w-line);
+}
+.place-act-hint { font-size: 12px; margin: 0; }
+.place-task { display: flex; align-items: baseline; gap: 8px; }
+.place-task-label { color: var(--w-dim); }
+.place-scene-act { display: grid; gap: 6px; }
+.place-scene-act .scene-act { display: flex; gap: 8px; }
+.place-scene-act input { flex: 1; min-width: 0; }
+.place-scene-act-result { font-size: 13px; }
+/* «О месте» — native disclosure, keyboard accessible; the body is one
+   label/value + roster + events stack. */
+.place-about {
+  border: 1px solid var(--w-line);
+  border-radius: 8px;
+  padding: 8px 10px;
+}
+.place-about summary {
+  cursor: pointer;
+  color: var(--w-text);
+}
+.place-about-body { display: grid; gap: 2px; margin-top: 8px; }
+.place-about h4 { margin: 10px 0 4px 0; color: var(--w-text); }
+@media (max-width: 720px) {
+  .place-grid { grid-template-columns: minmax(0, 1fr); }
+  .place-stage { min-height: 200px; }
 }
 
 /* #175: connection banner — persistent offline signal driven by consecutive

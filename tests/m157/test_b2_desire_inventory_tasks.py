@@ -675,9 +675,12 @@ def test_ui_legacy_pins_intact():
     assert js.count('"Нажмите «Осмотреть окрестности», чтобы осмотреться."') == 1
     assert js.count('"Осмотреть"') == 1
     assert js.count('"Открыть Scene"') == 1
-    # #72: +1 — the Place screen's always-available «К карте» (read-only
-    # navigation back to the map; the two #86 escape hatches are untouched).
-    assert js.count('"К карте"') == 3
+    # #72: +1 — the Place screen's always-available back-to-map button (the
+    # two #86 escape hatches are untouched). #303: the Place button's label
+    # is now «← Остров» (issue mockup: screen topbar «← Остров / {place}»);
+    # the read-only navigation intent is re-anchored to the new label.
+    assert js.count('"К карте"') == 2
+    assert js.count('"← Остров"') == 1
     assert js.count("S.scene = null;") >= 2
     assert js.count('"scene-act-input"') == 2
     assert js.count('"scene-act-go"') == 2
@@ -687,8 +690,11 @@ def test_ui_legacy_pins_intact():
     assert js.count('"chat-msg-input"') == 2
     assert js.count('"chat-roles"') == 1
     assert js.count("/characters/${S.character.id}/relationships") == 1
-    assert js.count("AUTONOMOUS_HINT") == 8  # 1 decl + 7 usages (#93 scene-act)
-    assert js.count("isAutonomousRefusal") == 6  # +1 (#93 scene-act catch)
+    # 1 decl + 8 usages (#93 scene-act); #303: +1 — the scene-act catch
+    # persistent line localizes refusals.
+    assert js.count("AUTONOMOUS_HINT") == 9
+    # +1 (#93 scene-act catch); #303: +1 same-catch persistent-line hint
+    assert js.count("isAutonomousRefusal") == 7
     assert js.count('} else { toast(e.message, true); }') == 2
     assert js.count('"Идти"') == 1
     assert js.count("/travel/plan") == 1

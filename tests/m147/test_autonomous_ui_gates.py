@@ -121,18 +121,22 @@ def test_autonomous_ui_gate_pins():
     # ---------- shared localized message (sub-items 1+3) ----------
     # One const definition; the raw literal survives exactly once (inside the
     # const — tests/m121:47 keeps pinning the literal itself); usages: world
-    # note (m121), moveTo gate, doAction catch, moveTo catch, viewExternal ×2.
+    # note (m121), moveTo gate, doAction catch, moveTo catch, viewExternal ×2,
+    # scene-act catch toast (#93), scene-act catch persistent line (#303
+    # review F2: the stored detail localizes §61 refusals too).
     assert js.count(AUTONOMOUS_HINT_BLOCK) == 1
     assert js.count("Персонаж действует сам — переключите режим в Профиле") == 1
-    assert js.count("AUTONOMOUS_HINT") == 8  # 1 decl + 7 usages (#93 scene-act)
+    # 1 decl + 8 usages (#93 scene-act; #303: +1 persistent line)
+    assert js.count("AUTONOMOUS_HINT") == 9
     assert js.count("toast(AUTONOMOUS_HINT);") == 1
     assert js.count("toast(AUTONOMOUS_HINT, true);") == 3
 
     # ---------- §61 refusal matcher (single source for all catches) ----------
     assert js.count('String(e.message ?? e.detail ?? "").includes('
                     '"character is AUTONOMOUS")') == 1
-    assert js.count("isAutonomousRefusal") == 6  # 1 decl + 5 catch usages
-    # (doAction ×1, moveTo ×1, viewExternal ×2, #93 scene-act ×1)
+    assert js.count("isAutonomousRefusal") == 7  # 1 decl + 6 catch usages
+    # (doAction ×1, moveTo ×1, viewExternal ×2, #93 scene-act ×1, #303 +1:
+    # scene-act catch persistent-line hint)
     # The inline check is gone (single source through the helper).
     assert 'String(e.message).includes("character is AUTONOMOUS")' not in js
 

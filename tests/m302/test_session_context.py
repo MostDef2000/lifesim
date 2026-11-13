@@ -8,9 +8,15 @@ SCRIPTABLE network boundary); it does NOT mock or reimplement ``route()``,
 ``api()``, ``viewWorld()``, ``viewLocation()``, ``viewChat()`` or any of the
 #302 logic (``gameUiContext``, ``navEpoch``, ``observedPlayerLocId``,
 ``resetGameUiContext()``). Every assertion is on an observable fact: the
-fetch log (method+path counts), the rendered DOM (shells, the roster
-«Диалог» button, the «← К месту» anchor, the composer), and the ``S`` /
-``gameUiContext`` state.
+fetch log (method+path counts), the rendered DOM (shells, the «Рядом»
+row «Поговорить» button, the «← К месту» anchor, the composer), and the
+``S`` / ``gameUiContext`` state.
+
+#303: the Place shell moved the dialogue affordance from the old roster
+«Диалог» button to a «Рядом» row «Поговорить» button (identical mechanics:
+``gameUiContext.npcId`` → ``#/chat``, revalidated in ``viewChat``). The
+scenario intent is unchanged; only the click-target label and the
+descriptions below moved.
 
 The network boundary is scriptable: responses can be QUEUED/DEFERRED
 (``__hold``) and released in an EXPLICIT order (``__releaseAt``), which is
@@ -22,7 +28,8 @@ Approved behavior under test (derived from the work order, not the code):
   unchanged, ZERO ``POST /actions`` requests are issued, and the world focus
   is restored (``S.mapFocusLocationId`` == the focus recorded at place entry;
   ``S.mapFocusManual`` true when that focus differs from the player location).
-- (b) World → current Place → Chat with a selected NPC (roster «Диалог») →
+- (b) World → current Place → Chat with a selected NPC («Рядом» row
+  «Поговорить») →
   type a draft → back to Place («← К месту») → back to World → re-enter Chat:
   the same NPC is selected and the per-NPC draft is restored into the
   composer.
@@ -42,7 +49,7 @@ Approved behavior under test (derived from the work order, not the code):
   longer matches the authoritative location) — the focus stays at the
   poll-applied player location, no manual flag. The no-move positive
   control (the restore DOES fire) is scenario (a)/A1.
-- (g) A roster carry superseded DURING the names fetch: the dead load
+- (g) A «Рядом» carry superseded DURING the names fetch: the dead load
   writes nothing (``S.chatNpcId``/``S.chatSessionId``/``S.chatDraft``
   untouched, nothing rendered) — the shared S.* writes are deferred past
   the names-fetch guard.
@@ -287,8 +294,8 @@ const SHIM = `
   }
   // #302: first descendant (pre-order) matching a predicate — the minimal
   // selector above has no descendant combinator, so the driver uses this for
-  // "the select inside #chat-view", "the «← К месту» anchor", "the «Диалог»
-  // button", etc.
+  // "the select inside #chat-view", "the «← К месту» anchor", "the
+  // «Поговорить» button" (#303: the place dialogue entry), etc.
   function findDescendant(root, pred) {
     let found = null;
     (function walk(n) {
@@ -489,8 +496,9 @@ const SHIM = `
   }
   function __setHash(h) { location.hash = h; }
   function __call(name, ...args) { return globalThis[name](...args); }
-  // #302: click the first BUTTON whose text matches (the roster «Диалог»,
-  // the profile «Выйти», ...). Returns whether a button was found+clicked.
+  // #302: click the first BUTTON whose text matches (the «Рядом» row
+  // «Поговорить» — #303 renamed the place dialogue entry from roster
+  // «Диалог» — the profile «Выйти», ...). Returns found+clicked.
   function __clickButton(text) {
     const b = findDescendant(documentElement,
       (n) => n.tagName === "BUTTON" && n.textContent === text);
@@ -682,7 +690,8 @@ WORLD_A = {"game_timestamp": 1500, "day": 2}
 WEATHER_OFF = {"enabled": False}
 LOC7 = {"id": 7, "name": "Settlement", "type": "settlement", "x": None, "y": None, "occupants": []}
 LOC9 = {"id": 9, "name": "Remote", "type": "shop", "x": None, "y": None, "occupants": []}
-# The player's CURRENT place with two NPC occupants (roster «Диалог» source).
+# The player's CURRENT place with two NPC occupants («Рядом» row
+# «Поговорить» source — #303 renamed the place dialogue entry).
 LOC7_NPCS = {
     "id": 7, "name": "Settlement", "type": "settlement", "x": None, "y": None,
     "occupants": [
@@ -691,7 +700,8 @@ LOC7_NPCS = {
     ],
 }
 # The player's CURRENT place with a SINGLE NPC occupant — scenario (b) uses
-# this so the roster has exactly one «Диалог» button (unambiguous click).
+# this so «Рядом» has exactly one «Поговорить» button (unambiguous click;
+# #303 renamed the place dialogue entry from roster «Диалог»).
 LOC7_NPC1 = {
     "id": 7, "name": "Settlement", "type": "settlement", "x": None, "y": None,
     "occupants": [{"id": "npc_1", "name": "NPC1", "kind": "npc"}],
@@ -774,16 +784,17 @@ SCENARIOS = [
             "globalThis.__result = { afterPlace, afterReturn };"
         ),
     },
-    # ---------- (b) Place → Chat (roster «Диалог») → draft → round trip ----------
+    # ---------- (b) Place → Chat («Рядом» row «Поговорить») → draft → round trip ----------
     {
         "name": "B_chat_draft_roundtrip",
         "initialHash": "#/world",
-        # Single-NPC place: exactly one roster «Диалог» button (unambiguous).
+        # Single-NPC place: exactly one «Рядом» row «Поговорить» button
+        # (unambiguous; #303 renamed the place dialogue entry from «Диалог»).
         "responses": _chat_base(catalog=[LOC7_NPC1, LOC9], detail=LOC7_DETAIL_NPC1),
         "driver": (
             "await __settle(); "
             "__setHash('#/location/7'); await __settle(); const place = __facts(); "
-            "const clicked = __clickButton('Диалог'); await __settle(); "
+            "const clicked = __clickButton('Поговорить'); await __settle(); "
             "const chat1 = __facts(); "
             "__fireInput('hello'); const afterType = __facts(); "
             "__setHash('#/location/7'); await __settle(); "
@@ -827,7 +838,8 @@ SCENARIOS = [
     {
         "name": "D_logout_relogin_no_leak",
         "initialHash": "#/world",
-        # Single-NPC place: exactly one roster «Диалог» button (unambiguous).
+        # Single-NPC place: exactly one «Рядом» row «Поговорить» button
+        # (unambiguous; #303 renamed the place dialogue entry from «Диалог»).
         "responses": dict(_chat_base(catalog=[LOC7_NPC1, LOC9], detail=LOC7_DETAIL_NPC1),
                           **{"/auth/logout": _resp(200, {}),
                              "/characters/by-user/2": _resp(200, [CHAR2]),
@@ -836,7 +848,7 @@ SCENARIOS = [
         "driver": (
             "await __settle(); "
             "__setHash('#/location/7'); await __settle(); "
-            "__clickButton('Диалог'); await __settle(); "
+            "__clickButton('Поговорить'); await __settle(); "
             "__fireInput('hello'); "
             "const before = __facts(); "
             "__setResponse('/auth/me', {status:401, body:null}); "
@@ -857,9 +869,10 @@ SCENARIOS = [
         "driver": (
             "await __settle(); "
             "__setHash('#/location/7'); await __settle(); "
-            # #302: set the roster carry directly (work order: "set
-            # gameUiContext.npcId + navigate") — the two-NPC roster has two
-            # «Диалог» buttons and the harness first-match click is ambiguous.
+            # #302: set the carry directly (work order: "set
+            # gameUiContext.npcId + navigate") — the two-NPC «Рядом» has two
+            # «Поговорить» buttons (#303 renamed the entry) and the harness
+            # first-match click is ambiguous.
             "__guc().npcId = 'npc_1'; "
             "__setHash('#/chat'); await __settle(); "
             "const switched = __setChatNpc('npc_2'); await __settle(); "
@@ -890,13 +903,14 @@ SCENARIOS = [
     {
         "name": "G_carry_superseded_during_names_fetch",
         "initialHash": "#/world",
-        # Single-NPC place: exactly one roster «Диалог» button (unambiguous).
+        # Single-NPC place: exactly one «Рядом» row «Поговорить» button
+        # (unambiguous; #303 renamed the place dialogue entry from «Диалог»).
         "responses": _chat_base(catalog=[LOC7_NPC1, LOC9], detail=LOC7_DETAIL_NPC1),
         "driver": (
             "await __settle(); "
             "__setHash('#/location/7'); await __settle(); const place = __facts(); "
             "__hold('/characters/npc_1'); "
-            "const clicked = __clickButton('Диалог'); "
+            "const clicked = __clickButton('Поговорить'); "
             "await __settle(); const held = __heldCount('/characters/npc_1'); "
             "__setHash('#/world'); await __settle(); const afterNav = __facts(); "
             "const released = __release('/characters/npc_1'); "
@@ -999,13 +1013,14 @@ def test_b_chat_draft_roundtrip(results):
         r["place"], r["clicked"], r["chat1"], r["afterType"], r["chat2"])
     assert place["hasPlaceShell"], "the current place view renders"
     assert clicked is True, (
-        "the place roster offers a «Диалог» button for the NPC occupant (the #302 entry point)"
+        "the place «Рядом» row offers a «Поговорить» button for the NPC "
+        "occupant (the #302 entry point; #303 renamed it from roster «Диалог»)"
     )
     # Chat with the carried NPC.
     assert chat1["hash"] == "#/chat"
     assert chat1["hasChatShell"], "the chat view renders"
     assert chat1["chatNpcSel"] == "npc_1", (
-        f"the roster-carried NPC is selected, got {chat1['chatNpcSel']!r}"
+        f"the «Рядом»-carried NPC is selected, got {chat1['chatNpcSel']!r}"
     )
     assert chat1["chatInputValue"] == "", "the composer starts empty"
     assert chat1["backToPlace"]["present"] is True, (
@@ -1142,7 +1157,7 @@ def test_e_ghost_npc_dropped(results):
     assert switched is True, "the chat NPC select is present and switchable"
     assert mid["S_chatNpcId"] == "npc_2", "the user switched the dialogue to npc_2"
     assert mid["guc"]["npcId"] == "npc_1", (
-        "the roster carry still points at npc_1 (the NPC that is about to leave)"
+        "the «Рядом» carry still points at npc_1 (the NPC that is about to leave)"
     )
     # npc_1 has left the place; re-enter chat.
     assert after["hash"] == "#/chat"
@@ -1220,7 +1235,8 @@ def test_g_carry_superseded_during_names_fetch(results):
         r["place"], r["clicked"], r["held"], r["afterNav"], r["released"], r["after"])
     assert place["hasPlaceShell"], "the current place view renders"
     assert clicked is True, (
-        "the place roster offers a «Диалог» button for the NPC occupant"
+        "the place «Рядом» row offers a «Поговорить» button for the NPC "
+        "occupant (#303 renamed it from roster «Диалог»)"
     )
     assert held == 1, (
         "the names fetch is in flight (held) when the superseding navigation happens"
@@ -1249,7 +1265,7 @@ def test_g_carry_superseded_during_names_fetch(results):
     assert after["hasChatShell"] is False, "the dead chat load renders nothing"
     # The carry itself survives (the restoration source for the next entry).
     assert after["guc"]["npcId"] == "npc_1", (
-        "the roster carry is not cleared by the dead load (restoration source)"
+        "the «Рядом» carry is not cleared by the dead load (restoration source)"
     )
     unhandled = _unhandled(results, "G_carry_superseded_during_names_fetch")
     assert unhandled == [], f"no unhandled errors may escape: {unhandled}"

@@ -296,9 +296,10 @@ def test_external_submit_and_m147_pins():
     assert js.count('api("/actions"') == 3
     # The m147 AUTONOMOUS catch handling is preserved: the helper is used
     # twice in this body (err mapping + toast gate) — the file-wide count
-    # stays 6 (1 decl + 5 catch usages; m147 pins the exact block).
+    # stays 7 (1 decl + 6 catch usages; m147 pins the exact block; #303:
+    # +1 scene-act catch persistent line localizes refusals).
     assert body.count("isAutonomousRefusal") == 2
-    assert js.count("isAutonomousRefusal") == 6
+    assert js.count("isAutonomousRefusal") == 7
     # The port toast literal survives exactly once.
     assert js.count('toast("Сначала дойдите до порта", true);') == 1
     # Submit safety (validator F1/F2): an in-flight latch respected by BOTH
