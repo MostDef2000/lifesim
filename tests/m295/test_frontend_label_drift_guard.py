@@ -117,8 +117,12 @@ def test_task_status_ru_keys_match_written_statuses():
     #   ai/worker.py:144        -> STARTED
     #   api/app.py:978 + :2425  -> cancelled (pause + cancel_task endpoint)
     #   characters/health.py:40 -> cancelled (death cancels open tasks)
+    #   api/app.py:1556         -> queued (intent/task creation path; served
+    #                              by GET /characters/{cid}/tasks active leg)
+    #     (#301: the canon missed this pre-existing writer — the World HUD
+    #     must map queued to player copy, never the raw code.)
     expected = {"planned", "active", "completed", "failed", "STARTED",
-                "cancelled"}
+                "cancelled", "queued"}
     assert set(d) == expected, (
         f"TASK_STATUS_RU keys drifted from the written statuses.\n"
         f"only in JS: {sorted(set(d) - expected)}\n"

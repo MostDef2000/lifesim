@@ -177,6 +177,7 @@ const TASK_TYPE_RU = { SLEEP: "сон", EAT: "еда", DRINK: "питьё", WORK
   MOVE: "перемещение", BUY_ITEM: "покупка", SOCIALIZE: "общение", IDLE: "безделье",
   TRAVEL_EXTERNAL: "внешняя поездка", CONSTRUCT: "строительство" };
 const TASK_STATUS_RU = { planned: "запланирована", active: "активна",
+  queued: "в очереди",
   completed: "выполнена", failed: "провалена", cancelled: "отменена",
   STARTED: "начата" };
 const TASK_SOURCE_RU = { player: "игрок", user: "игрок", utility: "система",
@@ -1881,6 +1882,90 @@ function needBar(label, value) {
     el("div", { class: "bar" }, el("div", { style: `width:${v}%` })));
 }
 
+/* #301 World HUD: «Сейчас» — the character's current deed, read-only. The
+   server pre-orders active/planned oldest created_at first, so the HUD takes
+   active[0] (else planned[0]) WITHOUT re-sorting. Honest states: the tasks
+   fetch failed (or the viewer is not the owner) -> «Данные о делах
+   недоступны»; nothing queued or running -> «Сейчас нет активных дел». No
+   progress bars, no timers, no ETA math — a render-time snapshot with the
+   same freshness model as the needs below. The expand control (mobile
+   compact band, #301 F) is a real button: keyboard-reachable, and the
+   toggle rides classList (no document listeners — vm-harness surface). */
+function nowPanel(tasksData, autonomous) {
+  const expandBtn = el("button", { class: "world-panel-expand", type: "button",
+      "aria-expanded": "false", "aria-controls": "world-panel-details",
+      onclick: (ev) => {
+        const btn = ev.currentTarget;
+        const panel = btn.closest(".world-panel");
+        if (!panel) return;
+        const expanded = panel.classList.toggle("world-panel--expanded");
+        btn.setAttribute("aria-expanded", expanded ? "true" : "false");
+        btn.textContent = expanded ? "Свернуть" : "Детали";
+        // #301 (G): keep the mobile POI card BELOW the HUD band. Static
+        // offsets — the vm-harness (m302/m310) has no getBoundingClientRect,
+        // so the exact expanded height is a browser-probe follow-up; the
+        // compact cap (136px) + panel top 12px + 8px gap = 156px.
+        const poiHost = document.getElementById("poi-card-host");
+        if (poiHost) poiHost.setAttribute("style", expanded
+          ? "--poi-top: calc(42vh + 20px)" : "--poi-top: 156px");
+      } }, "Детали");
+  let taskNode;
+  if (tasksData == null) {
+    taskNode = el("span", { class: "world-now-state" }, "Данные о делах недоступны");
+  } else {
+    const active = tasksData.active || [];
+    const planned = tasksData.planned || [];
+    const current = active.length ? active[0] : (planned.length ? planned[0] : null);
+    taskNode = current
+      ? el("span", { class: "world-now-task" },
+          el("span", { class: "world-now-status" },
+            codeLabel(TASK_STATUS_RU, current.status)),
+          el("span", { class: "world-now-type" },
+            codeLabel(TASK_TYPE_RU, current.task_type) || "—"))
+      : el("span", { class: "world-now-state" }, "Сейчас нет активных дел");
+  }
+  const parts = [el("div", { class: "world-now-row" },
+    el("span", { class: "world-now-label" }, "Сейчас"), taskNode, expandBtn)];
+  if (autonomous) {
+    // #301: the autonomy state line moved INTO the HUD (readable above the
+    // map fold) — relocated from the below-fold actions card, same
+    // autonomy-hint const and the same Profile switch path; no
+    // direct-action buttons exist in this mode.
+    parts.push(el("p", { class: "world-now-mode" }, AUTONOMOUS_HINT));
+    parts.push(el("button", { class: "world-now-profile", type: "button",
+      onclick: () => { location.hash = "#/profile"; } }, "Открыть Профиль"));
+  }
+  return el("div", { class: "world-now" }, ...parts);
+}
+
+/* #301: 1–3 newest island events as compact rows in the panel — a preview
+   OUTSIDE #feed (the WS/REST updaters replaceChildren that node). Same
+   render-time derivation as the needs: no new subscription, no second poll;
+   critical highlighting rides the existing isCriticalEvent inside feedRow. */
+function islandEventsBlock() {
+  const rows = (S.feed || []).slice(-3).reverse();
+  // #301: the container is ALWAYS present (stable id) so the feed updaters
+  // can refresh the preview after every arrival — on a cold entry the first
+  // poll lands after renderWorld, and a render-only block would stay empty
+  // for the whole visit (live-probe defect). Empty = zero-height div.
+  return el("div", { class: "world-island-events", id: "world-island-events" },
+    ...(rows.length
+      ? [el("h2", { class: "world-sec-h" }, "Остров"), ...rows.map(feedRow)]
+      : []));
+}
+
+/* #301: the island preview mirrors the live feed — re-derived from S.feed
+   (no new fetch) after every REST/WS arrival, same freshness model as the
+   needs' poll cycle. Absent panel (other view) → no-op. */
+function refreshIslandPreview() {
+  const box = document.getElementById("world-island-events");
+  if (!box) return;
+  const rows = (S.feed || []).slice(-3).reverse();
+  box.replaceChildren(...(rows.length
+    ? [el("h2", { class: "world-sec-h" }, "Остров"), ...rows.map(feedRow)]
+    : []));
+}
+
 const MAP_LOW_MARKER_BUDGET = 120;
 
 /* #57 first-queue ambient effects. Percentage coords (0-100 of the 1600x900
@@ -2422,12 +2507,21 @@ function renderWorld(locs, tasksData) {
         el("span", {},
           el("b", { id: "clock" }, S.world ? dayTime(S.world.game_timestamp) : clockPendingLabel()),
           el("span", { id: "weather" }, worldWeatherChipText())))),
-    el("h2", { class: "world-sec-h" }, "Состояние"),
-    el("div", { class: "world-mini-needs" },
-      needBar("Сытость", needs.hunger), needBar("Вода", needs.thirst),
-      needBar("Энергия", needs.energy), needBar("Общение", needs.social)),
-    el("hr"),
-    feedBlock,
+    // #301 World HUD: «Сейчас» sits directly under the header — the one
+    // glanceable line (current deed / autonomy mode) that stays visible in
+    // the mobile compact band; everything below folds into the collapsible.
+    nowPanel(tasksData, autonomous),
+    el("div", { class: "world-collapsible", id: "world-panel-details" },
+      el("h2", { class: "world-sec-h" }, "Состояние"),
+      el("div", { class: "world-mini-needs" },
+        needBar("Сытость", needs.hunger), needBar("Вода", needs.thirst),
+        needBar("Энергия", needs.energy), needBar("Общение", needs.social)),
+      // #301: 1–3 newest island events previewed above the feed (container
+      // always present; content filled here and refreshed by the feed
+      // updaters via refreshIslandPreview).
+      islandEventsBlock(),
+      el("hr"),
+      feedBlock),
     privileged ? el("a", { class: "world-admin-link", href: "#/admin" }, "Админ") : null);
 
   // #289: floating nav pill — 9 sections over the map, same routes as the
@@ -2474,12 +2568,10 @@ function renderWorld(locs, tasksData) {
         el("nav", { class: "panel world-card world-actions-card" },
           el("h2", {}, "Действия"),
           el("div", { class: "world-action-pills", "aria-label": "Действия персонажа" },
-            ...(autonomous
-              ? [el("span", { class: "muted world-autonomous-note" },
-                  AUTONOMOUS_HINT),
-                el("button", { type: "button", onclick: () => { location.hash = "#/profile"; } },
-                  "Открыть Профиль")]
-              : [...actions, extBtn]))),
+            // #301: in AUTONOMOUS mode the hint + Profile button moved into
+            // the panel HUD (nowPanel) — the below-fold card stays empty
+            // rather than duplicating the line above the fold.
+            ...(autonomous ? [] : [...actions, extBtn]))),
         el("div", { class: "panel world-card" },
           el("h2", {}, "Маршрут"),
           travelBar()),
@@ -3696,6 +3788,7 @@ async function pollEventsFeed() {
         feedBox.replaceChildren(el("h2", { class: "world-sec-h" }, "События"),
           ...S.feed.slice(-40).reverse().map(feedRow));
       }
+      refreshIslandPreview();  // #301: the panel's island preview follows the feed
       // #82 (A3): REST fallback path mirrors the WS arrival hook.
       if (fresh.some((e) => isOwnMoveEvent(e))) onOwnArrival();
     }
@@ -3767,6 +3860,7 @@ function connectWs() {
             feedBox.replaceChildren(el("h2", { class: "world-sec-h" }, "События"),
               ...S.feed.slice(-40).reverse().map(feedRow));
           }
+          refreshIslandPreview();  // #301: island preview follows the feed
           // #144: a CONTROL_CHANGED fired from another tab/session leaves
           // stale action pills behind — re-render the world view (it re-reads
           // the character). ws.onmessage fires on ALL views, so only refresh
