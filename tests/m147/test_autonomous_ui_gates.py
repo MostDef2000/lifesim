@@ -126,7 +126,8 @@ def test_autonomous_ui_gate_pins():
     # review F2: the stored detail localizes §61 refusals too).
     assert js.count(AUTONOMOUS_HINT_BLOCK) == 1
     assert js.count("Персонаж действует сам — переключите режим в Профиле") == 1
-    assert js.count("AUTONOMOUS_HINT") == 9  # 1 decl + 8 usages (#93 scene-act; #303: +1 persistent line)
+    # 1 decl + 8 usages (#93 scene-act; #303: +1 persistent line)
+    assert js.count("AUTONOMOUS_HINT") == 9
     assert js.count("toast(AUTONOMOUS_HINT);") == 1
     assert js.count("toast(AUTONOMOUS_HINT, true);") == 3
 

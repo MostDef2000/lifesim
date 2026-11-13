@@ -138,8 +138,11 @@ def test_lane_b_invariants():
     assert js.count('"Открыть Scene"') == 1
     assert js.count("pollEventsFeed") == 2
     assert js.count("innerHTML") == 0
-    assert js.count("AUTONOMOUS_HINT") == 9  # 1 decl + 8 usages (#93 scene-act; #303: +1 scene-act catch persistent line localizes refusals)
-    assert js.count("isAutonomousRefusal") == 7  # +1 (#93 scene-act catch; #303: +1 same-catch persistent-line hint)
+    # 1 decl + 8 usages (#93 scene-act); #303: +1 — the scene-act catch
+    # persistent line localizes refusals.
+    assert js.count("AUTONOMOUS_HINT") == 9
+    # +1 (#93 scene-act catch); #303: +1 same-catch persistent-line hint
+    assert js.count("isAutonomousRefusal") == 7
     assert "MAP_LOW_MARKER_BUDGET = 120" in js
     assert js.count("markerCount = houseSpans.length + locationAnchors.length") == 1
     # el() byte-pins untouched (m22/m121/m146/m147).

@@ -236,7 +236,8 @@ def test_regression_byte_pins_of_b3_survive():
     # #72: +1 — the Place screen's events-failure line reuses the hint.
     assert JS.count("RETRY_HINT") == 5
     assert JS.count("innerHTML") == 0
-    assert JS.count("AUTONOMOUS_HINT") == 9  # #303: +1 scene-act catch persistent line localizes refusals
+    # #303: +1 — the scene-act catch persistent line localizes refusals
+    assert JS.count("AUTONOMOUS_HINT") == 9
     assert JS.count("isAutonomousRefusal") == 7  # #303: +1 same-catch persistent-line hint
     # m158 oracle pins `sceneActDraft == 6` (5× S.sceneActDraft + 1× init
     # field); the bare-S count itself is 5 — #175 added the oninput capture

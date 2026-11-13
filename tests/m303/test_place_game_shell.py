@@ -598,7 +598,8 @@ const SHIM = `
     const taskEl = document.querySelector(".place-task");
     const details = document.querySelector("details.place-about");
     const detailsSummary = details
-      ? (findDescendant(details, (n) => n.tagName === "SUMMARY") || { textContent: null }).textContent
+      ? (findDescendant(details, (n) => n.tagName === "SUMMARY")
+          || { textContent: null }).textContent
       : null;
     // The weather/time lines: inside .place-context on the #303 shell; on a
     // base app.js (no .place-context) the fallback walks the whole document
