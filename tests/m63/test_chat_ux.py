@@ -153,7 +153,9 @@ def test_carry_forward_pins():
     assert js.count(
         'input.addEventListener("input", () => { S.chatDraft = input.value; });'
     ) == 1
-    assert js.count('S.chatDraft = "";') == 1
+    # #302: resetGameUiContext() adds a session-teardown clear — drafts must not
+    # leak across logout/relogin; the send-success clear (#175) remains the only in-session site.
+    assert js.count('S.chatDraft = "";') == 2
 
 
 # ---------- 2. behavior: band mapping evaluated against the real source ----------

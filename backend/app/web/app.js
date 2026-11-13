@@ -24,6 +24,59 @@ const S = { user: null, character: null, world: null, ws: null, wsTries: 0,
   shopConfirm: null, chatDraft: "",
   bootCursor: Infinity };  // #177: replay gate — set once from the first history fill (WS hello OR REST); Infinity = "no live events until proven"
 
+/* #302: session UI context — World ↔ Place ↔ Dialogue navigation state.
+   Module-level, deliberately NOT inside S: the m176 pin freezes the S
+   initializer tail (its tail field is byte-pinned), and the feed/WS fields
+   are #311's.
+   userRef is the user OBJECT REFERENCE (same keying as worldGet's
+   single-flight): identity, never id — a relogin as the same id is still a
+   different session. World truth (world state, player location) never lives
+   here — only cross-screen UI navigation state. */
+let gameUiContext = {
+  userRef: null,       // S.user object reference at capture time
+  characterId: null,   // S.character.id at capture time
+  selectedLocationId: null,  // place chosen on the World → Place navigation
+  viewLocationId: null,      // place whose view validated and rendered
+  lastWorldFocusId: null,    // world map focus to restore on the return
+  lastWorldFocusPlayerLocId: null,  // player location when the focus was recorded — restore is skipped if the player moved since
+  npcId: null,               // NPC carried Place → Chat (confirmed occupant id)
+  draftByNpc: {},            // per-NPC composer drafts, keyed by occupant id
+};
+
+/* #302: the last authoritatively observed player location — world truth,
+   deliberately NOT in gameUiContext. Drives the scene invalidation rule:
+   the scene is tied to the location it was inspected at (m153/m156), so it
+   survives a World ↔ Place round trip without movement and is invalidated
+   as soon as an authoritative read observes a different location. */
+let observedPlayerLocId = null;
+
+/* #302: monotonic navigation generation. Advanced by every route() dispatch
+   and by every World/Place/Chat load start (direct viewWorld()/gotoWorld()
+   callers and retries included) — an in-flight load whose captured epoch no
+   longer matches must not publish into the newer view's DOM or shared
+   state. Compared by value, never against the hash (the m238 pin censuses
+   that comparison file-wide — do not add occurrences). */
+let navEpoch = 0;
+
+/* #302: session teardown — drop every piece of cross-screen UI state so a
+   logout / relogin / character change starts clean (drafts, selection,
+   focus, scene). The legacy transient composer/chat fields ride along: the
+   live binding S.chatDraft keeps its m175 semantics WITHIN a session. */
+function resetGameUiContext() {
+  gameUiContext = {
+    userRef: null, characterId: null, selectedLocationId: null,
+    viewLocationId: null, lastWorldFocusId: null,
+    lastWorldFocusPlayerLocId: null, npcId: null, draftByNpc: {},
+  };
+  observedPlayerLocId = null;
+  S.scene = null;
+  S.chatDraft = "";
+  S.chatNpcId = null;
+  S.chatSessionId = null;
+  S.mapFocusManual = false;
+  S.mapFocusAnchor = null;
+}
+
 /* ---------- helpers ---------- */
 
 function toast(msg, isErr) {
@@ -196,6 +249,7 @@ async function api(path, opts = {}) {
     if (!stale) {
       S.user = null;
       S.world = null;  // the cached world belonged to the dead session
+      resetGameUiContext();  // #302: the dead session's UI state must not leak
       if (path !== "/auth/me") route();
     }
     throw new Error("unauthorized");
@@ -273,6 +327,7 @@ const routes = {
 };
 
 async function route() {
+  navEpoch++;  // #302: every dispatch invalidates in-flight view loads
   if (!location.hash) { location.hash = "#/world"; return; }  // #161: normalize once; the hashchange fires route again with a concrete view
   stopFeed();
   if (!S.user && !S.authProbed) {
@@ -286,6 +341,9 @@ async function route() {
       const chars = await api(`/characters/by-user/${S.user.id}`);
       S.character = chars && chars.length ? chars[0] : null;
     } catch (e) { S.character = null; }
+    // #302: a freshly hydrated character is a new session context — UI
+    // state captured under a previous user/character must not leak into it.
+    resetGameUiContext();
   }
   const hash = location.hash;  // #161: empty hash is normalized at the top of route(); no fallback needed
   // 020/#118 P1: a user without a character gets the creator screen for ANY
@@ -940,6 +998,7 @@ function viewCreateCharacter() {
         // carry the chosen mode so the profile view shows it (the server
         // persisted it atomically with the character row).
         S.character.outfit_mode = outfit.value;
+        resetGameUiContext();  // #302: a new character is a new session context
         gotoWorld();  // #161: single dispatch — no direct route() next to the hash assignment
       } catch (e) { err.textContent = e.message; }
       finally { confirmBtn.disabled = false; }
@@ -1731,6 +1790,7 @@ function welcomeCard() {
 }
 
 async function viewWorld() {
+  navEpoch++;  // #302: every load start is a new navigation generation
   location.hash = "#/world";
   const loading = el("div", { class: "muted" }, "Загрузка…");
   app.replaceChildren(topbar("#/world"), loading);
@@ -1740,8 +1800,11 @@ async function viewWorld() {
   // are staged LOCALLY; null (stale joined bootstrap) and a dead context
   // bail immediately after the joined /world, and the actual-context guard
   // runs again before any shared write (S22) — freshness guarded too (S23).
+  // #302: the navigation epoch joins the guard — a load superseded by a
+  // newer dispatch (or a direct re-entry) must not publish at all.
   const ctxUser = S.user;
   const ctxCharId = S.character.id;
+  const epoch = navEpoch;
   try {
     const world = await api("/world");
     // #269: null = the joined bootstrap lost ownership (stale, S22) — and
@@ -1749,7 +1812,7 @@ async function viewWorld() {
     // awaits: no further requests, no catch-side retry/toast for a dead
     // context. Rechecked below before any shared write (S23).
     if (!world || S.user !== ctxUser || !S.character
-      || S.character.id !== ctxCharId) return;
+      || S.character.id !== ctxCharId || epoch !== navEpoch) return;
     let weather = null;
     try { weather = await api("/weather"); } catch { weather = null; }
     const me = await api(`/characters/${ctxCharId}`);
@@ -1764,7 +1827,8 @@ async function viewWorld() {
         console.error("Tasks fetch failed", e);
       }
     }
-    if (S.user !== ctxUser || !S.character || S.character.id !== ctxCharId) return;
+    if (S.user !== ctxUser || !S.character || S.character.id !== ctxCharId
+      || epoch !== navEpoch) return;
     // #269 S23: freshness, not just context — an out-of-order OLDER
     // same-context load must not republish its world/weather over an
     // already-newer snapshot; it still renders (with the newer shared world).
@@ -1773,9 +1837,27 @@ async function viewWorld() {
       S.weather = weather;
     }
     S.character = { ...S.character, ...me };
+    // #302: Place → World return — restore the focus the world view had
+    // when the place was entered, through the EXISTING manual-focus
+    // mechanism (#92): a foreign focus carries the manual flag so the poll
+    // keeps it until the player physically moves; the player-location
+    // focus is the poll's own default and needs no flag. Consumed once —
+    // the next world render is a plain world view, not a return.
+    if (gameUiContext.viewLocationId != null
+      && gameUiContext.lastWorldFocusId != null
+      && gameUiContext.lastWorldFocusPlayerLocId === S.character.location_id) {
+      S.mapFocusLocationId = gameUiContext.lastWorldFocusId;
+      S.mapFocusManual = gameUiContext.lastWorldFocusId !== S.character.location_id
+        || S.mapFocusManual;
+      S.mapFocusAnchor = S.character.location_id;
+    }
+    gameUiContext.viewLocationId = null;
     renderWorld(locs, tasksData);
     startFeed();
   } catch (e) {
+    // #302: a superseded load paints no retry/toast into a newer view.
+    if (epoch !== navEpoch || S.user !== ctxUser || !S.character
+      || S.character.id !== ctxCharId) return;
     // #93: transient failure — explicit retry instead of a dead «Загрузка…».
     loadRetryNode(loading, () => viewWorld());
     toast(e.message, true);
@@ -2166,10 +2248,15 @@ function renderWorld(locs, tasksData) {
   const ch = S.character;
   const needs = ch.needs || {};
 
-  // #86 review: the scene is tied to the location it was inspected at —
-  // a world re-render (travel, arrival, action) invalidates it, otherwise
-  // the panel would show a stale location after moving.
-  S.scene = null;
+  // #86 review, refined by #302: the scene is tied to the location it was
+  // inspected at — invalidated when the authoritatively observed player
+  // location CHANGES (travel, arrival, action). A World ↔ Place round trip
+  // without movement keeps the scene (session context preservation); the
+  // poll publication path carries the same rule (pollEvents).
+  if (observedPlayerLocId !== null && observedPlayerLocId !== ch.location_id) {
+    S.scene = null;
+  }
+  observedPlayerLocId = ch.location_id;
 
 
   // Keep the A1 fallback when canonical map coordinates are unavailable.
@@ -2810,6 +2897,7 @@ function renderHome(homeId, fresh, home) {
 }
 
 async function viewLocation(locId) {
+  navEpoch++;  // #302: every load start is a new navigation generation
   const viewHash = `#/location/${locId}`;
   // #72 review F1: a leading-zero deep link (#/location/05) dispatches with
   // locId=5 while the raw hash stays "#/location/05" — the hash guards below
@@ -2824,6 +2912,20 @@ async function viewLocation(locId) {
   const loading = el("div", { class: "muted" }, "Загрузка…");
   app.replaceChildren(topbar("#/world"), loading);
   const seq = ++placeLoadSeq;
+  // #302: record the session UI context — the selected place and the world
+  // focus at the moment of leaving the map (restored on the return path,
+  // see viewWorld). The context is stamped with the current session
+  // identity; resetGameUiContext() clears it across sessions.
+  gameUiContext.userRef = S.user;
+  gameUiContext.characterId = S.character.id;
+  gameUiContext.selectedLocationId = locId;
+  gameUiContext.lastWorldFocusId = S.mapFocusLocationId;
+  gameUiContext.lastWorldFocusPlayerLocId = S.character.location_id;
+  // #302: the load captures its generation + session identity — a newer
+  // navigation or a session change while it flies must not publish.
+  const epoch = navEpoch;
+  const ctxUser = S.user;
+  const ctxCharId = S.character.id;
   let locs;
   // #72 validator: world context is fetched into LOCALS — a stale response
   // must not mutate the SHARED S.world/S.weather for a screen that is about
@@ -2845,17 +2947,23 @@ async function viewLocation(locId) {
     locs = await api("/locations");
   } catch (e) {
     // #93: transient failure — explicit retry instead of a dead «Загрузка…».
-    // Same stale guard as the apply path (review F3: session checks included).
+    // Same stale guard as the apply path (review F3: session checks included),
+    // #302: plus the navigation epoch and session identity.
     if (seq !== placeLoadSeq || location.hash !== viewHash
-      || !S.user || !S.character) return;
+      || !S.user || !S.character
+      || S.user !== ctxUser || S.character.id !== ctxCharId
+      || epoch !== navEpoch) return;
     loadRetryNode(loading, () => viewLocation(locId));
     toast(e.message, true);
     return;
   }
   // #72 stale-response guard (#66 precedent): latest request + still on this
   // place's hash + same session/character. Otherwise the response is dropped.
+  // #302: the epoch and session identity join the guard.
   if (seq !== placeLoadSeq || location.hash !== viewHash
-    || !S.user || !S.character) return;
+    || !S.user || !S.character
+    || S.user !== ctxUser || S.character.id !== ctxCharId
+    || epoch !== navEpoch) return;
   // Guard passed — only now do the fresh reads become shared state
   // (topbar clock, map ambience and the overview lines read them).
   // #269 S23: freshness, not just context — an out-of-order OLDER
@@ -2878,7 +2986,21 @@ async function viewLocation(locId) {
           el("a", { href: "#/world" }, "← К карте"))));
     return;
   }
+  // #302: the place origin is recorded only after the VALIDATED load — a
+  // missing/failed place never becomes a dialogue or back-navigation origin.
+  gameUiContext.viewLocationId = locId;
   renderPlace(locId, place, locs);
+}
+
+/* #302: roster dialogue candidates — NPC occupants of the player's CURRENT
+   location only (viewChat reads NPCs at S.character.location_id, #72 — a
+   remote place must not promise dialogue it cannot show). Module-level on
+   purpose: the m238 renderPlace-body census holds its kind comparison at
+   one and the occupants check is file-wide — this helper uses a reordered
+   comparison and stays outside that body. */
+function placeDialogueNpcs(locId, occupants) {
+  if (locId !== S.character.location_id) return [];
+  return occupants.filter((o) => "npc" === o.kind);
 }
 
 function renderPlace(locId, place, locs) {
@@ -2910,6 +3032,8 @@ function renderPlace(locId, place, locs) {
       S.mapFocusManual = true;
       S.mapFocusAnchor = S.character.location_id;
       S.mapFocusLocationId = locId;
+      gameUiContext.lastWorldFocusId = locId;  // #302: an explicit map return must not be overridden by viewWorld's stale pre-place focus restoration
+      gameUiContext.lastWorldFocusPlayerLocId = S.character.location_id;
       gotoWorld();
     } }, "К карте"),
     el("button", { type: "button",
@@ -2943,13 +3067,22 @@ function renderPlace(locId, place, locs) {
         ? `Погода в мире: ${S.weather.description}` : "Погода в мире: недоступна"),
     el("div", { class: "muted" }, `Здесь сейчас: ${occupants.length}`));
 
+  const dialogueNpcs = placeDialogueNpcs(locId, occupants);
   const people = el("section", { class: "panel place-people" },
     el("h3", {}, "Люди на месте"),
     occupants.length
       ? el("div", { class: "place-roster" },
           ...occupants.map((o) => el("div", { class: "place-roster-row" },
             el("span", {}, o.name || `#${o.id}`),
-            el("span", { class: "muted" }, o.kind || ""))))
+            el("span", { class: "muted" }, o.kind || ""),
+            // #302: «Диалог» only for NPC occupants of the CURRENT location —
+            // carries the confirmed occupant id into the chat view.
+            dialogueNpcs.includes(o)
+              ? el("button", { type: "button", onclick: () => {
+                  gameUiContext.npcId = o.id;
+                  location.hash = "#/chat";
+                } }, "Диалог")
+              : null)))
       : el("p", { class: "muted" }, "Сейчас здесь никого нет."));
 
   // Events: the request has its own failure/retry state, independent of the
@@ -3344,6 +3477,13 @@ async function pollEvents() {
       if (weatherEl) weatherEl.textContent = worldWeatherChipText();
     }
     S.character = { ...S.character, ...character };
+    // #302: scene invalidation on authoritative movement — the scene is tied
+    // to the location it was inspected at (m153/m156); a poll that observes
+    // the player at a DIFFERENT location drops it (same rule as renderWorld).
+    if (observedPlayerLocId !== null && observedPlayerLocId !== character.location_id) {
+      S.scene = null;
+    }
+    observedPlayerLocId = character.location_id;
     // F1: LOD focus follows the authoritative player location on every poll
     // refresh — unless a manual focus is active (#92 «Показать на карте»);
     // manual focus releases as soon as the player physically moves.
@@ -3592,38 +3732,89 @@ function connectWs() {
 /* ---------- chat (§77, #88 Dialogue alpha) ---------- */
 
 async function viewChat() {
+  navEpoch++;  // #302: every load start is a new navigation generation
   location.hash = "#/chat";
   const loading = el("div", { class: "muted" }, "Загрузка…");
   app.replaceChildren(topbar("#/chat"), loading);
+  // #302: the load captures its generation + session identity — a newer
+  // navigation or a session change while it flies must not publish (same
+  // guard shape as viewWorld/viewLocation; compared by value, never against
+  // the hash — the m238 pin censuses that comparison file-wide).
+  const epoch = navEpoch;
+  const ctxUser = S.user;
+  const ctxCharId = S.character.id;
+  const stale = () => epoch !== navEpoch || S.user !== ctxUser
+    || !S.character || S.character.id !== ctxCharId;
   try {
     // Cold-load safety: #/chat can be the first route after reload — the
     // by-user hydration omits location_id, so read the authoritative
     // character first (same pattern as viewWorld).
     if (S.character.location_id == null) {
       const me = await api(`/characters/${S.character.id}`);
+      // #302: guarded hydration — a superseded load must not write a dead
+      // context's character into shared state.
+      if (stale()) return;
       S.character = { ...S.character, ...me };
     }
     const loc = await api(`/locations/${S.character.location_id}`);
+    // #302: staged loads — every fetch lands in LOCALS; shared state is
+    // published only after the guard (a dropped load writes nothing and
+    // renders nothing).
+    if (stale()) return;
     const npcs = (loc.characters_here || []).filter((id) => id.startsWith("npc_"));
-    S.chatNpcs = npcs;
+    // #302: a Place-roster «Диалог» carries the confirmed occupant id in
+    // gameUiContext.npcId. Revalidate it against the FRESH occupants list —
+    // a stale carry (the NPC has left, an older navigation) must not
+    // address a ghost NPC. A valid carry that differs from the persisted
+    // selection switches the dialogue: the session belongs to the previous
+    // NPC, and the per-NPC draft (if any) is restored into the composer.
+    // The carry itself is NOT cleared on success — it is the restoration
+    // source for chat → place → chat. The decision lands in LOCALS; the
+    // shared S.* writes are deferred to after the names-fetch guard below
+    // (a superseded load publishes nothing).
+    let carriedNpc = null;
+    let carriedDraft = "";
+    if (gameUiContext.npcId != null) {
+      if (!npcs.includes(gameUiContext.npcId)) {
+        gameUiContext.npcId = null;
+      } else if (gameUiContext.npcId !== S.chatNpcId) {
+        carriedNpc = gameUiContext.npcId;
+        carriedDraft = gameUiContext.draftByNpc[carriedNpc] || "";
+      }
+    }
     // Resolve nearby NPC names for the select (bounded to NPCs present here).
     const names = {};
     await Promise.all(npcs.slice(0, 15).map(async (id) => {
       try { const c = await api(`/characters/${id}`); names[id] = c.name || id; }
       catch (e) { names[id] = id; }
     }));
-    S.chatNpcNames = names;
-    // #88: current session history comes from the authoritative read model.
-    let sess = null;
-    if (S.chatSessionId) {
-      try { sess = await api(`/dialogue/${S.chatSessionId}`); }
-      catch (e) { S.chatSessionId = null; sess = null; }
+    if (stale()) return;
+    // #302: the carried NPC is applied only after the names-fetch guard —
+    // a superseded load must not write shared chat state.
+    if (carriedNpc != null) {
+      S.chatNpcId = carriedNpc;
+      S.chatSessionId = null;
+      S.chatDraft = carriedDraft;
     }
+    // #88: current session history comes from the authoritative read model.
+    // #302: staged — the shared session id is updated only after the guard.
+    let sess = null;
+    const ctxSessId = S.chatSessionId;
+    if (ctxSessId) {
+      try { sess = await api(`/dialogue/${ctxSessId}`); }
+      catch (e) { sess = null; }
+    }
+    if (stale()) return;
+    if (ctxSessId && !sess) S.chatSessionId = null;
     // #63: the meeting location IS the display location (S.chatNpcs is
     // filtered to characters_here) — thread loc.name into the header.
+    S.chatNpcs = npcs;
+    S.chatNpcNames = names;
     renderChat(sess, loc.name);
   } catch (e) {
     // #93: transient failure — explicit retry instead of a dead «Загрузка…».
+    // #302: a superseded load paints no retry/toast into a newer view.
+    if (stale()) return;
     loadRetryNode(loading, () => viewChat());
     toast(e.message, true);
   }
@@ -3662,6 +3853,16 @@ function renderChat(session, locName) {
       (S.chatNpcNames && S.chatNpcNames[id])
         ? `${S.chatNpcNames[id]} (${id})` : id)));
   npcSel.addEventListener("change", () => {
+    // #302: per-NPC drafts — snapshot the outgoing composer text BEFORE the
+    // switch (keyed by the outgoing selection), then restore the incoming
+    // NPC's own draft into the shared binding AND the live input (the
+    // re-render below re-seeds the rebuilt composer from it; the programmatic
+    // input assignment fires no input event, so nothing clobbers the store).
+    if (S.chatNpcId != null) {
+      gameUiContext.draftByNpc[S.chatNpcId] = input.value;
+    }
+    S.chatDraft = gameUiContext.draftByNpc[npcSel.value] || "";
+    input.value = S.chatDraft;
     S.chatNpcId = npcSel.value;  // 182: survive re-renders (review F1)
     S.chatSessionId = null;
     renderChat(null, locName);
@@ -3836,6 +4037,9 @@ function renderChat(session, locName) {
         const inp = document.getElementById("chat-msg-input");
         if (inp) { inp.value = s; inp.focus(); }
         S.chatDraft = s;  // #256: chip fills the input programmatically (no input event) — sync the draft so the text survives re-renders
+        // #302: a programmatic set fires no input event — mirror the chip
+        // text into the per-NPC store for the currently selected NPC too.
+        if (S.chatNpcId != null) gameUiContext.draftByNpc[S.chatNpcId] = s;
       } }, s)));
   }
   const lastNpc = [...(curSession ? curSession.messages : [])]
@@ -3849,6 +4053,13 @@ function renderChat(session, locName) {
   // S.chatDraft and kept in sync on every keystroke; cleared on send.
   input.value = S.chatDraft || "";
   input.addEventListener("input", () => { S.chatDraft = input.value; });
+  // #302: an ADDITIONAL listener mirrors the live draft into the per-NPC
+  // store (multiple listeners on one element coexist — the pinned #175
+  // binding above stays byte-exact). No selected NPC → nothing to key on;
+  // the unkeyed text still lives in S.chatDraft alone.
+  input.addEventListener("input", () => {
+    if (S.chatNpcId != null) gameUiContext.draftByNpc[S.chatNpcId] = input.value;
+  });
   const sendBtn = el("button", {
     id: "chat-send", class: "primary", "aria-label": "Отправить",
     onclick: () => send(),
@@ -3938,6 +4149,11 @@ function renderChat(session, locName) {
       }
       input.value = "";
       S.chatDraft = "";  // #175: the send succeeded — the draft is consumed
+      // #302: the consumed draft leaves the per-NPC store — ONLY the sent
+      // NPC's entry (other NPCs' stored drafts are untouched). The
+      // mid-flight NPC-switch guard above returns before this line, so a
+      // stale-closure send never deletes the switched-to NPC's draft.
+      delete gameUiContext.draftByNpc[sentNpc];
       status.textContent = r.source === "fallback"
         ? "LLM недоступен, отвечает fallback" : "";
     } catch (e) {
@@ -3965,6 +4181,16 @@ function renderChat(session, locName) {
     el("div", { class: "grid chat-shell" },
       el("div", { class: "panel", id: "chat-view" },
         el("h2", {}, "Диалог"),
+        // #302: back to the Place the dialogue was opened from — rendered
+        // only when a VALIDATED place view is the origin (a direct #/chat
+        // deep link has no place to return to). Navigation rides the hash
+        // link (single dispatch through route()) — no location.hash
+        // assignment here; the anchor rides the shared global control
+        // styling (a { color: var(--accent) }, same idiom as «← К карте»).
+        ...(gameUiContext.viewLocationId != null
+          ? [el("a", { href: `#/location/${gameUiContext.viewLocationId}` },
+              "← К месту")]
+          : []),
         el("label", {}, "NPC на этой локации"), npcSel,
         visual,
         el("div", { class: "chat-head-info" },
@@ -4711,6 +4937,8 @@ function mapLink(locId) {
       S.mapFocusManual = true;
       S.mapFocusAnchor = S.character.location_id;
       S.mapFocusLocationId = locId;
+      gameUiContext.lastWorldFocusId = locId;  // #302: an explicit map jump must not be overridden by viewWorld's stale pre-place focus restoration
+      gameUiContext.lastWorldFocusPlayerLocId = S.character.location_id;
       gotoWorld();  // #161: single dispatch — no direct viewWorld() next to the hash assignment
     },
   }, "Показать на карте");
@@ -5787,6 +6015,7 @@ function renderProfile(modeSel) {
           creatorResetDraft();  // W118-RV1 F1: logout clears the creator draft
           appearanceResetDraft();  // #65: logout clears the outfit prompt draft
           desireResetDraft();  // #66: logout drops the pending interpret request
+          resetGameUiContext();  // #302: session teardown — drafts/selection/focus must not leak across logout/relogin
           location.hash = "#/login";
           route();
         } }, "Выйти")),
@@ -5804,6 +6033,7 @@ function renderProfile(modeSel) {
             creatorResetDraft();  // W118-RV1 F1: deletion clears the creator draft
             appearanceResetDraft();  // #65: deletion clears the outfit prompt draft
             desireResetDraft();  // #66: deletion drops the pending interpret request
+            resetGameUiContext();  // #302: session teardown — nothing survives account deletion
             // #138: no S.authProbed reset here (m132 pins exactly two reset
             // sites) — after deletion auth state is known-gone and the
             // cookie is cleared server-side; a re-probe would only 401.
