@@ -36,6 +36,7 @@ let gameUiContext = {
   userRef: null,       // S.user object reference at capture time
   characterId: null,   // S.character.id at capture time
   selectedLocationId: null,  // place chosen on the World → Place navigation
+  selectedPoiId: null,       // #310: Living Map marker highlighted by the selection card — a map-marker selection, never a MOVE intent (that is selectedLocationId's place-navigation semantics)
   viewLocationId: null,      // place whose view validated and rendered
   lastWorldFocusId: null,    // world map focus to restore on the return
   lastWorldFocusPlayerLocId: null,  // player location when the focus was recorded — restore is skipped if the player moved since
@@ -65,7 +66,7 @@ let navEpoch = 0;
 function resetGameUiContext() {
   gameUiContext = {
     userRef: null, characterId: null, selectedLocationId: null,
-    viewLocationId: null, lastWorldFocusId: null,
+    selectedPoiId: null, viewLocationId: null, lastWorldFocusId: null,
     lastWorldFocusPlayerLocId: null, npcId: null, draftByNpc: {},
   };
   observedPlayerLocId = null;
@@ -346,6 +347,10 @@ async function route() {
     resetGameUiContext();
   }
   const hash = location.hash;  // #161: empty hash is normalized at the top of route(); no fallback needed
+  // #310: marker selection is World-screen-local — any route change away from
+  // #/world drops it (World→Place→World, World→Chat→World, …). A POI click
+  // never changes the hash, so no route() fires and the selection persists.
+  if (hash !== "#/world") gameUiContext.selectedPoiId = null;
   // 020/#118 P1: a user without a character gets the creator screen for ANY
   // hash. The #/profile carve-out below is deliberate: #/profile falls
   // through to viewProfile, whose #128 null-guard hands off to the creator,
@@ -2090,13 +2095,18 @@ function buildLivingMap(locs) {
       continue;
     }
     const isHere = l.id === ch.location_id;
+    // #310: a POI click SELECTS the marker (context card) — it never moves.
+    // The selected class is derived here at build time, so every
+    // rerenderLivingMap rebuild re-derives it from gameUiContext and the
+    // selection ring survives the ~5s poll rebuilds automatically.
+    const isSelected = l.id === gameUiContext.selectedPoiId;
     locationAnchors.push(el("button", {
-      class: `anchor location-anchor ${isHere ? "here" : ""} ${l.y >= 20 ? "above" : ""}`,
+      class: `anchor location-anchor ${isHere ? "here" : ""} ${l.y >= 20 ? "above" : ""} ${isSelected ? "anchor--selected" : ""}`,
       style: `left:${l.x}%; top:${l.y}%`,
       "aria-label": l.name,
       "data-loc-id": String(l.id),
       onpointerdown: markTouchedAnchor,
-      onclick: () => moveTo(l),
+      onclick: () => selectPoi(l),
     },
       el("span", { class: "dot" }),
       (!/^House \d+$/.test(l.name) ? el("span", { class: "map-label" }, l.name) : null),
@@ -2217,6 +2227,94 @@ function rerenderLivingMap() {
       newBadge.classList.toggle("hidden", capturedBadgeHidden);
     }
   }
+  // #310: the poll rebuild wipes the host children — the selection card lives
+  // OUTSIDE the host (in .world-stage) and is re-derived from current state
+  // after every rebuild, so it stays fresh (variant, existence) and the
+  // selected anchor's ring is re-derived inside buildLivingMap.
+  updatePoiSelectionCard();
+}
+
+/* ---------- #310: Living Map POI selection (click = select, never move) ---------- */
+
+/* Module-level once-guard: the Escape handler is bound exactly once per
+   page load; it acts only while a selection card is open. No other Escape
+   handling exists in app.js. */
+let poiKeydownBound = false;
+function bindPoiSelectionKeys() {
+  if (poiKeydownBound) return;
+  poiKeydownBound = true;
+  // window, not document: same Escape semantics in a real browser, and the
+  // keydown listener rides the same surface as the boot hashchange listener.
+  window.addEventListener("keydown", (ev) => {
+    if (ev.key !== "Escape") return;
+    if (!document.getElementById("poi-card")) return;
+    gameUiContext.selectedPoiId = null;
+    rerenderLivingMap();
+  });
+}
+
+/* #310: the selection setter — a POI click highlights the marker and opens
+   the context card; no MOVE, no POST. */
+function selectPoi(loc) {
+  gameUiContext.selectedPoiId = loc.id;
+  // Rebuild, not just the card: the ring is derived at map-build time, so a
+  // rebuild is what paints it immediately (the rebuild tail also refreshes
+  // the card). Same cost as a poll tick.
+  rerenderLivingMap();
+}
+
+function closePoiSelection() {
+  gameUiContext.selectedPoiId = null;
+  rerenderLivingMap();
+}
+
+/* #310: the card is derived from CURRENT state on every call — the selected
+   loc must still exist in S.mapLocations (a poll may have dropped it), and
+   the «вы здесь» variant is re-read from the fresh player location. */
+function poiSelectionCard() {
+  const poiId = gameUiContext.selectedPoiId;
+  if (poiId == null) return null;
+  const loc = (S.mapLocations || []).find((l) => l.id === poiId);
+  if (!loc) {  // stale selection — the location vanished from the payload
+    gameUiContext.selectedPoiId = null;
+    return null;
+  }
+  const here = loc.id === S.character.location_id;
+  return el("div", { class: "poi-card", id: "poi-card", role: "group",
+      "aria-label": `${loc.name || `#${loc.id}`} — выбор места` },
+    el("div", { class: "poi-card-head" },
+      el("h3", { class: "poi-card-title" },
+        `${loc.name || `#${loc.id}`} · ${here ? "вы здесь" : "другое место"}`),
+      el("button", { class: "poi-card-close", type: "button", "aria-label": "Закрыть",
+        onclick: () => closePoiSelection() }, "×")),
+    el("div", { class: "poi-card-actions" },
+      el("a", { class: "poi-card-btn", href: `#/location/${loc.id}` },
+        here ? "Войти в место" : "Посмотреть место"),
+      here
+        ? el("button", { class: "poi-card-btn", type: "button",
+            onclick: () => closePoiSelection() }, "Закрыть")
+        : el("button", { class: "poi-card-btn poi-card-go", type: "button",
+            onclick: async () => {
+              const target = loc;
+              // #310: the ONE move path is the existing moveTo() — no new
+              // /actions call site. Selection clears after success AND
+              // failure (the marker can simply be clicked again).
+              await moveTo(target);
+              gameUiContext.selectedPoiId = null;
+              rerenderLivingMap();
+            } }, "Пойти сюда")));
+}
+
+/* #310: idempotent updater — the card lives in a dedicated host slot inside
+   .world-stage (never inside living-map-host: rerenderLivingMap wipes host
+   children). replaceChildren swaps the content in place: present → card,
+   absent → empty. Cheap enough to call after every map rebuild. */
+function updatePoiSelectionCard() {
+  const host = document.getElementById("poi-card-host");
+  if (!host) return;
+  const card = poiSelectionCard();
+  if (card) host.replaceChildren(card);
+  else host.replaceChildren();
 }
 
 function setMapLod(lod) {
@@ -2363,7 +2461,11 @@ function renderWorld(locs, tasksData) {
               onclick: () => moveTo(loc),
             }, el("span", {}, loc.name || `#${loc.id}`),
                el("span", { class: "muted" }, loc.type || ""))))),
-        inspectBtn),
+        inspectBtn,
+        // #310: the POI selection card mounts into this dedicated host (AFTER
+        // inspectBtn, never inside living-map-host — the poll rebuild wipes
+        // host children); updatePoiSelectionCard() fills it from state.
+        el("div", { class: "poi-card-host", id: "poi-card-host" })),
       worldPanel,
       worldPill,
       // Below-fold blocks (travel, actions, journal, portrait, scene) —
@@ -2390,6 +2492,11 @@ function renderWorld(locs, tasksData) {
           taskRows.slice(0, 3)),
         portraitBox,
         sceneBox)));
+  // #310: bind the Escape close path once and derive the card from current
+  // state after the mount (covers a selection carried across a same-hash
+  // re-render; route() clears it on any hash change).
+  bindPoiSelectionKeys();
+  updatePoiSelectionCard();
 }
 
 async function doAction(actionType, params = {}, after = viewWorld) {
