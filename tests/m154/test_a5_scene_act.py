@@ -501,7 +501,9 @@ def test_ui_scene_act_pins_without_damaging_existing_pins():
     # #289: a new comment mentions the bare guillemet label, so pin the full
     # scene-fallback hint string (code-only, comment-robust) instead of the
     # bare label to keep the "hint appears once" intent exact.
-    assert js.count('"Нажмите «Осмотреть окрестности», чтобы осмотреться."') == 1
+    # #312: the idle scene-panel instruction literal is superseded by the
+    # Place stage composition (the old «Осмотреть окрестности» hint is gone).
+    assert js.count('"Нажмите «Осмотреть окрестности», чтобы осмотреться."') == 0
     assert js.count('"Осмотреть"') == 1
     assert js.count('"Открыть Scene"') == 1
     # #72: +1 — the Place screen's always-available back-to-map button
@@ -510,13 +512,19 @@ def test_ui_scene_act_pins_without_damaging_existing_pins():
     # the «К карте» literal now survives only in the two #86 hatches.
     assert js.count('"К карте"') == 2
     assert js.count('"← Остров"') == 1
-    assert js.count("S.scene = null;") >= 2
-    assert js.count('S.scene.state === "loading"') >= 1
+    # #312: the scene cache is cleared by a dedicated clearSceneCache()
+    # (the old `S.scene = null;` reset sites are superseded by the cache).
+    assert js.count("function clearSceneCache()") == 1
+    # #312: the in-flight guard reads the new `status === "generating"`
+    # (the old `S.scene.state === "loading"` literal is superseded).
+    assert js.count('status === "generating"') >= 1
     assert js.count("async function inspectSurroundings()") == 1
     assert js.count("scene.scrollIntoView") == 2
     assert js.count('location.hash === "#/world"') == 1
     assert js.count('api("/visual/scenes", { method: "POST",') == 1
-    assert js.count("body: { location_id: S.character.location_id }") == 1
+    # #312: the POST body no longer hardcodes `S.character.location_id`
+    # (the Place stage captures the location at click time).
+    assert js.count("body: { location_id: S.character.location_id }") == 0
     assert js.count("Осмотр — в следующем срезе") == 0
 
 

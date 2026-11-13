@@ -96,7 +96,9 @@ class TestSceneFlow:
     def test_scene_calls_visual_api(self):
         js = load_js()
         assert 'api("/visual/scenes", { method: "POST",' in js
-        assert "body: { location_id: S.character.location_id }" in js
+        # #312: the POST body captures the location at click time (locId);
+        # the S.character.location_id literal is superseded — see m153/m154.
+        assert "body: { location_id: locId }" in js
 
     def test_world_view_embeds_scene(self):
         js = load_js()

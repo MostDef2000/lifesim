@@ -389,10 +389,16 @@ def test_flux_down_scene_result_commits_and_serves(world):
 
     # Client pins: fallback state + retry affordance + honest toast.
     js = _read(APP_JS)
-    assert js.count('S.scene = { state: "fallback" };') == 1
-    assert js.count("sceneFallbackData()") == 2  # def + call
+    # #312: the scene state machine moves from `state: "fallback"` to
+    # `status: "unavailable"` (the old fallback literal is gone).
+    assert js.count('state: "fallback"') == 0
+    assert js.count('"unavailable"') >= 1
+    # #312: Place stage adds a call site; floor preserves both existing sites.
+    assert js.count("sceneFallbackData()") >= 2
     assert js.count('"Визуал недоступен, показываю данные"') == 1
-    assert js.count('"Повторить осмотр"') == 1
+    # #312: the retry affordance is renamed «Повторить визуализацию».
+    assert js.count('"Повторить осмотр"') == 0
+    assert js.count('"Повторить визуализацию"') >= 1
 
 
 # ---------- 4. Transient-failure pins (every alpha-critical catch path) ----------
@@ -500,6 +506,12 @@ def test_ui_low_graphics_and_reduced_motion_pins():
     # night-light limit, marker-budget label.
     assert js.count('S.mapQuality === "low-mobile"') == 4
     # Scene fallback stays usable (summary data + retry + act bar).
-    assert js.count('S.scene = { state: "fallback" };') == 1
-    assert js.count("sceneFallbackData()") == 2
-    assert js.count('"Повторить осмотр"') == 1
+    # #312: the scene state machine moves from `state: "fallback"` to
+    # `status: "unavailable"` (the old fallback literal is gone).
+    assert js.count('state: "fallback"') == 0
+    assert js.count('"unavailable"') >= 1
+    # #312: Place stage adds a call site; floor preserves both existing sites.
+    assert js.count("sceneFallbackData()") >= 2
+    # #312: the retry affordance is renamed «Повторить визуализацию».
+    assert js.count('"Повторить осмотр"') == 0
+    assert js.count('"Повторить визуализацию"') >= 1

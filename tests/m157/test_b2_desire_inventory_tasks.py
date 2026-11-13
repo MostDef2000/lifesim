@@ -672,7 +672,9 @@ def test_ui_legacy_pins_intact():
     # #289: a new comment mentions the bare guillemet label, so pin the full
     # scene-fallback hint string (code-only, comment-robust) instead of the
     # bare label to keep the "hint appears once" intent exact.
-    assert js.count('"Нажмите «Осмотреть окрестности», чтобы осмотреться."') == 1
+    # #312: the idle scene-panel instruction literal is superseded by the
+    # Place stage composition (the old «Осмотреть окрестности» hint is gone).
+    assert js.count('"Нажмите «Осмотреть окрестности», чтобы осмотреться."') == 0
     assert js.count('"Осмотреть"') == 1
     assert js.count('"Открыть Scene"') == 1
     # #72: +1 — the Place screen's always-available back-to-map button (the

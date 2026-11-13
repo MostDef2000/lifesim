@@ -1078,12 +1078,14 @@ SCENARIOS = [
         ),
         "driver": (
             "await __settle(); "
-            "__S.scene = { state: 'ready', asset: 'x' }; "
+            # #312: the scene state machine moves from `state` to `status`.
+            "__S.scene = { status: 'ready' }; "
             "const inp1 = document.getElementById('scene-act-input'); "
             "inp1.value = 'Поговорить с Иваном'; "
             "__clickButton('Сделать'); await __settle(); "
             "const leg1 = __facts(); "
-            "__S.scene = { state: 'fallback' }; "
+            # #312: the scene state machine moves from `state` to `status`.
+            "__S.scene = { status: 'unavailable' }; "
             "const inp2 = document.getElementById('scene-act-input'); "
             "inp2.value = 'Поговорить с Петром'; "
             "__clickButton('Сделать'); await __settle(); "
@@ -1198,9 +1200,12 @@ def test_game_shell_mount(results):
     assert r["topbarTitle"] == "/ Settlement", (
         f"the topbar title carries the place name, got {r['topbarTitle']!r}"
     )
-    # The stage is an honest static placeholder.
-    assert r["stageText"] is not None and "Фото места недоступно" in r["stageText"], (
-        f"the stage carries the honest photo note, got {r['stageText']!r}"
+    # #312: the stage is a text-first composition (location name, no photo note).
+    assert r["stageText"] is not None and "Settlement" in r["stageText"], (
+        f"the stage carries the location name, got {r['stageText']!r}"
+    )
+    assert "Фото места недоступно" not in (r["stageText"] or ""), (
+        f"the stage has no photo note, got {r['stageText']!r}"
     )
     # No raw #id debug string in the always-visible context panel — the ID
     # lives only inside the collapsed details.

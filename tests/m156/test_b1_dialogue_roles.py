@@ -628,7 +628,9 @@ def test_ui_legacy_pins_intact():
     # #289: a new comment mentions the bare guillemet label, so pin the full
     # scene-fallback hint string (code-only, comment-robust) instead of the
     # bare label to keep the "hint appears once" intent exact.
-    assert js.count('"Нажмите «Осмотреть окрестности», чтобы осмотреться."') == 1
+    # #312: the idle scene-panel instruction literal is superseded by the
+    # Place stage composition (the old «Осмотреть окрестности» hint is gone).
+    assert js.count('"Нажмите «Осмотреть окрестности», чтобы осмотреться."') == 0
     assert js.count('"Осмотреть"') == 1
     assert js.count('"Открыть Scene"') == 1
     # #72: +1 — the Place screen's always-available back-to-map button
@@ -637,8 +639,12 @@ def test_ui_legacy_pins_intact():
     # the «К карте» literal now survives only in the two #86 hatches.
     assert js.count('"К карте"') == 2
     assert js.count('"← Остров"') == 1
-    assert js.count("S.scene = null;") >= 2
-    assert js.count('S.scene.state === "loading"') >= 1
+    # #312: the scene cache is cleared by a dedicated clearSceneCache()
+    # (the old `S.scene = null;` reset sites are superseded by the cache).
+    assert js.count("function clearSceneCache()") == 1
+    # #312: the in-flight guard reads the new `status === "generating"`
+    # (the old `S.scene.state === "loading"` literal is superseded).
+    assert js.count('status === "generating"') >= 1
     assert js.count('"scene-act-input"') == 2
     assert js.count('"scene-act-go"') == 2
     assert js.count('"Осматриваю окрестности…"') == 1
