@@ -102,9 +102,14 @@ def test_connection_banner_state_pins():
     # S init: one line, after visualDisabled (m132 substring intact).
     assert js.count("connLost: false, pollFails: 0,") == 1
     assert js.count("S.connLost = true;") == 1   # armed on the 2nd consecutive failure
-    assert js.count("S.connLost = false;") == 1  # cleared on the first full-refresh success
+    # #311: +1 — the feed controller's destructive teardown resets the
+    # liveness state too (a torn-down session starts clean: no banner, no
+    # failure streak carried into the next session).
+    # cleared on the first full-refresh success + teardown
+    assert js.count("S.connLost = false;") == 2
     assert js.count("S.pollFails += 1;") == 1    # failure streak in the poll catch
-    assert js.count("S.pollFails = 0;") == 1     # streak reset on success
+    # #311: +1 — same teardown liveness reset as S.connLost above.
+    assert js.count("S.pollFails = 0;") == 2     # streak reset on success + teardown
     # The banner arms on the SECOND consecutive failure (one blip stays quiet).
     assert js.count("S.pollFails >= 2") == 1
     # The old silent-catch byte literal is gone on purpose (m162 pins the
@@ -128,7 +133,9 @@ def test_connection_banner_node_pins():
     # Recovery feedback is a one-shot toast (house toast mechanics), not a
     # second persistent surface.
     assert js.count(RECOVERY_TEXT) == 1
-    assert js.count("hideConnBanner();") == 1
+    # #311: +1 — the feed controller's teardown hides the banner as part of
+    # its liveness reset (a torn-down session must not leave the banner up).
+    assert js.count("hideConnBanner();") == 2
     assert js.count("ensureConnBanner();") == 1
 
 

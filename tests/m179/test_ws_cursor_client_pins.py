@@ -116,9 +116,12 @@ def test_ws_cursor_state_and_rearm_pins():
     #   (c) #258 hello-deadline retire — a hello-less socket is detached
     #       (onclose nulled) before close, so the flag re-arms there too.
     assert JS.count("S.wsCursorSent = false;") == 3
-    # (a) stopFeed: inside the `if (S.ws)` branch, strictly BETWEEN the #161
-    # detach line and the close call (detach order itself untouched).
-    sf_start = JS.index("function stopFeed() {")
+    # (a) the controller teardown: inside the `if (S.ws)` branch, strictly
+    # BETWEEN the #161 detach line and the close call (detach order itself
+    # untouched). #311: stopFeed() was renamed worldFeedTeardown() (the
+    # session-owned feed controller) — the WS-detach branch body is
+    # byte-identical to the old stopFeed body.
+    sf_start = JS.index("function worldFeedTeardown() {")  # #311: was "function stopFeed() {"
     sf_branch = JS.index("if (S.ws) {", sf_start)
     sf_end = JS.index("\n  }\n", sf_branch)
     stopfeed_body = JS[sf_branch:sf_end]
@@ -133,8 +136,10 @@ def test_ws_cursor_state_and_rearm_pins():
     oc_end = JS.index("\n  };", oc_start)
     assert "S.wsCursorSent = false;" in JS[oc_start:oc_end]
     # ...and precedes the reconnect scheduling inside onclose
+    # (#311: the raw setTimeout(connectWs, ...) became the tracked,
+    # token+navGen-checked armReconnect(delay) — same scheduling position).
     rearm_oc = JS.index("S.wsCursorSent = false;", oc_start)
-    assert rearm_oc < JS.index("setTimeout(connectWs", oc_start)
+    assert rearm_oc < JS.index("armReconnect(", oc_start)  # #311: was "setTimeout(connectWs"
 
 
 # ---------- server-side #179 pins (backend/app/api/ws.py) ----------
@@ -150,12 +155,13 @@ def test_179_ws_py_handshake_pins():
 # ---------- #177/#178 defense-in-depth literals unchanged ----------
 
 def test_178_defense_in_depth_literals_unchanged():
-    # bootCursor census identical to m176 (#262 recount): 1 init field
-    # + 7 S. sites (#258 adds the hello-handler assign S.bootCursor =
-    # data.cursor; #262 splits the old own-arrival gate site into
-    # liveOwnArrival + the own-actor completion clause)
-    assert JS.count("bootCursor") == 8
-    assert JS.count("S.bootCursor") == 7
+    # bootCursor census identical to m176 (#262 recount; #311 recount):
+    # 1 init field + 9 S. sites (#258 adds the hello-handler assign
+    # S.bootCursor = data.cursor; #262 splits the old own-arrival gate site
+    # into liveOwnArrival + the own-actor completion clause; #311 adds the
+    # worldFeedHasLive gate read + the teardown reset)
+    assert JS.count("bootCursor") == 10
+    assert JS.count("S.bootCursor") == 9
     assert JS.count("bootCursor: Infinity") == 1
     # the CONTROL_CHANGED liveness gate keeps its exact bytes inside the
     # #262 combined gate (m176 owns it)

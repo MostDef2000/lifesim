@@ -63,7 +63,10 @@ def test_feed_dedup_pins():
     # #132 console-quiet flags: set/clear counts unchanged. (#309: the
     # login/register-success authProbed reset site is gone with local auth —
     # the flag is cleared at logout only, pinned in tests/m132.)
-    assert js.count("S.authProbed = true") == 1
+    # #311: +1 — the api() 401 deauth now marks the session probed-dead
+    # (fail-closed: the reroute's boot probe must not resurrect a dead
+    # session from a stale /auth/me 200).
+    assert js.count("S.authProbed = true") == 2
     assert js.count("S.authProbed = false") == 1
     assert js.count("S.visualDisabled = true") == 1
     assert js.count("S.visualDisabled = false") == 1
