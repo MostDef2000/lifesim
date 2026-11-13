@@ -188,6 +188,103 @@ textarea {
   pointer-events: none;
   cursor: default;
 }
+
+/* #310: Living Map POI selection — a click/tap on a POI marker SELECTS it
+   (context card), it never moves. The ring rides the existing .dot (no
+   second before-rule on .anchor — its count is pinned) and the
+   .world-shell-scoped selector out-specifies the warm world-shell dot rule
+   so the ring wins. */
+.anchor--selected {
+  z-index: 4;
+}
+.anchor--selected .dot,
+.world-shell .anchor--selected .dot {
+  box-shadow: 0 0 0 2px var(--w-panel), 0 0 0 4px var(--w-accent);
+}
+
+/* #310: compact context card for the selected marker. Desktop: floats
+   bottom-right over the map, ABOVE .world-inspect (right 20px / bottom 20px,
+   ~40px tall) and the transient .map-badge (bottom 64px) — bottom: 96px
+   clears both. z-index 8: over the map controls (5-6), under the pill (9). */
+.poi-card {
+  position: absolute;
+  right: 20px;
+  bottom: 96px;
+  z-index: 8;
+  max-width: 340px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px 12px;
+  background: var(--w-panel);
+  border: 1px solid var(--w-line);
+  border-radius: 10px;
+  box-shadow: var(--w-shadow-panel);
+  color: var(--w-text);
+  font: 400 14px/1.35 system-ui, -apple-system, "Segoe UI", sans-serif;
+}
+.poi-card-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+}
+.poi-card-title {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 600;
+}
+.poi-card-close {
+  background: none;
+  border: 0;
+  padding: 0 2px;
+  font-size: 16px;
+  line-height: 1;
+  color: var(--w-dim);
+  cursor: pointer;
+}
+.poi-card-close:hover { color: var(--w-text); }
+.poi-card-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.poi-card-actions a,
+.poi-card-actions button {
+  display: inline-flex;
+  align-items: center;
+  padding: 6px 12px;
+  background: var(--w-panel);
+  border: 1px solid var(--w-line);
+  border-radius: 8px;
+  color: var(--w-text);
+  font: 400 13px/1.2 system-ui, -apple-system, "Segoe UI", sans-serif;
+  text-decoration: none;
+  cursor: pointer;
+}
+.poi-card-actions a:hover,
+.poi-card-actions button:hover { border-color: var(--w-warm-line); }
+.poi-card-actions .poi-card-go {
+  background: var(--w-warm);
+  border-color: var(--w-warm-line);
+  color: var(--w-accent);
+}
+
+/* #310 mobile (≤720px): the bottom band is taken — the nav pill wraps to two
+   rows (top edge ~111px, bottom 8px) and the right-side control stack sits at
+   176/220/262px — so the card docks to the TOP of the viewport: it never
+   overlaps .world-pill, never covers .world-inspect, and leaves the map
+   tappable everywhere below it. Dismissible (× / Escape) keeps it transient. */
+@media (max-width: 720px) {
+  .poi-card {
+    position: fixed;
+    top: 8px;
+    right: 8px;
+    bottom: auto;
+    left: 8px;
+    max-width: none;
+  }
+}
 .dot.npc {
   position: absolute;
   top: -4px;
