@@ -305,12 +305,18 @@ def test_ui_scene_state_pins_without_damaging_existing_pins():
     assert js.count('"← Остров"') == 1
     # #86 review: stale-scene invalidation on world re-render (travel)
     # and the one-in-flight guard against double POST.
-    assert js.count("S.scene = null;") >= 2
-    assert js.count('S.scene.state === "loading"') >= 1
+    # #312: the scene cache is cleared by a dedicated clearSceneCache()
+    # (the old `S.scene = null;` reset sites are superseded by the cache).
+    assert js.count("function clearSceneCache()") == 1
+    # #312: the in-flight guard reads the new `status === "generating"`
+    # (the old `S.scene.state === "loading"` literal is superseded).
+    assert js.count('status === "generating"') >= 1
     assert js.count("async function inspectSurroundings()") == 1
     # m14 carry: the inspect action posts the current location.
     assert js.count('api("/visual/scenes", { method: "POST",') == 1
-    assert js.count("body: { location_id: S.character.location_id }") == 1
+    # #312: the POST body no longer hardcodes `S.character.location_id`
+    # (the Place stage captures the location at click time).
+    assert js.count("body: { location_id: S.character.location_id }") == 0
     # A3 placeholder superseded by the real A4 inspect action (the m151 pin
     # is updated to ==0 there, with the supersession documented in the test).
     assert js.count("Осмотр — в следующем срезе") == 0

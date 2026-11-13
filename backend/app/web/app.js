@@ -21,6 +21,16 @@ const S = { user: null, character: null, world: null, ws: null, wsTries: 0,
   // position; NEVER reset by navigation/reconnect. helloDeadline holds the
   // 5s hello-wait timer id (null = none armed).
   feedInit: "pending", helloDeadline: null,
+  // #312: Place scene-visual state. S.scene is the MOUNTED entry (the cache
+  // entry for the player's current location, or null); S.sceneCache is the
+  // durable per-location cache (normalized STRING locationId → entry —
+  // navigation retains entries, movement/context/identity discard them).
+  // sceneRequestSeq is the monotonic request token (never reset — it voids
+  // stale flights); sceneFlight is the single in-flight generation record;
+  // sceneSession keys the cache to the session identity (user OBJECT
+  // REFERENCE + character id + world id + world seed).
+  sceneCache: new Map(), sceneRequestSeq: 0, sceneFlight: null,
+  sceneSession: null,
   shopConfirm: null, chatDraft: "",
   bootCursor: Infinity };  // #177: replay gate — set once from the first history fill (WS hello OR REST); Infinity = "no live events until proven"
 
@@ -70,7 +80,13 @@ function resetGameUiContext() {
     lastWorldFocusPlayerLocId: null, npcId: null, draftByNpc: {},
   };
   observedPlayerLocId = null;
-  S.scene = null;
+  // #312: session teardown routes through the shared scene lifecycle — the
+  // in-flight generation is voided and the whole cache dies (URLs revoked,
+  // entries dropped, mounted state reset to idle). A new session never
+  // inherits the previous identity's scene assets.
+  cancelSceneFlight();
+  clearSceneCache();
+  S.sceneSession = null;  // #312: the next sync re-keys the cache identity
   S.chatDraft = "";
   S.chatNpcId = null;
   S.chatSessionId = null;
@@ -330,6 +346,10 @@ const routes = {
 
 async function route() {
   navEpoch++;  // #302: every dispatch invalidates in-flight view loads
+  // #312: a navigation dispatch cancels the scene flight and releases the
+  // mounted URLs (blobs RETAINED — the return recreates them from cache).
+  cancelSceneFlight();
+  releaseSceneURLs();
   if (!location.hash) { location.hash = "#/world"; return; }  // #161: normalize once; the hashchange fires route again with a concrete view
   stopFeed();
   if (!S.user && !S.authProbed) {
@@ -1151,10 +1171,18 @@ function viewCreateCharacter() {
 
 /* ---------- portrait + scene (014, M6 visual pipeline) ---------- */
 
-async function fetchPortraitBlob(path) {
+async function fetchPortraitBlob(path, opts = {}) {
   // Same-origin cookie auth (same as api()); the client holds no bearer token,
   // so a Bearer header would 401. img src cannot carry auth → fetch blob, objectURL.
-  const r = await fetch(path, { credentials: "same-origin" });
+  // #312: an optional abort signal rides the fetch, and an isFresh predicate
+  // is re-checked between the response await and the blob await — a scene
+  // flight superseded mid-transfer must not consume the file it raced for.
+  // #312: the abort signal rides only when provided — the no-signal call
+  // stays byte-identical to the historical portrait fetch (m14 pin).
+  const r = opts.signal
+    ? await fetch(path, { credentials: "same-origin", signal: opts.signal })
+    : await fetch(path, { credentials: "same-origin" });
+  if (opts.isFresh && !opts.isFresh()) throw new Error("stale scene request");
   if (!r.ok) throw new Error(`HTTP ${r.status}`);
   return await r.blob();
 }
@@ -1347,24 +1375,36 @@ function sceneDescriptorData(d) {
     nearby: d && Array.isArray(d.characters)
       ? d.characters.filter((c) => c.id !== S.character.id).map((c) => c.name)
       : [],
+    nearbyKnown: true,  // #312: the committed descriptor is authoritative
     objects: d && Array.isArray(d.objects) ? d.objects.map((o) => o.type) : [],
   };
 }
 
-function sceneFallbackData() {
-  // Visual service down (503/502/…): same summary built client-side from
-  // already-loaded authoritative state — a dead visual service never blocks
-  // inspection. Read-only: no gameplay state is touched on any path.
+function sceneFallbackData(locId = (S.character ? S.character.location_id : null),
+                           locs = S.mapLocations) {
+  // #312: the confirmed-data summary built client-side from ALREADY-LOADED
+  // authoritative state — a dead visual service never blocks inspection, and
+  // the Place stage renders it for any viewed location. Generalized signature
+  // (the Place stage passes the viewed location + the loaded catalog); the
+  // world Scene panel keeps the defaults. Honest gaps: a missing world
+  // timestamp stays «недоступно» (never a synthesized «День 1»), and an
+  // unknown catalog location is distinguished from a confirmed-empty roster
+  // (nearbyKnown) — no false «Рядом никого» is claimed for unknown data.
+  // Read-only: no gameplay state is touched on any path.
   const ch = S.character;
-  const loc = (S.mapLocations || []).find((l) => l.id === ch.location_id);
+  const list = locs || [];
+  const loc = list.find((l) => String(l.id) === String(locId));
+  const ts = S.world && typeof S.world.game_timestamp === "number"
+    ? S.world.game_timestamp : null;
   const nearby = ((loc && loc.occupants) || [])
-    .filter((o) => o.id !== ch.id)
+    .filter((o) => !ch || o.id !== ch.id)
     .map((o) => o.name);
   return {
     locationName: loc && loc.name ? loc.name : "—",
-    timeText: dayTime((S.world && S.world.game_timestamp) || 0),
+    timeText: ts !== null ? dayTime(ts) : "недоступно",
     weatherText: S.weather && S.weather.enabled ? S.weather.description : "",
     nearby,
+    nearbyKnown: !!loc,
     objects: [],
   };
 }
@@ -1372,67 +1412,81 @@ function sceneFallbackData() {
 function sceneSummaryLines(d) {
   const lines = [`Место: ${d.locationName}`, `Время: ${d.timeText}`];
   if (d.weatherText) lines.push(`Погода: ${d.weatherText}`);
-  lines.push(d.nearby.length ? `Рядом: ${d.nearby.join(", ")}` : "Рядом никого");
+  // #312: nearbyKnown === false → the catalog has no such location — the
+  // roster is UNKNOWN, never confirmed empty.
+  lines.push(!d.nearbyKnown ? "Рядом: недоступно"
+    : d.nearby.length ? `Рядом: ${d.nearby.join(", ")}` : "Рядом никого");
   if (d.objects.length) lines.push(`Объекты: ${d.objects.join(", ")}`);
   return lines;
 }
 
 function backToMap() {
-  // Back navigation from the scene state to the world view.
-  S.scene = null;
+  // Back navigation from the scene state to the world view. #312: the scene
+  // lifecycle (cache/flight/URLs) is owned by the scene helpers — the panel
+  // keeps showing the mounted entry; only the scroll resets.
   renderScenePanel();
   const map = document.querySelector(".world-stage");
   if (map) map.scrollIntoView({ behavior: S.mapReducedMotion ? "auto" : "smooth", block: "start" });
 }
 
 function fillScenePanel(box) {
-  // S.scene state machine → scene panel content:
-  // idle → loading («Осматриваю окрестности…») → ready (image + descriptor
-  // summary) or fallback (summary from loaded world state).
+  // #312: the world Scene panel is a stable-host view over the mounted scene
+  // entry (S.scene) — hosts are created once (box._sceneHosts) and patched in
+  // place, so a re-fill never rebuilds the subtree (focus/scroll retention).
+  // Missing/unknown entry shapes (legacy presets) render the idle branch.
   const scene = S.scene;
-  const kids = [];
-  if (!scene) {
-    kids.push(el("div", { class: "muted" },
-      "Нажмите «Осмотреть окрестности», чтобы осмотреться."));
-  } else if (scene.state === "loading") {
-    kids.push(el("div", { class: "muted scene-status" }, "Осматриваю окрестности…"));
-    // #86 review: escape hatch while a generation is in flight.
-    kids.push(el("button", { type: "button", onclick: backToMap }, "К карте"));
-  } else {
-    if (scene.state === "ready") {
-      const status = el("div", { class: "muted scene-status" });
-      kids.push(status);
-      (async () => {
-        // Cookie-auth image fetch (img src cannot carry auth → blob).
-        try {
-          const blob = await fetchPortraitBlob(`/visual/assets/${scene.asset.id}/file`);
-          const url = URL.createObjectURL(blob);
-          box.insertBefore(
-            el("img", { class: "portrait-img", src: url, alt: "Сцена" }), status);
-          status.textContent = "";
-        } catch (e) { status.textContent = "Изображение недоступно"; }
-      })();
-    }
-    const data = scene.state === "fallback"
-      ? sceneFallbackData()
-      : sceneDescriptorData(scene.asset.scene_descriptor);
-    for (const line of sceneSummaryLines(data)) {
-      kids.push(el("div", { class: "muted" }, line));
-    }
-    if (scene.state === "fallback") {
-      // #93: Flux down → fallback data + an explicit retry affordance.
-      kids.push(el("button", { type: "button", onclick: inspectSurroundings },
-        "Повторить осмотр"));
-    }
-    kids.push(el("button", { type: "button", onclick: backToMap }, "К карте"));
+  if (!box._sceneHosts) {
+    const bar = sceneActBar();
+    box._sceneHosts = {
+      status: el("div", { class: "muted scene-status" }),
+      image: el("div", { class: "scene-image-host" }),
+      summary: el("div", { class: "scene-live-summary" }),
+      actions: el("div", { class: "scene-panel-actions" }),
+      result: el("div", { class: "scene-act-result-host" }),
+    };
+    box.replaceChildren(el("h2", {}, "Сцена"),
+      box._sceneHosts.status, box._sceneHosts.image, box._sceneHosts.summary,
+      box._sceneHosts.actions, bar, box._sceneHosts.result);
   }
-  // #87 (A5): the free-text scene action bar + the last result line are part
-  // of EVERY scene panel state (idle/loading/ready/fallback) — the issue
-  // requires the input to be always visible in Scene.
-  kids.push(sceneActBar(), sceneActResultNode());
+  const h = box._sceneHosts;
+  const status = scene ? scene.status : null;
+  h.status.textContent = !status ? "Осмотр ещё не выполнялся."
+    : status === "generating" ? "Осматриваю окрестности…"
+    : status === "unavailable" ? "Визуал недоступен." : "";
+  // The panel mounts ONLY a live objectURL — it never recreates one from the
+  // cached blob (that is the Place stage's cache-return path).
+  if (status === "ready" && scene.objectURL) {
+    h.image.replaceChildren(el("img", {
+      src: scene.objectURL, alt: sceneImageAlt(scene) }));
+  } else {
+    h.image.replaceChildren();
+  }
+  const data = status === "ready"
+    ? sceneDescriptorData(scene.descriptor) : sceneFallbackData();
+  h.summary.replaceChildren(...sceneSummaryLines(data)
+    .map((t) => el("div", { class: "muted" }, t)));
+  if (status === "generating") {
+    // #86 review: escape hatch while a generation is in flight.
+    h.actions.replaceChildren(
+      el("button", { type: "button", onclick: backToMap }, "К карте"));
+  } else if (status === "ready" || status === "unavailable") {
+    const kids = [];
+    if (status === "unavailable") {
+      // #93: the visual service failed → an explicit retry affordance.
+      kids.push(el("button", { type: "button",
+        onclick: () => inspectSurroundings() }, "Повторить визуализацию"));
+    }
+    kids.push(el("button", { type: "button", onclick: backToMap }, "К карте"));
+    // #253 convention: a raw spread into replaceChildren never carries a
+    // null kid unfiltered (sceneActResultNode's "nothing to show" shape).
+    h.actions.replaceChildren(...kids.filter(Boolean));
+  } else {
+    h.actions.replaceChildren();
+  }
   // #253: raw replaceChildren stringifies null args (unlike el()/appendKids),
   // so a null kid (sceneActResultNode's "nothing to show") must never reach it.
-  box.replaceChildren(el("h2", {}, "Сцена"), ...kids.filter(Boolean));
+  const resultNode = sceneActResultNode();
+  h.result.replaceChildren(...(resultNode ? [resultNode] : []));
 }
 
 function renderScenePanel() {
@@ -1442,20 +1496,89 @@ function renderScenePanel() {
 }
 
 async function inspectSurroundings() {
+  // #312: the SINGLE /visual/scenes call site. The click captures its
+  // location; every await re-checks the flight token (seq, nav epoch,
+  // identity, world, player location, cache ownership, context key) — a
+  // superseded flight is discarded silently, never published.
+  if (!S.user || !S.character) return;
+  const locId = S.character.location_id;
   // #86 review: one inspection in flight — rapid re-clicks are no-ops.
-  if (S.scene && S.scene.state === "loading") return;
-  S.scene = { state: "loading" };
-  const scene = renderScenePanel();
+  if (S.sceneFlight) return;
+  // A valid cached READY entry means zero POST and zero file GET.
+  const cached = locId != null ? S.sceneCache.get(String(locId)) : null;
+  if (cached && cached.status === "ready"
+    && cached.contextKey === sceneContextKey()) {
+    S.scene = cached;
+    renderSceneVisuals();
+    return;
+  }
+  // A stale-context entry (if any) dies before the fresh flight.
+  if (cached) discardSceneEntry(locId);
+  const entry = {
+    locationId: locId, status: "generating", assetId: null, descriptor: null,
+    blob: null, objectURL: null, contextKey: sceneContextKey(),
+    capturedAt: Date.now(), errorKind: null,
+  };
+  S.sceneCache.set(String(locId), entry);
+  S.scene = entry;
+  const flight = {
+    seq: ++S.sceneRequestSeq, navEpoch: navEpoch, userRef: S.user,
+    characterId: S.character.id,
+    worldId: S.world ? S.world.id : null,
+    worldSeed: S.world ? S.world.seed : null,
+    locationId: locId, contextKey: entry.contextKey, entry, controller: null,
+  };
+  S.sceneFlight = flight;
+  const scene = renderSceneVisuals();
   if (scene) scene.scrollIntoView({ behavior: S.mapReducedMotion ? "auto" : "smooth", block: "start" });
+  // One 300s deadline covers the whole flight (POST + file GET); the late
+  // fire is a no-op unless the flight is still current (token check #7).
+  const timer = setTimeout(() => {
+    if (!sceneFlightCurrent(flight)) return;
+    sceneUnavailable(flight.entry, "deadline");
+  }, SCENE_REQUEST_TIMEOUT_MS);
   try {
+    // The POST carries NO abort signal — a superseded flight is discarded by
+    // its token checks, not by transport cancellation. #312 (m153/m154 pin):
+    // the body carries the click-captured locId, not a live S.character read.
     const r = await api("/visual/scenes", { method: "POST",
-      body: { location_id: S.character.location_id } });
-    S.scene = { state: "ready", asset: r.asset };
-    renderScenePanel();
+      body: { location_id: locId } });
+    // Token check #2: the flight must still own the state before the asset
+    // is consumed.
+    if (!sceneFlightCurrent(flight)) return;
+    if (!r || !r.asset || r.asset.asset_type !== "scene"
+      || String(r.asset.location_id) !== String(locId)
+      || !r.asset.scene_descriptor || !r.asset.scene_descriptor.location
+      || String(r.asset.scene_descriptor.location.id) !== String(locId)) {
+      sceneUnavailable(entry, "invalid-asset");
+      return;
+    }
+    entry.assetId = r.asset.id;
+    entry.descriptor = r.asset.scene_descriptor;
+    // Cookie-auth file fetch (img src cannot carry auth → blob). The abort
+    // signal rides THIS fetch only; isFresh re-checks between the response
+    // and the blob (token check #4).
+    flight.controller = new AbortController();
+    // Token check #3: a flight superseded while the POST flew must not even
+    // issue the file GET (the abort signal covers later cancellation).
+    if (!sceneFlightCurrent(flight)) return;
+    const blob = await fetchPortraitBlob(`/visual/assets/${r.asset.id}/file`,
+      { signal: flight.controller.signal,
+        isFresh: () => sceneFlightCurrent(flight) });
+    // Token check #5: only the still-current flight turns bytes into a URL.
+    if (!sceneFlightCurrent(flight)) return;
+    entry.blob = blob;
+    entry.objectURL = URL.createObjectURL(blob);
+    entry.status = "ready";
+    S.sceneFlight = null;
+    renderSceneVisuals();
   } catch (e) {
-    S.scene = { state: "fallback" };
-    renderScenePanel();
-    toast("Визуал недоступен, показываю данные");
+    // Token check #6: only a still-current flight lands as unavailable —
+    // a superseded flight (nav away, movement, identity switch) stays silent.
+    if (!sceneFlightCurrent(flight)) return;
+    sceneUnavailable(entry, "error");
+  } finally {
+    clearTimeout(timer);
   }
 }
 
@@ -1464,6 +1587,171 @@ function sceneBlock() {
   const box = el("div", { class: "panel portrait", id: "scene-view" }, el("h2", {}, "Сцена"));
   fillScenePanel(box);
   return box;
+}
+
+/* ---------- #312: scene cache + flight lifecycle ---------- */
+
+const SCENE_REQUEST_TIMEOUT_MS = 300000;
+
+function sceneSessionKey() {
+  // #312: the scene cache identity — the user OBJECT reference (a relogin
+  // yields a fresh object), the character, and the world identity.
+  if (!S.user || !S.character) return null;
+  return {
+    userRef: S.user, characterId: S.character.id,
+    worldId: S.world ? S.world.id : null,
+    worldSeed: S.world ? S.world.seed : null,
+  };
+}
+
+function sceneSessionMatches(key) {
+  if (!key || !S.user || !S.character) return false;
+  const cur = sceneSessionKey();
+  return !!cur && cur.userRef === key.userRef
+    && cur.characterId === key.characterId
+    && cur.worldId === key.worldId && cur.worldSeed === key.worldSeed;
+}
+
+function sceneContextKey(locId = (S.character ? S.character.location_id : null),
+                         locs = S.mapLocations) {
+  // #312: the cache validity key — world hour, readable weather, and the
+  // location's name/type/roster at the moment of capture. Any change
+  // invalidates the cached visual WITHOUT a regeneration POST.
+  if (locId == null || !S.world) return null;
+  const ts = S.world.game_timestamp;
+  const hour = typeof ts === "number" ? Math.floor(ts / 60) : null;
+  const weather = S.weather && S.weather.enabled
+    ? (S.weather.description || "") : "";
+  const loc = (locs || []).find((l) => String(l.id) === String(locId));
+  const occ = loc && Array.isArray(loc.occupants)
+    ? loc.occupants.map((o) => `${o.id}|${o.name}|${o.kind}`).sort().join(",")
+    : "";
+  return [String(locId), hour, weather, loc ? (loc.name || "") : "",
+    loc ? (loc.type || "") : "", occ].join("\u0001");
+}
+
+function syncSceneContext(locs) {
+  // #312: publish-time cache reconciliation — an identity change (user
+  // object ref, character, world) clears the whole cache; a context-key
+  // change at the player's CURRENT location discards that entry; S.scene
+  // re-mounts from whatever cache remains. Entries carry no session field.
+  if (!sceneSessionMatches(S.sceneSession)) {
+    clearSceneCache();
+    S.sceneSession = sceneSessionKey();
+  }
+  const locId = S.character ? S.character.location_id : null;
+  if (locId != null) {
+    const entry = S.sceneCache.get(String(locId));
+    if (entry && entry.contextKey !== sceneContextKey(locId, locs)) {
+      discardSceneEntry(locId);
+    }
+    S.scene = S.sceneCache.get(String(locId)) || null;
+  } else {
+    S.scene = null;
+  }
+}
+
+function cancelSceneFlight() {
+  // #312: navigation away — the in-flight file GET is aborted at the
+  // network boundary (the POST carries no signal; its token checks discard
+  // the result) and the still-generating entry is dropped.
+  const flight = S.sceneFlight;
+  if (!flight) return;
+  S.sceneFlight = null;
+  if (flight.controller) {
+    try { flight.controller.abort(); } catch (e) { /* already aborted */ }
+  }
+  if (flight.entry && flight.entry.status === "generating") {
+    S.sceneCache.delete(String(flight.entry.locationId));
+    if (S.scene === flight.entry) S.scene = null;
+  }
+}
+
+function releaseSceneURLs() {
+  // #312: navigation away — mounted URLs are revoked exactly once; the
+  // blobs are RETAINED so the return can recreate the URL from the cache.
+  for (const entry of S.sceneCache.values()) {
+    if (entry.objectURL) {
+      URL.revokeObjectURL(entry.objectURL);
+      entry.objectURL = null;
+    }
+  }
+}
+
+function clearSceneCache() {
+  // #312: identity-level invalidation — every entry dies (URL revoked once,
+  // blob dropped) and the mounted state resets.
+  for (const entry of S.sceneCache.values()) {
+    if (entry.objectURL) {
+      URL.revokeObjectURL(entry.objectURL);
+      entry.objectURL = null;
+    }
+    entry.blob = null;
+  }
+  S.sceneCache.clear();
+  S.scene = null;
+}
+
+function discardSceneEntry(locId) {
+  // #312: movement/context discard — the entry dies entirely (URL revoked
+  // only while still live, blob dropped); a flight targeting it is cancelled.
+  const entry = S.sceneCache.get(String(locId));
+  if (!entry) return;
+  S.sceneCache.delete(String(locId));
+  if (entry.objectURL) {
+    URL.revokeObjectURL(entry.objectURL);
+    entry.objectURL = null;
+  }
+  entry.blob = null;
+  if (S.scene === entry) S.scene = null;
+  if (S.sceneFlight && S.sceneFlight.entry === entry) cancelSceneFlight();
+}
+
+function sceneUnavailable(entry, kind) {
+  // #312: the single failure landing — one honest status, one toast, one
+  // re-render. Only a still-current flight (or a mounted decode failure)
+  // reaches here; stale flights bail at their token checks.
+  entry.status = "unavailable";
+  entry.errorKind = kind;
+  S.sceneCache.set(String(entry.locationId), entry);
+  S.scene = entry;
+  S.sceneFlight = null;
+  renderSceneVisuals();
+  toast("Визуал недоступен, показываю данные");
+}
+
+function sceneFlightCurrent(flight) {
+  // #312: the flight token — seq/epoch/identity/world/player location/
+  // cache ownership/context key must ALL still match to publish anything.
+  if (!flight || S.sceneFlight !== flight) return false;
+  if (!S.user || !S.character || flight.userRef !== S.user
+    || flight.characterId !== S.character.id
+    || flight.navEpoch !== navEpoch) return false;
+  if ((S.world ? S.world.id : null) !== flight.worldId
+    || (S.world ? S.world.seed : null) !== flight.worldSeed) return false;
+  if (String(S.character.location_id) !== String(flight.locationId)) return false;
+  if (flight.entry !== S.sceneCache.get(String(flight.locationId))) return false;
+  return flight.contextKey === sceneContextKey();
+}
+
+function sceneImageAlt(entry) {
+  // #312: the alt comes from the VALIDATED descriptor only — never from
+  // live data (the image shows the committed scene, not the current roster).
+  const d = entry && entry.descriptor;
+  return `Визуализация места: ${d && d.location && d.location.name
+    ? d.location.name : "—"}`;
+}
+
+function renderSceneVisuals() {
+  // #312: one render entry for both scene hosts — the Place stage (when a
+  // scene stage for the player's CURRENT place is mounted) and the world
+  // Scene panel. Returns the panel box (null on the Place screen).
+  const stage = document.querySelector(".place-stage");
+  if (stage && stage._sceneHosts && S.character
+    && String(stage._sceneLocId) === String(S.character.location_id)) {
+    updateSceneVisual(stage, stage._sceneLocId, S.mapLocations);
+  }
+  return renderScenePanel();
 }
 
 /* ---------- #87 (A5): free-text scene action ---------- */
@@ -1547,16 +1835,11 @@ async function submitSceneAct(refreshScene = true) {
       // Only a real success (or the discarded 200-ok shape) clears it.
       S.sceneActDraft = null;
     }
-    // Committed result → visual refresh: re-inspect ONLY from ready/fallback
-    // (A4 invariant: never reset S.scene, never re-render the whole world —
-    // travel/arrival invalidation stays in renderWorld). Idle keeps the
-    // result line without a refresh.
-    const st = S.scene && S.scene.state;
-    if (refreshScene && r.ok && r.task_id && (st === "ready" || st === "fallback")) {
-      await inspectSurroundings();
-    } else {
-      renderScenePanel();
-    }
+    // #312: a committed scene action is a PRESENTATION refresh only — the
+    // visual lifecycle is owned by the explicit inspect affordance, so the
+    // success path never re-inspects (no /visual/scenes POST from here).
+    // Idle keeps the result line without a refresh.
+    renderScenePanel();
   } catch (e) {
     // Same error phrasing as the A3 travel bar (409/401/4xx surfaces).
     // #303 review F2: the persistent result line localizes §61 refusals too —
@@ -1801,6 +2084,10 @@ function welcomeCard() {
 
 async function viewWorld() {
   navEpoch++;  // #302: every load start is a new navigation generation
+  // #312: direct re-entries (arrival, gotoWorld) bypass route() — the scene
+  // flight does not survive a view load; mounted URLs release (blobs kept).
+  cancelSceneFlight();
+  releaseSceneURLs();
   location.hash = "#/world";
   const loading = el("div", { class: "muted" }, "Загрузка…");
   app.replaceChildren(topbar("#/world"), loading);
@@ -2441,7 +2728,7 @@ function renderWorld(locs, tasksData) {
   // without movement keeps the scene (session context preservation); the
   // poll publication path carries the same rule (pollEvents).
   if (observedPlayerLocId !== null && observedPlayerLocId !== ch.location_id) {
-    S.scene = null;
+    discardSceneEntry(observedPlayerLocId);
   }
   observedPlayerLocId = ch.location_id;
 
@@ -2485,8 +2772,11 @@ function renderWorld(locs, tasksData) {
   const activeCount = tasksData && tasksData.active ? tasksData.active.length : 0;
 
   const portraitBox = portraitBlock();
-  const sceneBox = sceneBlock();
   S.mapLocations = locs;
+  // #312: publish BEFORE the scene hosts render — the panel reads the cache
+  // against the fresh catalog (identity + context-key reconciliation).
+  syncSceneContext(locs);
+  const sceneBox = sceneBlock();
 
   const characterName = ch.name || `${ch.first_name || ""} ${ch.last_name || ""}`;
   const currentLoc = locs.find((l) => l.id === ch.location_id);
@@ -3107,6 +3397,10 @@ function renderHome(homeId, fresh, home) {
 
 async function viewLocation(locId) {
   navEpoch++;  // #302: every load start is a new navigation generation
+  // #312: the scene flight does not survive a place load; mounted URLs
+  // release (blobs kept — the cache-return path recreates them).
+  cancelSceneFlight();
+  releaseSceneURLs();
   const viewHash = `#/location/${locId}`;
   // #72 review F1: a leading-zero deep link (#/location/05) dispatches with
   // locId=5 while the raw hash stays "#/location/05" — the hash guards below
@@ -3204,6 +3498,10 @@ async function viewLocation(locId) {
   }
   // #303: publish only after the stale guard — same discipline as world/weather; renderPlace derives isCurrent / «Вы сейчас» / placeDialogueNpcs from it.
   if (charData) S.character = { ...S.character, ...charData };
+  // #312: publish the catalog + reconcile the scene cache BEFORE the place
+  // renders — the stage reads the cache against the fresh state.
+  S.mapLocations = locs;
+  syncSceneContext(locs);
   const place = locs.find((l) => l.id === locId);
   if (!place) {
     // #72: honest missing-place state — the catalog has no such id.
@@ -3264,13 +3562,11 @@ function renderPlace(locId, place, locs, tasksData) {
     el("span", { class: "place-topbar-title" },
       `/ ${place.name || "Без названия"}`));
 
-  // Stage: a large STATIC placeholder — no Flux call, no upload affordance
-  // (the asset lifecycle is #312's). The honest photo note carries over
-  // from the previous hero band.
-  const stage = el("div", { class: "place-stage" },
-    el("span", { class: "place-stage-icon", "aria-hidden": "true" },
-      placeTypeIcon(place.type)),
-    el("span", { class: "muted place-stage-note" }, "Фото места недоступно"));
+  // Stage: the #312 text-first scene visual — heading, live weather +
+  // confirmed-data summary, image host, live-region status, and ONE stable
+  // button (current place only). No Flux call on entry; the asset lifecycle
+  // is owned by the scene cache/flight helpers.
+  const stage = buildSceneVisual(locId, locs);
 
   // Context panel — everything about being (or not being) here. World time
   // and weather keep the #72 honest-missing wording («недоступно», never a
@@ -3441,6 +3737,102 @@ function renderPlace(locId, place, locs, tasksData) {
       el("div", { class: "place-grid" },
         stage,
         el("section", { class: "panel place-context" }, ...contextKids))));
+}
+
+/* #312: the Place stage scene visual. Module-level on purpose: the m238
+   renderPlace-body census holds its isCurrent branches at one each — these
+   helpers use a `current` local (String comparison) and stay outside the
+   branch bodies. The stage hosts are created ONCE and patched in place
+   (the button node is never deleted — focus retention across state swaps). */
+const SCENE_IDLE_LABEL = "Показать сцену";
+
+function buildSceneVisual(locId, locs) {
+  const heading = el("h2", { class: "scene-heading" });
+  const summary = el("div", { class: "scene-live-summary" });
+  const image = el("div", { class: "scene-image-host" });
+  const status = el("p", { class: "scene-status", role: "status",
+    "aria-live": "polite" });
+  const button = el("button", { type: "button",
+    onclick: () => inspectSurroundings() });
+  const current = String(locId) === String(S.character
+    && S.character.location_id);
+  // Remote preview: NO generation button at all (the move CTA stays in the
+  // context panel) — the button node exists only for the current place.
+  const stage = el("div", { class: "place-stage" },
+    heading, summary, image, status, ...(current ? [button] : []));
+  stage._sceneLocId = locId;
+  stage._sceneHosts = { heading, summary, image, status, button };
+  updateSceneVisual(stage, locId, locs);
+  return stage;
+}
+
+function updateSceneVisual(stage, locId, locs) {
+  // Patch the stable stage hosts from the scene cache — never a rebuild,
+  // never a request. The summary ALWAYS reflects the live loaded data; the
+  // descriptor feeds only the img alt.
+  const h = stage._sceneHosts;
+  if (!h) return;
+  const current = String(locId) === String(S.character
+    && S.character.location_id);
+  const data = current ? sceneFallbackData() : sceneFallbackData(locId, locs);
+  const ts = S.world && typeof S.world.game_timestamp === "number"
+    ? S.world.game_timestamp : null;
+  h.heading.textContent = ts !== null
+    ? `${data.locationName} · ${dayTime(ts)}` : data.locationName;
+  // Weather line: readable description when enabled, honest gap otherwise —
+  // a disabled description never leaks.
+  const weatherText = S.weather && S.weather.enabled
+    ? (S.weather.description || "Погода недоступна") : "Погода недоступна";
+  h.summary.replaceChildren(
+    ...[weatherText, ...sceneSummaryLines(data)]
+      .map((t) => el("div", { class: "muted" }, t)));
+  const entry = S.sceneCache.get(String(locId)) || null;
+  // A cache RETURN recreates the objectURL from the retained blob (the
+  // mounted URL was revoked on navigation away); the PANEL never does this.
+  if (entry && entry.status === "ready" && !entry.objectURL && entry.blob) {
+    entry.objectURL = URL.createObjectURL(entry.blob);
+  }
+  if (entry && entry.status === "ready" && entry.objectURL) {
+    const img = el("img", { src: entry.objectURL, alt: sceneImageAlt(entry) });
+    img.addEventListener("error", () => {
+      // Token check #8: only the still-mounted entry for THIS place reacts
+      // to a decode failure — a superseded entry is never touched. Cache
+      // membership + ready ⇒ the full flight token held at ready-time; every
+      // token change (movement/identity/context) discards the entry first
+      // (discardSceneEntry/syncSceneContext/clearSceneCache), so this guard
+      // is equivalent to a token re-check without a live flight to compare.
+      if (S.sceneCache.get(String(locId)) !== entry
+        || entry.status !== "ready") return;
+      URL.revokeObjectURL(entry.objectURL);
+      entry.objectURL = null;
+      sceneUnavailable(entry, "decode");
+    });
+    h.image.replaceChildren(img);
+  } else {
+    h.image.replaceChildren();
+  }
+  // Remote preview: text-first composition only — no button, no status.
+  if (!current) return;
+  if (entry && entry.status === "generating") {
+    h.status.textContent = "Создаём визуализацию…";
+  } else if (entry && entry.status === "unavailable") {
+    h.status.textContent = "Визуал недоступен";
+  } else {
+    h.status.textContent = "";
+  }
+  if (entry && entry.status === "generating") {
+    h.button.textContent = "Создаём сцену…";
+    h.button.setAttribute("aria-disabled", "true");
+  } else if (entry && entry.status === "ready") {
+    h.button.textContent = "Сцена показана";
+    h.button.setAttribute("aria-disabled", "true");
+  } else if (entry && entry.status === "unavailable") {
+    h.button.textContent = "Повторить визуализацию";
+    h.button.setAttribute("aria-disabled", "false");
+  } else {
+    h.button.textContent = SCENE_IDLE_LABEL;
+    h.button.setAttribute("aria-disabled", "false");
+  }
 }
 
 async function viewExternal() {
@@ -3777,7 +4169,7 @@ async function pollEvents() {
     // to the location it was inspected at (m153/m156); a poll that observes
     // the player at a DIFFERENT location drops it (same rule as renderWorld).
     if (observedPlayerLocId !== null && observedPlayerLocId !== character.location_id) {
-      S.scene = null;
+      discardSceneEntry(observedPlayerLocId);
     }
     observedPlayerLocId = character.location_id;
     // F1: LOD focus follows the authoritative player location on every poll
@@ -3795,6 +4187,15 @@ async function pollEvents() {
       S.world = world;
       const clock = document.getElementById("clock");
       if (clock) clock.textContent = dayTime(world.game_timestamp);
+    }
+    // #312: reconcile the scene cache against the fresh publish (identity +
+    // context key), then patch the mounted place stage IN PLACE — a tick
+    // never generates (no POST from the poll path).
+    syncSceneContext(locs);
+    const sceneStage = document.querySelector(".place-stage");
+    if (sceneStage && sceneStage._sceneHosts
+      && String(sceneStage._sceneLocId) === String(character.location_id)) {
+      updateSceneVisual(sceneStage, sceneStage._sceneLocId, locs);
     }
     rerenderLivingMap();
 

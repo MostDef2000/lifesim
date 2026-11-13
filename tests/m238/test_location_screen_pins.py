@@ -146,7 +146,17 @@ def test_place_honest_literal_pins():
     # The stage's photo honesty note, exactly once.
     # #303: re-anchored — the note moved from the hero band to the static
     # .place-stage placeholder (same wording, same honesty).
-    assert js.count('"Фото места недоступно"') == 1
+    # #312: the static photo placeholder is superseded by the text-first
+    # stage composition (the old «Фото места недоступно» note is gone).
+    assert js.count('"Фото места недоступно"') == 0
+    # #312: the stage's «Показать сцену» affordance is current-place-only
+    # (present in the isCurrent branch, absent from the remote branch).
+    rbody = _render_place_body(js)
+    remote = rbody[rbody.index("if (!isCurrent) {"):
+                 rbody.index("if (isCurrent) {")]
+    current = rbody[rbody.index("if (isCurrent) {"):]
+    assert current.count('"Показать сцену"') == 1
+    assert remote.count('"Показать сцену"') == 0
     # Events are a loaded SAMPLE, never complete history…
     assert js.count('"События в загруженной выборке"') == 1
     # …with the honest empty copy.
@@ -374,7 +384,8 @@ def test_place_css_pins():
     # block tail — pinned by count, not by absence).
     game_rules = (
         ".place-game {", ".place-topbar {", ".place-topbar-title {",
-        ".place-stage-icon {", ".place-stage-note {", ".place-context {",
+        # #312: .place-stage-icon is removed with the static photo placeholder.
+        ".place-stage-note {", ".place-context {",
         ".place-context-name {", ".place-badge {", ".place-badge-here {",
         ".place-cta {", ".place-nearby-row {", ".place-act-hint {",
         ".place-task {", ".place-task-label {", ".place-scene-act {",

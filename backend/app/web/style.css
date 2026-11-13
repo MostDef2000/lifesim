@@ -3449,23 +3449,22 @@ button.danger:hover { background: #93301f; }
   gap: 12px;
   align-items: start;
 }
-/* stage — large static placeholder: warm gradient, decorative type glyph,
-   honest photo note; no imagery is implied and none is fetched (#312 owns
-   the asset lifecycle). */
+/* stage — the #312 scene visual: a text-first composition (heading, live
+   summary, image host, status, one stable button) over the warm panel
+   gradient; the asset lifecycle stays in app.js. No fixed min-height —
+   the stage sizes to its content. */
 .place-stage {
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
   gap: 10px;
-  min-height: 280px;
   border: 1px solid var(--w-warm-line);
   border-radius: 12px;
   background:
     linear-gradient(135deg, var(--w-warm), rgba(12, 19, 25, 0.6) 70%),
     var(--w-panel-deep);
 }
-.place-stage-icon { font-size: 56px; line-height: 1; color: var(--w-accent); }
 .place-stage-note { font-size: 12px; }
 .place-context { display: grid; gap: 8px; align-content: start; }
 .place-context-name { font-size: 18px; font-weight: 600; color: var(--w-text); }
@@ -3522,6 +3521,12 @@ button.danger:hover { background: #93301f; }
   .place-grid { grid-template-columns: minmax(0, 1fr); }
   .place-stage { min-height: 200px; }
 }
+
+/* #312: Place stage scene visual — the heading names the place (+ day time);
+   the image fills the stage width at its natural aspect ratio (no fixed
+   box, no crop). */
+.scene-heading { margin: 0; font-size: 18px; font-weight: 600; color: var(--w-text); }
+.scene-image-host img { display: block; width: 100%; height: auto; max-width: 100%; }
 
 /* #175: connection banner — persistent offline signal driven by consecutive
    pollEvents failures (WS close is routine on navigation, never drives it).
