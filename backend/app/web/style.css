@@ -274,11 +274,19 @@ textarea {
    rows (top edge ~111px, bottom 8px) and the right-side control stack sits at
    176/220/262px — so the card docks to the TOP of the viewport: it never
    overlaps .world-pill, never covers .world-inspect, and leaves the map
-   tappable everywhere below it. Dismissible (× / Escape) keeps it transient. */
+   tappable everywhere below it. Dismissible (× / Escape) keeps it transient.
+   #301 (G): the HUD compact band now owns the top strip too, so the card's
+   top edge reads --poi-top (set inline on #poi-card-host by the panel's
+   expand toggle in app.js): 156px collapsed = 12px panel top + 136px compact
+   cap + 8px gap; calc(42vh + 20px) expanded mirrors the pinned 42% panel cap.
+   HUD-band stacking is STATIC offsets by design — the vm-harness (m302/m310)
+   has no getBoundingClientRect, and a JS-measured offset would drift with
+   font loading anyway. The var() fallback keeps the pre-#301 dock position
+   if the toggle has not run yet. */
 @media (max-width: 720px) {
   .poi-card {
     position: fixed;
-    top: 8px;
+    top: var(--poi-top, 156px);
     right: 8px;
     bottom: auto;
     left: 8px;
@@ -1252,7 +1260,28 @@ body.landing-mode #app {
   border-radius: 9px;
   box-shadow: var(--w-shadow-soft);
 }
-.world-shell .map-toolbar.map-quality { top: 50px; }
+/* #301 (G): the quality toolbar is a settings affordance, not HUD — visually
+   de-promoted (translucent panel, smaller padding/type, dimmer ink) so it
+   never competes with the panel/POI layer for attention. Every control keeps
+   its full behaviour: the hover/active rules below still apply (higher
+   specificity here only lowers contrast, never disables state). */
+.world-shell .map-toolbar.map-quality {
+  top: 50px;
+  padding: 3px 5px;
+  background: rgba(255, 249, 239, 0.82);
+  border-color: rgba(48, 39, 31, 0.08);
+  box-shadow: none;
+}
+.world-shell .map-toolbar.map-quality button {
+  padding: 2px 7px;
+  color: rgba(105, 89, 76, 0.75);
+  font-size: 11px;
+}
+.world-shell .map-toolbar.map-quality button.active {
+  background: rgba(134, 85, 30, 0.08);
+  border-color: rgba(134, 85, 30, 0.3);
+  color: rgba(134, 85, 30, 0.85);
+}
 .world-shell .map-toolbar button {
   padding: 3px 9px;
   background: transparent;
@@ -1436,6 +1465,73 @@ body.landing-mode #app {
 }
 .world-admin-link:hover { color: var(--w-accent); }
 
+/* ---- #301 World HUD: «Сейчас» line + collapsible details ---- */
+/* The «Сейчас» row is the one glanceable line that stays visible in the
+   mobile compact band (#301 F); everything below it folds into
+   .world-collapsible (no desktop styling needed — plain flow inside the
+   panel). All colors ride the panel's --w-* token family. */
+.world-now { margin-top: 12px; }
+.world-now-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+.world-now-label {
+  flex: 0 0 auto;
+  color: var(--w-dim);
+  font-size: 11.5px;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+.world-now-state { color: var(--w-dim); font-size: 13px; }
+.world-now-task {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 7px;
+  flex: 1 1 auto;
+  min-width: 0;
+  color: var(--w-text);
+  font-size: 13.5px;
+}
+.world-now-status {
+  flex: 0 0 auto;
+  padding: 1px 8px;
+  background: var(--w-warm);
+  border: 1px solid var(--w-warm-line);
+  border-radius: 999px;
+  color: var(--w-accent);
+  font-size: 11px;
+  white-space: nowrap;
+}
+.world-now-type {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.world-now-mode { margin: 6px 0 0; color: var(--w-dim); font-size: 12.5px; }
+.world-now-profile {
+  margin-top: 6px;
+  padding: 3px 10px;
+  background: transparent;
+  border: 1px solid var(--w-warm-line);
+  border-radius: 8px;
+  color: var(--w-accent);
+  font-size: 12px;
+  cursor: pointer;
+}
+.world-now-profile:hover { background: var(--w-warm); }
+/* Expand control exists only for the mobile compact band (#301 F) — hidden
+   on desktop, revealed inside the ≤720px block at the end of this file. */
+.world-panel-expand { display: none; }
+/* Island events preview: same .ev row language as the feed, tightened. */
+.world-island-events .world-sec-h { margin-top: 14px; }
+.world-island-events .ev { margin-top: 6px; }
+/* Compact needs density inside the panel (bare .world-mini-needs rule above
+   stays — m121 pins it; this only tightens the panel instance). */
+.world-panel .world-mini-needs { gap: 1px; }
+.world-panel .world-mini-needs .need { margin-top: 5px; }
+
 /* ---- floating nav pill: the world screen's navigation (INSTEAD of the topbar) ---- */
 .world-pill {
   position: fixed;
@@ -1570,7 +1666,8 @@ body.landing-mode #app {
   border-color: var(--w-accent);
   color: var(--w-text);
 }
-.world-autonomous-note { flex: 1 1 auto; font-size: 13px; }
+/* #301: the .world-autonomous-note rule was removed with its only usage —
+   the autonomy hint moved into the panel HUD (see .world-now* below). */
 
 /* no-coords fallback list floats beside the context panel */
 .world-map-fallback {
@@ -3308,6 +3405,33 @@ button.danger:hover { background: #93301f; }
    diverge later without touching the helpers) */
 .game-state-empty, .game-state-loading { color: var(--game-dim); }
 .game-state .game-action { margin-top: 8px; }
+
+/* #301 (F/G): mobile compact HUD — additive block (the pinned #289 mobile
+   overrides above stay untouched). The panel collapses to a one-glance band:
+   header + «Сейчас» row, hard-capped at 136px (12px panel top + 136px + 8px
+   gap = the 156px --poi-top dock for the POI card). Needs, island events and
+   the feed hide until «Детали» expands the panel; expanded, the pinned 42%
+   cap and the panel's own scroll take over again. Inserted BEFORE the #175
+   conn-banner block — the appended-only tail convention (m175 and friends)
+   pins .conn-banner.hidden as the file's last rule. */
+@media (max-width: 720px) {
+  .world-panel:not(.world-panel--expanded) {
+    max-height: 136px;
+    overflow: hidden;
+    /* live-probe fit (#301 review blocker): 14/16px paddings + the 12px chip
+       gap pushed the «Детали» button ~16px past the 136px cap at 390×844 —
+       overflow:hidden clipped it. Compress to 8 + head 81 + row 32 + 8 = 129. */
+    padding-top: 8px;
+    padding-bottom: 8px;
+  }
+  .world-panel:not(.world-panel--expanded) .world-chip {
+    margin-top: 4px;
+    padding-block: 3px;
+  }
+  .world-panel:not(.world-panel--expanded) .world-sub { margin-top: 0; }
+  .world-panel:not(.world-panel--expanded) .world-collapsible { display: none; }
+  .world-panel-expand { display: inline-flex; }
+}
 
 /* #175: connection banner — persistent offline signal driven by consecutive
    pollEvents failures (WS close is routine on navigation, never drives it).
