@@ -92,6 +92,10 @@ function resetGameUiContext() {
   S.chatSessionId = null;
   S.mapFocusManual = false;
   S.mapFocusAnchor = null;
+  // #311: the session-owned feed controller tears down destructively — the
+  // transport dies, the stream state resets, the listeners invalidate
+  // (logout / 401 / character switch start a clean feed).
+  worldFeedController.teardown();
 }
 
 /* ---------- helpers ---------- */
@@ -233,7 +237,9 @@ function hideConnBanner() {
 
 async function api(path, opts = {}) {
   // #269: private routing metadata — never forwarded to fetch.
-  const { worldBootstrap: bootstrapFlight, ...fetchOpts } = opts;
+  // #311: feedPoll rides the same lane — the poll flight's session token,
+  // used to exempt a STALE flight's 401 from the global fail-closed deauth.
+  const { worldBootstrap: bootstrapFlight, feedPoll: feedPollFlight, ...fetchOpts } = opts;
   // #269: /world GETs join the pending cold-entry bootstrap flight for the
   // SAME session context (one GET during a route handoff, S17/S18); with no
   // bootstrap in flight every caller still fetches fresh (existing loader
@@ -261,11 +267,27 @@ async function api(path, opts = {}) {
     // superseded flight is still not the current one). A CURRENT 401
     // (bootstrap included) and every other caller keep the global
     // fail-closed deauth + reroute.
-    const stale = bootstrapFlight && (S.user !== bootstrapFlight.user
+    // #311: a feed-poll flight carries the same exemption — a stale poll
+    // resolving 401 must not deauthenticate the CURRENT session. Stale =
+    // the flight's token no longer matches the live session identity, OR
+    // the flight lost currency (a newer tick superseded it, a teardown
+    // nulled the slot, or a navigation advanced the generation) — a
+    // superseded same-user flight's 401 is just as stale as a dead
+    // session's. A CURRENT flight's genuine 401 keeps the global
+    // fail-closed deauth + reroute.
+    const stale = (bootstrapFlight && (S.user !== bootstrapFlight.user
       || !S.character || S.character.id !== bootstrapFlight.charId
-      || worldGet !== bootstrapFlight);
+      || worldGet !== bootstrapFlight))
+      || (feedPollFlight && (S.user !== feedPollFlight.userRef
+        || !S.character || S.character.id !== feedPollFlight.charId
+        || worldFeedPollFlight !== feedPollFlight
+        || worldFeedNavGen !== feedPollFlight.navGen));
     if (!stale) {
       S.user = null;
+      // #311: fail-closed — a 401 just proved this session dead, so mark it
+      // probed: the deauth reroute's boot probe must not re-fetch /auth/me
+      // and resurrect the user from a stale-200 (a dead session stays dead).
+      S.authProbed = true;
       S.world = null;  // the cached world belonged to the dead session
       resetGameUiContext();  // #302: the dead session's UI state must not leak
       if (path !== "/auth/me") route();
@@ -351,7 +373,11 @@ async function route() {
   cancelSceneFlight();
   releaseSceneURLs();
   if (!location.hash) { location.hash = "#/world"; return; }  // #161: normalize once; the hashchange fires route again with a concrete view
-  stopFeed();
+  // #311: the session-owned feed controller reconciles the navigation — the
+  // view subscription detaches, the identity is re-checked (a session change
+  // tears down destructively), and the transport KEEPS RUNNING across
+  // screens (no per-navigation stop/start churn).
+  worldFeedController.onRoute();
   if (!S.user && !S.authProbed) {
     try { S.user = await api("/auth/me"); }
     catch (e) { S.user = null; S.authProbed = true; }
@@ -2150,7 +2176,14 @@ async function viewWorld() {
     }
     gameUiContext.viewLocationId = null;
     renderWorld(locs, tasksData);
-    startFeed();
+    // #311: start (identity-reconciled, idempotent — NO transport restart on
+    // returning to World) + attach the world view's feed listener. The World
+    // view also fires the ONE-TIME session bootstrap poll (place/chat
+    // entries start the transport without it — m269 S10 keeps its single
+    // /world fetch on a place cold boot).
+    worldFeedController.start();
+    worldFeedController.initialPoll();
+    worldFeedController.attachView(worldFeedListener);
   } catch (e) {
     // #302: a superseded load paints no retry/toast into a newer view.
     if (epoch !== navEpoch || S.user !== ctxUser || !S.character
@@ -3001,12 +3034,15 @@ function isOwnMoveEvent(e) {
 }
 
 function onOwnArrival() {
-  if (S.travel && S.travel.state === "travelling") {
-    const destName = S.travel.destName || "";
-    S.travel = null;
-    toast(`Вы прибыли: ${destName}`);
-  }
+  // #311: the travel state machine settles on EVERY screen (the arrival
+  // happened in the world, not in a view), but the feedback — the toast and
+  // the map re-render — stays on #/world: the feed now runs on every screen,
+  // and non-World surfaces own the quiet indicator instead of a toast.
+  const arrival = (S.travel && S.travel.state === "travelling")
+    ? (S.travel.destName || "") : null;
+  if (arrival !== null) S.travel = null;
   if (location.hash !== "#/world") return;
+  if (arrival !== null) toast(`Вы прибыли: ${arrival}`);
   viewWorld();
 }
 
@@ -3584,6 +3620,10 @@ function renderPlace(locId, place, locs, tasksData) {
     el("span", { class: isCurrent
       ? "place-badge place-badge-here" : "place-badge" },
       isCurrent ? "Вы здесь" : "Другое место"),
+    // #311: the quiet live-events indicator — empty on render, filled by the
+    // feed controller's place listener when a LIVE event arrives (muted
+    // style rides the shared .muted class; no modal, no route change).
+    el("div", { class: "place-feed-quiet muted" }, ""),
   ];
   if (!isCurrent) {
     // Remote place: read-only — the player's own location is stated
@@ -3737,6 +3777,10 @@ function renderPlace(locId, place, locs, tasksData) {
       el("div", { class: "place-grid" },
         stage,
         el("section", { class: "panel place-context" }, ...contextKids))));
+  // #311: the feed controller starts (idempotent) + the place view attaches
+  // its quiet listener — a cold deep-link into a place starts the feed too.
+  worldFeedController.start();
+  worldFeedController.attachView(placeFeedListener);
 }
 
 /* #312: the Place stage scene visual. Module-level on purpose: the m238
@@ -4099,14 +4143,133 @@ function feedRow(ev) {
       : null);
 }
 
-function startFeed() {
+/* ---------- #311: the session-owned world feed controller ----------
+   One owner of the live event transport (WS + REST poll) across every
+   screen. The controller exclusively owns the S feed/transport state
+   (declared in S above); its session metadata lives in the module-local
+   bindings below (same convention as navEpoch/gameUiContext). Views never
+   stop/start the transport: they start() the controller (identity-
+   reconciled, idempotent) and attachView() a listener that receives
+   committed event batches. */
+
+// #311: module-local controller metadata.
+let worldFeedRunning = false;
+let worldFeedToken = null;  // { userRef, charId, generation } — user OBJECT identity
+let worldFeedGeneration = 0;
+let worldFeedNavGen = 0;  // advanced by onRoute(); stale-timer/flight checks
+let worldFeedListeners = new Set();
+let worldFeedViewDisposer = null;
+let worldFeedReconnectTimer = null;
+let worldFeedPollFlight = null;  // { controller, userRef, charId, navGen }
+let worldFeedInitialPollDone = false;
+
+// #311: the live-event gate shared by the quiet-indicator listeners —
+// bootstrap replay (id at or below the replay gate) never surfaces as a
+// «В мире произошло…» notice. One shared helper gates both quiet listeners
+// (and keeps the replay-gate census at its code sites only).
+function worldFeedHasLive(fresh) {
+  return fresh.some((ev) => ev.id > S.bootCursor);
+}
+
+// #311: a poll flight may commit only while it is still the current one —
+// the controller running, the same session token, the same navigation
+// generation, and still the registered flight (a teardown aborts + clears).
+function worldFeedFlightCurrent(flight) {
+  return worldFeedRunning && worldFeedToken
+    && worldFeedPollFlight === flight
+    && worldFeedToken.userRef === flight.userRef
+    && worldFeedToken.charId === flight.charId
+    && flight.navGen === worldFeedNavGen;
+}
+
+// #311: publish a committed batch to the listeners. One bad listener must
+// never break the feed — exceptions are isolated per listener.
+function worldFeedPublishAll(fresh) {
+  for (const listener of [...worldFeedListeners]) {
+    try { listener(fresh); } catch (e) { /* isolated: the feed outlives it */ }
+  }
+}
+
+function worldFeedSubscribe(listener) {
+  if (!worldFeedRunning || typeof listener !== "function") return () => {};
+  worldFeedListeners.add(listener);
+  return () => { worldFeedListeners.delete(listener); };
+}
+
+function worldFeedDetachView() {
+  if (worldFeedViewDisposer) { worldFeedViewDisposer(); worldFeedViewDisposer = null; }
+}
+
+function worldFeedAttachView(listener) {
+  worldFeedDetachView();
+  worldFeedViewDisposer = worldFeedSubscribe(listener);
+}
+
+// #311: the tracked, token-checked reconnect timer (replaces the untracked
+// setTimeout in ws.onclose). The callback re-checks the session token, the
+// controller GENERATION, and the navigation generation — a timer armed
+// before a teardown/restart cycle or a navigation must never open a socket
+// for a newer context.
+function armReconnect(delay) {
+  if (worldFeedReconnectTimer) clearTimeout(worldFeedReconnectTimer);
+  const armedNavGen = worldFeedNavGen;
+  const armedGeneration = worldFeedGeneration;
+  worldFeedReconnectTimer = setTimeout(() => {
+    worldFeedReconnectTimer = null;
+    if (!worldFeedRunning || !worldFeedToken) return;  // session torn down
+    if (armedGeneration !== worldFeedGeneration) return;  // #311: a teardown/restart cycle invalidated this timer
+    if (armedNavGen !== worldFeedNavGen) return;  // stale navigation — onRoute re-arms
+    if (S.ws) return;  // a socket already exists
+    connectWs();
+  }, delay);
+}
+
+// #311: identity-reconciled, idempotent start — running for the same
+// identity is a no-op (no second WS, no second interval, no poll re-arm);
+// a different identity tears down destructively and starts fresh.
+function worldFeedStart() {
+  if (!S.user) return;
+  const userRef = S.user;
+  const charId = S.character ? S.character.id : null;
+  if (worldFeedRunning && worldFeedToken
+    && worldFeedToken.userRef === userRef
+    && worldFeedToken.charId === charId) return;
+  if (worldFeedRunning) worldFeedTeardown();
+  worldFeedRunning = true;
+  worldFeedGeneration += 1;
+  worldFeedToken = { userRef, charId, generation: worldFeedGeneration };
   connectWs();
-  if (S.pollTimer) return;  // #161: never stack a second poll loop — leaked intervals multiply with navigation history
-  S.pollTimer = setInterval(pollEvents, 5000);
+  if (!S.pollTimer) S.pollTimer = setInterval(pollEvents, 5000);  // #161: never stack a second poll loop
+}
+
+// #311: the ONE-TIME session bootstrap poll — fired by the WORLD view only.
+// A place/chat cold entry starts the transport (WS + interval) but must not
+// add the poll's /world refresh on top of its own load (m269 S10: a place
+// cold boot keeps its single /world fetch). Once per session — navigation
+// never re-arms it; a teardown (logout/401/character switch) re-arms it for
+// the next session.
+function worldFeedInitialPoll() {
+  if (worldFeedInitialPollDone) return;
+  worldFeedInitialPollDone = true;
   pollEvents();
 }
 
-function stopFeed() {
+// #311: destructive teardown — invalidate the token and every listener,
+// close the WS, cancel the reconnect + hello-deadline timers, abort the
+// in-flight poll, reset the stream + liveness state (logout / 401 /
+// character switch / resetGameUiContext all land here).
+function worldFeedTeardown() {
+  worldFeedRunning = false;
+  worldFeedToken = null;
+  worldFeedListeners.clear();
+  worldFeedDetachView();
+  if (worldFeedReconnectTimer) { clearTimeout(worldFeedReconnectTimer); worldFeedReconnectTimer = null; }
+  if (worldFeedPollFlight) {
+    if (worldFeedPollFlight.controller) {
+      worldFeedPollFlight.controller.abort();  // a deferred poll must resolve into nothing
+    }
+    worldFeedPollFlight = null;
+  }
   if (S.pollTimer) { clearInterval(S.pollTimer); S.pollTimer = null; }
   if (S.helloDeadline) { clearTimeout(S.helloDeadline); S.helloDeadline = null; }  // #258: a stopped feed's hello deadline must never fire
   if (S.ws) {
@@ -4116,6 +4279,76 @@ function stopFeed() {
     S.wsCursorSent = false;  // #179: the #161 detach means onclose never fires for this socket — re-arm the handshake flag here so the next connection re-declares its cursor
     try { w.close(); } catch (e) { /* already closed */ }
   }
+  S.feed = [];
+  S.cursor = 0;
+  S.feedInit = "pending";
+  S.feedFetched = false;
+  S.bootCursor = Infinity;  // #177: back to "no live events until proven"
+  S.wsTries = 0;
+  S.connLost = false;
+  S.pollFails = 0;
+  hideConnBanner();
+  worldFeedInitialPollDone = false;
+}
+
+// #311: navigation dispatch — detach the view subscription, reconcile the
+// identity (a session change tears down destructively), and keep the
+// transport running across screens. A pending reconnect timer is stale
+// after this dispatch (its callback is navGen-checked), so a fresh one is
+// armed while the socket is down and tries remain.
+function worldFeedOnRoute() {
+  worldFeedNavGen += 1;
+  worldFeedDetachView();
+  const userRef = S.user;
+  const charId = S.character ? S.character.id : null;
+  if (worldFeedRunning && worldFeedToken
+    && (worldFeedToken.userRef !== userRef || worldFeedToken.charId !== charId)) {
+    worldFeedTeardown();
+    return;
+  }
+  if (worldFeedRunning && !S.ws && S.wsTries >= 1 && S.wsTries <= 3) {
+    armReconnect(2000 * S.wsTries);  // clears the stale timer first
+  }
+}
+
+// #311: the controller — the single session-owned owner of the feed.
+const worldFeedController = {
+  start: worldFeedStart,
+  subscribe: worldFeedSubscribe,
+  stop: worldFeedTeardown,
+  teardown: worldFeedTeardown,
+  onRoute: worldFeedOnRoute,
+  attachView: worldFeedAttachView,
+  initialPoll: worldFeedInitialPoll,
+};
+
+// #311: the World view's feed listener — the feed box and the island
+// preview re-render on every committed batch (moved out of the transport
+// frame handler / REST poll, which are view-agnostic now).
+function worldFeedListener(fresh) {
+  const feedBox = document.getElementById("feed");
+  if (feedBox) {
+    feedBox.replaceChildren(el("h2", { class: "world-sec-h" }, "События"),
+      ...S.feed.slice(-40).reverse().map(feedRow));
+  }
+  refreshIslandPreview();  // #301: the panel's island preview follows the feed
+}
+
+// #311: the Place view's quiet listener — a LIVE event (beyond the boot
+// replay marker) while the player reads a place surfaces as the muted
+// «В мире произошло…» line; a fresh render starts empty (no stale notice).
+function placeFeedListener(fresh) {
+  if (!worldFeedHasLive(fresh)) return;
+  const node = document.querySelector(".place-feed-quiet");
+  if (node) node.textContent = "В мире произошло…";
+}
+
+// #311: the Chat view's quiet listener — same contract on a dedicated
+// muted node near the heading; never touches the draft/typing/send surface.
+function chatFeedListener(fresh) {
+  if (!worldFeedHasLive(fresh)) return;
+  const node = document.getElementById("chat-feed-quiet");
+  if (node) node.textContent = "В мире произошло…";
 }
 
 // #258: the 5s hello window — a fresh page session waits for the WS hello
@@ -4144,20 +4377,41 @@ function armHelloDeadline(ws) {
 async function pollEvents() {
   if (S.pollBusy) return;  // #161: a view re-render must not double-fire the poll
   S.pollBusy = true;
+  // #311: the poll flight — the token every post-await guard re-checks, so
+  // a tick deferred across a navigation or a session teardown commits
+  // nothing; the AbortController lets the teardown cancel the held request.
+  // The controller is defensive (same tolerance as the #312 scene flight):
+  // an environment without AbortController still gets a fully working poll
+  // — the token checks alone discard stale flights — and a constructor
+  // failure here must never wedge the busy flag (the creation sits BEFORE
+  // the try on purpose, so it cannot be mistaken for a poll failure).
+  let controller = null;
+  try { controller = new AbortController(); } catch (e) { controller = null; }
+  const flight = {
+    controller,
+    userRef: S.user,
+    charId: S.character ? S.character.id : null,
+    navGen: worldFeedNavGen,
+  };
+  worldFeedPollFlight = flight;
   try {
     await pollEventsFeed();
+    if (!worldFeedFlightCurrent(flight)) return;  // #311: stale flight — commit nothing
 
     // A2 Living Map: refresh authoritative read state, then rebuild presentation.
     const previousDay = S.world ? S.world.day : null;
     const character = await api(`/characters/${S.character.id}`);
+    if (!worldFeedFlightCurrent(flight)) return;  // #311: stale flight
     const world = await api("/world");
     // #269: null = the joined bootstrap lost ownership (stale) — the tick is
     // stale: drop it silently BEFORE the extra awaits (no .day dereference,
     // no shared write, no poll-failure mark); a newer load owns the shared
     // state (S22). S.character re-checked: a dead context must not drive
     // the rest of the tick.
-    if (!world || !S.character) return;
+    // #311: the flight token joins the guard — a superseded tick drops here too.
+    if (!worldFeedFlightCurrent(flight) || !world || !S.character) return;
     const locs = await api("/locations");
+    if (!worldFeedFlightCurrent(flight)) return;  // #311: stale flight
     if (previousDay !== world.day) {
       try { S.weather = await api("/weather"); } catch { /* keep last readable weather */ }
       // F3: day-boundary refetch must update the panel chip in place, not wait for a full re-render.
@@ -4250,6 +4504,8 @@ async function pollEvents() {
     // routine on navigation and never drive the banner) — the 2nd failure in
     // a row surfaces the persistent connection banner. Errors stay otherwise
     // unlogged (same quiet-catch semantics as before, now with a signal).
+    // #311: a stale/aborted flight is not a liveness signal — no failure mark.
+    if (!worldFeedFlightCurrent(flight)) return;
     S.pollFails += 1;
     if (S.pollFails >= 2 && !S.connLost) {
       S.connLost = true;
@@ -4270,7 +4526,19 @@ async function pollEventsFeed() {
   if (S.feedInit === "pending") return;
   if (S.ws && S.ws.readyState === 1) return;
   const requested = S.cursor;  // #258: snapshot the requested position — a WS batch may advance S.cursor while this fetch is in flight
-  const data = await api(`/world/events?since=${requested}`);
+  // #311: the feed-owned GET rides the poll flight — the abort signal lets a
+  // teardown cancel the held request, and the feedPoll metadata (the flight
+  // OBJECT itself: userRef + charId + navGen) lets api() exempt a STALE
+  // flight's 401 from the global fail-closed deauth — stale by identity OR
+  // by currency (superseded tick / teardown / navigation). The signal rides
+  // only when the flight actually carries a controller (the defensive
+  // creation may yield null — token checks still apply).
+  const flight = worldFeedPollFlight;
+  const feedPollOpts = flight ? { feedPoll: flight } : {};
+  if (flight && flight.controller) feedPollOpts.signal = flight.controller.signal;
+  const data = await api(`/world/events?since=${requested}`, feedPollOpts);
+  // #311: a poll deferred across a navigation/session change commits nothing.
+  if (flight && !worldFeedFlightCurrent(flight)) return;
   const events = Array.isArray(data) ? data : (data.events || []);
   if (events.length) {
     // #258: never lower a cursor the WS already advanced while we awaited.
@@ -4281,12 +4549,10 @@ async function pollEventsFeed() {
     const fresh = events.filter((e) => !seen.has(e.id));
     if (fresh.length) {
       S.feed.push(...fresh);
-      const feedBox = document.getElementById("feed");
-      if (feedBox) {
-        feedBox.replaceChildren(el("h2", { class: "world-sec-h" }, "События"),
-          ...S.feed.slice(-40).reverse().map(feedRow));
-      }
-      refreshIslandPreview();  // #301: the panel's island preview follows the feed
+      // #311: the feed-box render + island preview moved OUT of the
+      // transport into the view listeners (worldFeedPublishAll) — the
+      // transport is view-agnostic now.
+      worldFeedPublishAll(fresh);
       // #82 (A3): REST fallback path mirrors the WS arrival hook.
       if (fresh.some((e) => isOwnMoveEvent(e))) onOwnArrival();
     }
@@ -4353,12 +4619,10 @@ function connectWs() {
         const fresh = data.events.filter((e) => !seen.has(e.id));
         if (fresh.length) {
           S.feed.push(...fresh);
-          const feedBox = document.getElementById("feed");
-          if (feedBox) {
-            feedBox.replaceChildren(el("h2", { class: "world-sec-h" }, "События"),
-              ...S.feed.slice(-40).reverse().map(feedRow));
-          }
-          refreshIslandPreview();  // #301: island preview follows the feed
+          // #311: the feed-box render + island preview moved OUT of the
+          // transport into the view listeners (worldFeedPublishAll) — the
+          // frame handler is view-agnostic now.
+          worldFeedPublishAll(fresh);
           // #144: a CONTROL_CHANGED fired from another tab/session leaves
           // stale action pills behind — re-render the world view (it re-reads
           // the character). ws.onmessage fires on ALL views, so only refresh
@@ -4420,7 +4684,7 @@ function connectWs() {
       // permanent for this page session (never reset by navigation).
       S.feedInit = "rest";
     }
-    if (S.wsTries <= 3) setTimeout(connectWs, 2000 * S.wsTries);
+    if (S.wsTries <= 3) armReconnect(2000 * S.wsTries);  // #311: tracked, token+navGen-checked reconnect
     /* иначе остаётся polling */
   };
   ws.onopen = () => { S.wsTries = 0; sendWsCursor(); };
@@ -4880,6 +5144,9 @@ function renderChat(session, locName) {
     el("div", { class: "grid chat-shell" },
       el("div", { class: "panel", id: "chat-view" },
         el("h2", {}, "Диалог"),
+        // #311: the quiet live-events indicator — empty on render, filled by
+        // the chat listener on a LIVE event; never touches the composer.
+        el("div", { id: "chat-feed-quiet", class: "muted" }, ""),
         // #302: back to the Place the dialogue was opened from — rendered
         // only when a VALIDATED place view is the origin (a direct #/chat
         // deep link has no place to return to). Navigation rides the hash
@@ -4905,6 +5172,10 @@ function renderChat(session, locName) {
       el("div", { class: "panel" }, el("h2", {}, "Подсказки"),
         el("div", { class: "muted" },
           "Подсказки заполняют поле ввода, свободный текст — основной"))));
+  // #311: the feed controller starts (idempotent) + the chat view attaches
+  // its quiet listener (draft/typing/send surface untouched).
+  worldFeedController.start();
+  worldFeedController.attachView(chatFeedListener);
 }
 
 /* ---------- inventory (§77, #91 Inventory alpha) ---------- */

@@ -117,14 +117,23 @@ def _double_dispatch_hits(js_lines):
 # ---------- 1. startFeed must never stack a second poll loop ----------
 
 def test_startfeed_idempotent():
-    # #161: startFeed() runs on every viewWorld() render (route, WS
+    # #161: the poll-loop start runs on every view render (route, WS
     # CONTROL_CHANGED refresh, onOwnArrival, retry buttons, external-trip
     # back button). Without the guard every call overwrote S.pollTimer and
     # the previous interval kept running forever.
-    assert JS.count("function startFeed() {\n  connectWs();") == 1
+    # #311: startFeed()/stopFeed() became the session-owned feed controller
+    # (worldFeedStart/worldFeedTeardown) — the transport now outlives
+    # navigation, so the idempotence guard moved INTO the creation site:
+    # the interval is created only when none exists (same never-stack
+    # contract, inverted guard form).
+    assert JS.count(
+        "if (!S.pollTimer) S.pollTimer = setInterval(pollEvents, 5000);") == 1
     # connectWs() stays unguarded here — it self-guards via
     # `if (!S.user || S.ws) return;` (pinned in test 2's file-wide counts).
-    assert JS.count("if (S.pollTimer) return;") == 1
+    # #311: the old early-return guard (`if (S.pollTimer) return;`) is gone
+    # — its job is done by the guarded creation above (a running loop is
+    # left alone, not re-created).
+    assert JS.count("if (S.pollTimer) return;") == 0
     # Single creation site: the interval must be created exactly once.
     # (Round 2: tightened from <= 1 to == 1.)
     assert JS.count("S.pollTimer = setInterval") == 1
@@ -212,7 +221,9 @@ def test_pollevents_inflight_guard():
                     " finally { S.pollBusy = false; }") == 0
     assert JS.count("finally { S.pollBusy = false; }") == 1
     assert JS.count("S.pollFails += 1;") == 1
-    assert JS.count("S.pollFails = 0;") == 1
+    # #311: +1 — the feed controller's teardown resets the failure streak
+    # as part of its liveness reset (same site m175 pins).
+    assert JS.count("S.pollFails = 0;") == 2
 
 
 # ---------- 5. B3/resilience byte pins survive the #161 edits ----------

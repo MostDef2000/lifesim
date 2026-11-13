@@ -703,7 +703,10 @@ def test_ui_legacy_pins_intact():
     # #309: the local login form (which held the second reset site) is gone —
     # only the logout handler resets authProbed now.
     assert js.count("S.authProbed = false") == 1
-    assert js.count("S.authProbed = true") == 1
+    # #311: +1 — the api() 401 deauth marks the session probed-dead
+    # (fail-closed: the reroute's boot probe must not resurrect a dead
+    # session from a stale /auth/me 200).
+    assert js.count("S.authProbed = true") == 2
     # #74: +1 each — the Home screen reads home_location_id (outside the
     # map, per the m149 revision) and its h2 is «Дом»; deliberate
     # screen-only exception, the map layer stays anchor-free.

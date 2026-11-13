@@ -127,14 +127,16 @@ def test_boot_cursor_init_pin():
     # #175 chatDraft tail — same single-line tail convention).
     assert JS.count("bootCursor: Infinity") == 1
     assert JS.count(BOOT_CURSOR_INIT_TAIL) == 1
-    # Whole-file occurrence census (recounted for #262): 1 init field (no S.
-    # prefix) + 7 S. sites (REST capture guard, REST capture assign,
-    # zero-events fallback assign, #258 hello-handler assign,
-    # CONTROL_CHANGED gate, #262 own-actor completion gate, liveOwnArrival
-    # gate) => 8 total, 7 S.-prefixed. There is no separate fallback guard —
-    # the fallback is `} else if (S.cursor === 0) {` + a bare assign.
-    assert JS.count("bootCursor") == 8
-    assert JS.count("S.bootCursor") == 7
+    # Whole-file occurrence census (recounted for #262; #311 recount):
+    # 1 init field (no S. prefix) + 9 S. sites (REST capture guard, REST
+    # capture assign, zero-events fallback assign, #258 hello-handler
+    # assign, CONTROL_CHANGED gate, #262 own-actor completion gate,
+    # liveOwnArrival gate, #311 worldFeedHasLive gate read, #311 teardown
+    # reset) => 10 total, 9 S.-prefixed. There is no separate fallback
+    # guard — the fallback is `} else if (S.cursor === 0) {` + a bare
+    # assign.
+    assert JS.count("bootCursor") == 10
+    assert JS.count("S.bootCursor") == 9
 
 
 # ---------- (b) the boot cursor is captured from the first REST fill ----------

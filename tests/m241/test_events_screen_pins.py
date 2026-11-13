@@ -281,7 +281,10 @@ def test_events_world_link_pins():
     assert wrap_start < link_idx
     assert js.index("const feedNode =") < wrap_start
     # The updaters still target #feed by id (untouched).
-    assert js.count('document.getElementById("feed")') == 2
+    # #311: 2→1 — the two inline updaters (REST poll render + WS frame
+    # render) collapsed into the single view listener
+    # (worldFeedListener), which still targets #feed by id.
+    assert js.count('document.getElementById("feed")') == 1
 
 
 # ---------- l: empty state + chrome + hygiene ----------

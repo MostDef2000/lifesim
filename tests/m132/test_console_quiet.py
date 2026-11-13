@@ -46,7 +46,10 @@ def test_console_quiet_pins():
     # The flag is set exactly once (the failed probe) and cleared at exactly
     # the one auth-state transition that remains: logout. (#309: the
     # login/register-success reset site is gone with local auth.)
-    assert js.count("S.authProbed = true") == 1
+    # #311: +1 — the api() 401 deauth marks the session probed-dead
+    # (fail-closed: the reroute's boot probe must not resurrect a dead
+    # session from a stale /auth/me 200).
+    assert js.count("S.authProbed = true") == 2
     assert js.count("S.authProbed = false") == 1
 
     # ---------- change (b): visual-disabled negative cache (503 only) ----------
