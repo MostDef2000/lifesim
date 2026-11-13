@@ -631,9 +631,12 @@ def test_ui_legacy_pins_intact():
     assert js.count('"Нажмите «Осмотреть окрестности», чтобы осмотреться."') == 1
     assert js.count('"Осмотреть"') == 1
     assert js.count('"Открыть Scene"') == 1
-    # #72: +1 — the Place screen's always-available «К карте» (read-only
-    # navigation back to the map; the two #86 escape hatches are untouched).
-    assert js.count('"К карте"') == 3
+    # #72: +1 — the Place screen's always-available back-to-map button
+    # (read-only navigation; the two #86 escape hatches are untouched).
+    # #303: the Place topbar back button is «← Остров» (issue mockup) —
+    # the «К карте» literal now survives only in the two #86 hatches.
+    assert js.count('"К карте"') == 2
+    assert js.count('"← Остров"') == 1
     assert js.count("S.scene = null;") >= 2
     assert js.count('S.scene.state === "loading"') >= 1
     assert js.count('"scene-act-input"') == 2

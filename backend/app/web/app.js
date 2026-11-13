@@ -1468,7 +1468,7 @@ function sceneBlock() {
 
 /* ---------- #87 (A5): free-text scene action ---------- */
 
-function sceneActBar() {
+function sceneActBar(onSubmit = submitSceneAct) {
   return el("div", { class: "scene-act" },
     el("input", {
       id: "scene-act-input", type: "text",
@@ -1477,10 +1477,10 @@ function sceneActBar() {
       // #175: capture the draft on every keystroke too (the post-submit
       // pattern alone loses text to a re-inspect while typing).
       oninput: (ev) => { S.sceneActDraft = ev.target.value; },
-      onkeydown: (ev) => { if (ev.key === "Enter") submitSceneAct(); },
+      onkeydown: (ev) => { if (ev.key === "Enter") onSubmit(); },
     }),
     el("button", { id: "scene-act-go", type: "button",
-      onclick: () => submitSceneAct() }, "Сделать"));
+      onclick: () => onSubmit() }, "Сделать"));
 }
 
 function sceneActInterpText(i) {
@@ -1527,7 +1527,7 @@ function sceneActResultNode() {
   return el("div", { id: "scene-act-result", class: "scene-act-line muted" }, ...lines);
 }
 
-async function submitSceneAct() {
+async function submitSceneAct(refreshScene = true) {
   const input = document.getElementById("scene-act-input");
   const text = input ? input.value.trim() : "";
   if (!text) return;
@@ -1552,14 +1552,18 @@ async function submitSceneAct() {
     // travel/arrival invalidation stays in renderWorld). Idle keeps the
     // result line without a refresh.
     const st = S.scene && S.scene.state;
-    if (r.ok && r.task_id && (st === "ready" || st === "fallback")) {
+    if (refreshScene && r.ok && r.task_id && (st === "ready" || st === "fallback")) {
       await inspectSurroundings();
     } else {
       renderScenePanel();
     }
   } catch (e) {
     // Same error phrasing as the A3 travel bar (409/401/4xx surfaces).
-    S.sceneAct = { ok: false, detail: travelErrorText(e) };
+    // #303 review F2: the persistent result line localizes §61 refusals too —
+    // the raw server detail never reaches player-visible copy (the toast
+    // below keeps its own #93 semantics untouched).
+    const refusalHint = isAutonomousRefusal(e) ? AUTONOMOUS_HINT : travelErrorText(e);
+    S.sceneAct = { ok: false, detail: refusalHint };
     // #93: a recoverable error keeps the typed draft (chat-draft pattern).
     S.sceneActDraft = text;
     // #93 review F1: §61 refusals surface as localized hints (same discipline
@@ -2463,8 +2467,7 @@ function renderWorld(locs, tasksData) {
       : [el("p", { class: "world-feed-empty" }, "Сейчас на острове тихо")]));
   const feedBlock = el("div", { class: "world-feed-block" }, feedNode,
     el("a", { class: "world-events-link", href: "#/events" }, "События мира →"));
-  const actions = [["WORK", "Пойти на работу"], ["EAT", "Поесть"], ["DRINK", "Попить"],
-    ["SLEEP", "Отдохнуть / поспать"], ["SOCIALIZE", "Пообщаться"]].map(([a, label]) =>
+  const actions = ACTION_VOCABULARY.map(([a, label]) =>
     el("button", { onclick: () => doAction(a) }, label));
   const extBtn = el("button", { onclick: () => viewExternal() },
     "Поездка во Владивосток");
@@ -2590,6 +2593,13 @@ function renderWorld(locs, tasksData) {
   bindPoiSelectionKeys();
   updatePoiSelectionCard();
 }
+
+/* #303: the shared action vocabulary — the World actions card and the Place
+   context panel render the SAME request set through doAction. A button only
+   POSTs a request: POST /actions validates it, so a button is a possible
+   request, never a guaranteed outcome. */
+const ACTION_VOCABULARY = [["WORK", "Пойти на работу"], ["EAT", "Поесть"], ["DRINK", "Попить"],
+  ["SLEEP", "Отдохнуть / поспать"], ["SOCIALIZE", "Пообщаться"]];
 
 async function doAction(actionType, params = {}, after = viewWorld) {
   try {
@@ -3126,6 +3136,10 @@ async function viewLocation(locId) {
   const ctxUser = S.user;
   const ctxCharId = S.character.id;
   let locs;
+  // #303: the context panel's current-task line reads the SAME tasks source
+  // as the World HUD's «Сейчас» (viewWorld's /characters/{id}/tasks) — one
+  // bounded read per place load, staged locally like world/weather.
+  let tasksData = null;
   // #72 validator: world context is fetched into LOCALS — a stale response
   // must not mutate the SHARED S.world/S.weather for a screen that is about
   // to be dropped. Other screens read S.world/S.weather (topbar clock, map
@@ -3133,6 +3147,11 @@ async function viewLocation(locId) {
   // the stale guard below.
   let world = null;
   let weather = null;
+  // #303: a deep link / F5 boots from /characters/by-user, whose payload
+  // carries no location_id — the World poll that normally sets it has never
+  // run. Re-read the character from the same source the poll uses; the own
+  // catch degrades to the stale state, never kills the place load.
+  let charData = null;
   try {
     world = await api("/world");
     // #269: null = the joined bootstrap lost ownership (stale, S22) — and
@@ -3141,9 +3160,19 @@ async function viewLocation(locId) {
     // shared write.
     if (!world || seq !== placeLoadSeq) return;
     try { weather = await api("/weather"); } catch (e) { weather = null; }
+    try { charData = await api(`/characters/${ctxCharId}`); } catch (e) { charData = null; }
     // ONE /locations fetch resolves the requested place — the world-scoped
     // catalog already carries occupants; no /locations/{id} detail call.
     locs = await api("/locations");
+    // #303: the tasks read owns its catch — a tasks failure is an honest
+    // «Данные о делах недоступны» line, never a dead place screen. The
+    // is_owner gate mirrors viewWorld; the cold by-user bootstrap payload
+    // carries no is_owner and the place viewer always owns S.character,
+    // so undefined counts as owner.
+    if (S.character.is_owner !== false) {
+      try { tasksData = await api(`/characters/${ctxCharId}/tasks`); }
+      catch (e) { tasksData = null; }
+    }
   } catch (e) {
     // #93: transient failure — explicit retry instead of a dead «Загрузка…».
     // Same stale guard as the apply path (review F3: session checks included),
@@ -3173,6 +3202,8 @@ async function viewLocation(locId) {
     S.world = world;
     S.weather = weather;
   }
+  // #303: publish only after the stale guard — same discipline as world/weather; renderPlace derives isCurrent / «Вы сейчас» / placeDialogueNpcs from it.
+  if (charData) S.character = { ...S.character, ...charData };
   const place = locs.find((l) => l.id === locId);
   if (!place) {
     // #72: honest missing-place state — the catalog has no such id.
@@ -3188,7 +3219,7 @@ async function viewLocation(locId) {
   // #302: the place origin is recorded only after the VALIDATED load — a
   // missing/failed place never becomes a dialogue or back-navigation origin.
   gameUiContext.viewLocationId = locId;
-  renderPlace(locId, place, locs);
+  renderPlace(locId, place, locs, tasksData);
 }
 
 /* #302: roster dialogue candidates — NPC occupants of the player's CURRENT
@@ -3202,28 +3233,23 @@ function placeDialogueNpcs(locId, occupants) {
   return occupants.filter((o) => "npc" === o.kind);
 }
 
-function renderPlace(locId, place, locs) {
+function renderPlace(locId, place, locs, tasksData) {
   const viewHash = `#/location/${locId}`;
   const occupants = place.occupants || [];
-  const hasNpc = occupants.some((o) => o.kind === "npc");
+  const isCurrent = locId === S.character.location_id;
+  // #303: nearby NPCs are the dialogue-relevant slice of the roster; the
+  // full roster (any kind) stays reference-level inside «О месте». The API
+  // provides exactly {id, name, kind} — nothing else is attributed to NPCs.
+  const npcs = occupants.filter((o) => o.kind === "npc");
+  // #302: dialogue candidates — the existing helper gates the affordance to
+  // the CURRENT location (#72: viewChat reads NPCs at S.character.location_id,
+  // so a remote place must not promise dialogue it cannot show).
+  const dialogueNpcs = placeDialogueNpcs(locId, occupants);
 
-  // Hero: warm gradient + decorative type icon + real name/type; the photo
-  // note is honest — no stock or fabricated imagery exists for places.
-  const hero = el("header", { class: "place-hero" },
-    el("span", { class: "place-hero-icon", "aria-hidden": "true" },
-      placeTypeIcon(place.type)),
-    el("div", { class: "place-hero-text" },
-      el("h2", {}, place.name || `#${place.id}`),
-      el("div", { class: "muted" }, place.type || ""),
-      el("div", { class: "muted place-hero-note" }, "Фото места недоступно")));
-
-  // Read-only actions: «К карте» always (map focus when the id is known —
-  // it always is here), «Обновить» re-runs the load, «Открыть диалог» only
-  // when NPCs are present AND this is the player's CURRENT location —
-  // #72 validator: chat (viewChat) reads NPCs at S.character.location_id,
-  // so a remote place with NPCs must not promise dialogue it cannot show.
-  // No type-derived buttons, no leave button.
-  const actions = el("div", { class: "place-actions" },
+  // Screen topbar: back to the island map + the place title. The back path
+  // is the previous «К карте» mechanism verbatim (#92 manual focus, #302
+  // context stamp, #161 single-dispatch gotoWorld).
+  const placeTopbar = el("div", { class: "place-topbar" },
     el("button", { type: "button", onclick: () => {
       // Same manual-focus mechanism as mapLink() (#92): survives polls,
       // releases when the player physically moves; gotoWorld() keeps the
@@ -3234,62 +3260,118 @@ function renderPlace(locId, place, locs) {
       gameUiContext.lastWorldFocusId = locId;  // #302: an explicit map return must not be overridden by viewWorld's stale pre-place focus restoration
       gameUiContext.lastWorldFocusPlayerLocId = S.character.location_id;
       gotoWorld();
-    } }, "К карте"),
-    el("button", { type: "button",
-      onclick: () => viewLocation(locId) }, "Обновить"),
-    (locId === S.character.location_id && hasNpc)
-      ? el("a", { class: "place-chat-link", href: "#/chat" },
-          "Открыть диалог") : null);
+    } }, "← Остров"),
+    el("span", { class: "place-topbar-title" },
+      `/ ${place.name || "Без названия"}`));
 
-  // Compact selector for remote browsing — populated from the SAME
-  // /locations payload (no extra fetch); navigation goes through the hash,
-  // so route() re-dispatches exactly once.
-  const selector = el("label", { class: "place-selector" },
-    "Место: ",
-    el("select", { onchange: (ev) => {
-      const id = Number(ev.target.value);
-      if (id && id !== locId) location.hash = `#/location/${id}`;
-    } },
-      ...locs.map((l) => el("option", l.id === locId
-        ? { value: l.id, selected: "" } : { value: l.id },
-        `${l.name || `#${l.id}`} · ${l.type || ""}`))));
+  // Stage: a large STATIC placeholder — no Flux call, no upload affordance
+  // (the asset lifecycle is #312's). The honest photo note carries over
+  // from the previous hero band.
+  const stage = el("div", { class: "place-stage" },
+    el("span", { class: "place-stage-icon", "aria-hidden": "true" },
+      placeTypeIcon(place.type)),
+    el("span", { class: "muted place-stage-note" }, "Фото места недоступно"));
 
+  // Context panel — everything about being (or not being) here. World time
+  // and weather keep the #72 honest-missing wording («недоступно», never a
+  // zero-fallback lie).
   const worldTs = S.world && S.world.game_timestamp;
-  const overview = el("section", { class: "panel place-overview" },
-    el("h3", {}, "Обзор"),
-    // #72: world scope is explicit in the labels; unknown time stays
-    // unavailable — no zero-fallback («День 1, 00:00» would be a lie).
+  const currentLoc = locs.find((l) => l.id === S.character.location_id);
+  const contextKids = [
+    el("h2", {}, "Контекст места"),
+    el("div", { class: "place-context-name" }, place.name || "Без названия"),
     el("div", { class: "muted" },
       `Время мира: ${typeof worldTs === "number" ? dayTime(worldTs) : "недоступно"}`),
     el("div", { class: "muted" },
       S.weather && S.weather.enabled
         ? `Погода в мире: ${S.weather.description}` : "Погода в мире: недоступна"),
-    el("div", { class: "muted" }, `Здесь сейчас: ${occupants.length}`));
+    el("span", { class: isCurrent
+      ? "place-badge place-badge-here" : "place-badge" },
+      isCurrent ? "Вы здесь" : "Другое место"),
+  ];
+  if (!isCurrent) {
+    // Remote place: read-only — the player's own location is stated
+    // explicitly, and the ONE move path is the existing #310 moveTo()
+    // (AUTONOMOUS gating and toasts included). No actions, no dialogue,
+    // no scene-act, no «Вы здесь».
+    contextKids.push(
+      el("div", { class: "muted" },
+        `Вы сейчас: ${currentLoc && currentLoc.name ? currentLoc.name : "—"}`),
+      el("button", { class: "place-cta", type: "button",
+        onclick: () => moveTo(place) }, "Пойти сюда"));
+  }
 
-  const dialogueNpcs = placeDialogueNpcs(locId, occupants);
-  const people = el("section", { class: "panel place-people" },
-    el("h3", {}, "Люди на месте"),
-    occupants.length
-      ? el("div", { class: "place-roster" },
-          ...occupants.map((o) => el("div", { class: "place-roster-row" },
-            el("span", {}, o.name || `#${o.id}`),
-            el("span", { class: "muted" }, o.kind || ""),
-            // #302: «Диалог» only for NPC occupants of the CURRENT location —
-            // carries the confirmed occupant id into the chat view.
-            dialogueNpcs.includes(o)
-              ? el("button", { type: "button", onclick: () => {
-                  gameUiContext.npcId = o.id;
-                  location.hash = "#/chat";
-                } }, "Диалог")
-              : null)))
-      : el("p", { class: "muted" }, "Сейчас здесь никого нет."));
+  // Nearby NPCs — name rows only; «Поговорить» reuses the existing dialogue
+  // entry (gameUiContext.npcId → #/chat, revalidated in viewChat) and is
+  // offered for the CURRENT place only.
+  contextKids.push(el("div", { class: "place-nearby" },
+    el("h3", {}, "Рядом"),
+    ...(npcs.length
+      ? npcs.map((o) => el("div", { class: "place-nearby-row" },
+          el("span", {}, o.name || "Без имени"),
+          dialogueNpcs.includes(o)
+            ? el("button", { class: "place-cta", type: "button", onclick: () => {
+                gameUiContext.npcId = o.id;
+                location.hash = "#/chat";
+              } }, "Поговорить")
+            : null))
+      : [el("p", { class: "muted" }, "Рядом никого нет.")])));
+
+  if (isCurrent) {
+    // Contextual actions — CURRENT place only, the SAME vocabulary as the
+    // World card; the hint keeps the contract honest (a button is a
+    // possible request — POST /actions validates it).
+    contextKids.push(
+      el("div", { class: "place-actions-block" },
+        el("h3", {}, "Действия здесь"),
+        el("div", { class: "place-actions" },
+          ...ACTION_VOCABULARY.map(([a, label]) =>
+            el("button", { type: "button", onclick: () => doAction(a) }, label))),
+        el("p", { class: "muted place-act-hint" },
+          "Кнопка только отправляет запрос — сервер решает, возможно ли это сейчас.")));
+
+    // Free-text action — CURRENT place only. The bar reuses sceneActBar with
+    // the SAME submission path (submitSceneAct — the single /scene/act call
+    // site, draft and error semantics included); the committed result is
+    // re-read from S.sceneAct into THIS host, because submitSceneAct's own
+    // refresh targets the Scene panel host id, which the Place screen does
+    // not mount.
+    const actResult = el("div", { class: "place-scene-act-result" });
+    const initial = sceneActResultNode();
+    if (initial) actResult.append(initial);
+    const submitPlaceSceneAct = async () => {
+      await submitSceneAct(false);
+      const node = sceneActResultNode();
+      actResult.replaceChildren(...(node ? [node] : []));
+    };
+    contextKids.push(el("div", { class: "place-scene-act" },
+      sceneActBar(submitPlaceSceneAct), actResult));
+  }
+
+  // Current task — the same read-only source as the World HUD's «Сейчас»
+  // (fetched in viewLocation). Honest states: the top active (else planned)
+  // task, «нет активной задачи», or an explicit unavailable.
+  let taskNode;
+  if (tasksData == null) {
+    taskNode = el("span", { class: "muted" }, "Данные о делах недоступны");
+  } else {
+    const active = tasksData.active || [];
+    const planned = tasksData.planned || [];
+    const current = active.length ? active[0] : (planned.length ? planned[0] : null);
+    taskNode = current
+      ? el("span", {},
+          `${codeLabel(TASK_STATUS_RU, current.status)} · ${codeLabel(TASK_TYPE_RU, current.task_type) || "—"}`)
+      : el("span", { class: "muted" }, "нет активной задачи");
+  }
+  contextKids.push(el("div", { class: "place-task" },
+    el("span", { class: "place-task-label" }, "Задача:"), taskNode));
 
   // Events: the request has its own failure/retry state, independent of the
   // main render — a feed failure never takes the whole screen down.
   const eventsBody = el("div", { class: "place-events-body" },
     el("div", { class: "muted" }, "Загрузка…"));
-  const eventsPanel = el("section", { class: "panel place-events" },
-    el("h3", {}, "События"),
+  const eventsPanel = el("section", { class: "place-events" },
+    el("h4", {}, "События"),
     el("div", { class: "muted place-events-note" }, "События в загруженной выборке"),
     eventsBody);
 
@@ -3327,23 +3409,38 @@ function renderPlace(locId, place, locs) {
   }
   loadPlaceEvents();
 
-  // Details: authoritative catalog fields only — no invented description.
+  // «О месте» — collapsed reference level: authoritative catalog fields, the
+  // FULL occupant roster (names + kinds, no affordances), and the sampled
+  // events listing. Native <details> — keyboard accessible for free.
   const parent = place.parent_id != null
     ? locs.find((l) => l.id === place.parent_id) : null;
   const detailRow = (label, value) => el("div", { class: "place-detail-row" },
     el("span", { class: "place-detail-label" }, label), el("span", {}, value));
-  const details = el("section", { class: "panel place-details" },
-    el("h3", {}, "Подробности"),
-    detailRow("ID", String(place.id)),
-    detailRow("Тип", place.type || "—"),
-    detailRow("Координаты", place.x != null && place.y != null
-      ? `${place.x} · ${place.y}` : "—"),
-    detailRow("Входит в", parent ? (parent.name || `#${parent.id}`) : "—"),
-    detailRow("Людей сейчас", String(occupants.length)));
+  const details = el("details", { class: "place-about" },
+    el("summary", {}, "О месте"),
+    el("div", { class: "place-about-body" },
+      detailRow("ID", String(place.id)),
+      detailRow("Тип", place.type || "—"),
+      detailRow("Координаты", place.x != null && place.y != null
+        ? `${place.x} · ${place.y}` : "—"),
+      detailRow("Входит в", parent ? (parent.name || `#${parent.id}`) : "—"),
+      detailRow("Людей сейчас", String(occupants.length)),
+      el("h4", {}, "Кто здесь"),
+      occupants.length
+        ? el("div", { class: "place-roster" },
+            ...occupants.map((o) => el("div", { class: "place-roster-row" },
+              el("span", {}, o.name || `#${o.id}`),
+              el("span", { class: "muted" }, o.kind || ""))))
+        : el("p", { class: "muted" }, "Сейчас здесь никого нет."),
+      eventsPanel));
+  contextKids.push(details);
 
   app.replaceChildren(topbar("#/world"),
-    el("main", { class: "place-shell" },
-      hero, actions, selector, overview, people, eventsPanel, details));
+    el("main", { class: "place-shell place-game" },
+      placeTopbar,
+      el("div", { class: "place-grid" },
+        stage,
+        el("section", { class: "panel place-context" }, ...contextKids))));
 }
 
 async function viewExternal() {
