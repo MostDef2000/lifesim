@@ -165,7 +165,9 @@ def test_chat_draft_survival_pins():
     # Cleared ONLY on the true success path — the mid-flight NPC-switch
     # guard intentionally does NOT clear it (a stale closure would clobber
     # the freshly re-rendered composer's draft).
-    assert js.count("S.chatDraft = \"\";") == 1
+    # #302: resetGameUiContext() adds a session-teardown clear — drafts must not
+    # leak across logout/relogin; the send-success clear (#175) remains the only in-session site.
+    assert js.count("S.chatDraft = \"\";") == 2
     # m156 gold literals untouched (mirrored guard; m156 pins them too):
     # exactly two post-POST clears, one error-path restore.
     assert js.count("input.value = \"\";") == 2
