@@ -60,7 +60,7 @@ label { display: block; margin: 8px 0 2px; color: var(--dim); }
 .task { padding: 4px 0; display: flex; gap: 8px; }
 .task .status { color: var(--dim); }
 
-.chatlog { max-height: 320px; overflow-y: auto; }
+.chatlog { max-height: min(320px, max(120px, calc(100dvh - 480px))); overflow-y: auto; }
 .chatmsg { margin: 4px 0; }
 .chatmsg .who { color: var(--accent); margin-right: 6px; }
 .chatmsg.npc .who { color: var(--ok); }
@@ -2080,6 +2080,8 @@ button.danger:hover { background: #93301f; }
   --dim: var(--w-dim);
   background: var(--w-bg);
   color: var(--w-text);
+  /* #313: the backdrop scrim positions against the shell, not the page. */
+  position: relative;
 }
 .chat-shell .panel {
   /* #268 card pattern: lighter fill + visible warm edge on the cream
@@ -2087,6 +2089,8 @@ button.danger:hover { background: #93301f; }
   background: var(--w-panel);
   border-color: rgba(120, 96, 64, 0.35);
   border-radius: 14px;
+  /* #313: panels stack above the decorative scrim. */
+  position: relative;
 }
 .chat-shell .muted { color: var(--w-dim); }
 .chat-shell button.primary {
@@ -2255,7 +2259,7 @@ button.danger:hover { background: #93301f; }
    44px WCAG 2.5.8 target (radius stays 50% — m63 pins it). */
 .chat-shell .chat-bar { gap: 8px; margin-top: 10px;
   padding-bottom: calc(0px + env(safe-area-inset-bottom, 0px)); }
-.chat-shell #chat-msg-input { border-radius: 12px; }
+.chat-shell #chat-msg-input { border-radius: 12px; font-size: 1rem; }
 .chat-shell #chat-send {
   width: 44px;
   height: 44px;
@@ -3508,14 +3512,16 @@ button.danger:hover { background: #93301f; }
 }
 /* stage — the #312 scene visual: a text-first composition (heading, live
    summary, image host, status, one stable button) over the warm panel
-   gradient; the asset lifecycle stays in app.js. No fixed min-height —
-   the stage sizes to its content. */
+   gradient; the asset lifecycle stays in app.js. #313: a viewport floor
+   (dvh where supported) keeps the stage present while the scene loads. */
 .place-stage {
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
   gap: 10px;
+  min-height: 36vh;
+  min-height: 36dvh;
   border: 1px solid var(--w-warm-line);
   border-radius: 12px;
   background:
@@ -3592,7 +3598,7 @@ button.danger:hover { background: #93301f; }
 .place-about h4 { margin: 10px 0 4px 0; color: var(--w-text); }
 @media (max-width: 720px) {
   .place-grid { grid-template-columns: minmax(0, 1fr); }
-  .place-stage { min-height: 200px; }
+  .place-stage { min-height: 36vh; min-height: 36dvh; }
 }
 
 /* #312: Place stage scene visual — the heading names the place (+ day time);
@@ -3600,6 +3606,40 @@ button.danger:hover { background: #93301f; }
    box, no crop). */
 .scene-heading { margin: 0; font-size: 18px; font-weight: 600; color: var(--w-text); }
 .scene-image-host img { display: block; width: 100%; height: auto; max-width: 100%; }
+
+/* #313: dialogue composition — decorative scrim, panel band, ctx header. */
+.chat-shell #chat-view { width: clamp(420px, 460px, 500px); }
+.chat-backdrop {
+  position: absolute;
+  inset: 0;
+  background: rgba(46, 36, 24, 0.22);
+  pointer-events: none;
+}
+.ctx-topbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 56px;
+  padding: 6px 10px;
+}
+.ctx-topbar .ctx-title { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ctx-topbar h1 { font-size: 0.875rem; margin: 0; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ctx-topbar #weather { font-size: 0.875rem; white-space: nowrap; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.ctx-topbar #clock { white-space: nowrap; }
+.ctx-topbar button, .ctx-topbar a, .ctx-topbar summary { min-height: 44px; min-width: 44px; }
+.ctx-topbar .ctx-sections { position: relative; }
+.ctx-topbar .ctx-sections[open] .tabs {
+  position: absolute;
+  top: 100%;
+  right: 0;
+  z-index: 30;
+}
+@media (max-width: 720px) {
+  .chat-shell #chat-view { width: 100%; }
+}
+@media (max-width: 720px) {
+  .ctx-topbar h1, .ctx-topbar #weather { display: none; }
+}
 
 /* #175: connection banner — persistent offline signal driven by consecutive
    pollEvents failures (WS close is routine on navigation, never drives it).
