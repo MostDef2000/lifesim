@@ -2097,6 +2097,16 @@ button.danger:hover { background: #93301f; }
   padding: 0 16px;
   text-align: center;
 }
+/* #305: the initials fallback is its own line under the honest sentence —
+   without this the inline span glues to the text («…текстомМС»). */
+.chat-shell .chat-hero .portrait-initials {
+  display: block;
+  margin-top: 8px;
+  font-size: 22px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  color: var(--w-text);
+}
 .chat-visual-img {
   width: 100%;
   height: 100%;
@@ -2253,6 +2263,9 @@ button.danger:hover { background: #93301f; }
   cursor: pointer;
 }
 .chat-shell #chat-partner-btn:disabled { opacity: 0.6; cursor: default; }
+/* #305: a departed/missing NPC disables the send affordance — it must look
+   disabled, not just be disabled (the presence caption alone is easy to miss). */
+.chat-shell #chat-send:disabled { opacity: 0.55; cursor: default; }
 
 /* ---------- issue #67: profile screen read-model redesign ----------
    #/profile renders outside .world-shell, so the cool :root tokens would

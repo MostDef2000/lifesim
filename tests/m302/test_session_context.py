@@ -861,7 +861,7 @@ SCENARIOS = [
             "globalThis.__result = { before, clickedOut, afterLogout, afterRelogin };"
         ),
     },
-    # ---------- (e) carried NPC left the place → dropped, not addressed ----------
+    # ---------- (e) in-chat selection updates the carry; ghost never addressed ----------
     {
         "name": "E_ghost_npc_dropped",
         "initialHash": "#/world",
@@ -877,6 +877,10 @@ SCENARIOS = [
             "__setHash('#/chat'); await __settle(); "
             "const switched = __setChatNpc('npc_2'); await __settle(); "
             "const mid = __facts(); "
+            # #305: the departure signal now lives in the /locations CATALOG
+            # (the roster source); the /locations/7 detail is no longer read
+            # by viewChat, so this setResponse is an inert witness of the
+            # superseded mechanism — kept to document the scenario's origin.
             "__setResponse('/locations/7', {status:200, body:" +
             json.dumps(LOC7_DETAIL_NO_NPC1) + "}); "
             "__setHash('#/world'); await __settle(); "
@@ -899,7 +903,7 @@ SCENARIOS = [
             "globalThis.__result = { afterBoot, afterPlace, afterMove, afterReturn };"
         ),
     },
-    # ---------- (g) carry superseded during the names fetch → writes nothing ----------
+    # ---------- (g) carry superseded during the catalog read → writes nothing ----------
     {
         "name": "G_carry_superseded_during_names_fetch",
         "initialHash": "#/world",
@@ -909,13 +913,27 @@ SCENARIOS = [
         "driver": (
             "await __settle(); "
             "__setHash('#/location/7'); await __settle(); const place = __facts(); "
-            "__hold('/characters/npc_1'); "
+            # #305: the roster names now come from the /locations catalog
+            # occupants (the per-NPC /characters/{id} names fetch is gone —
+            # a departed carry renders its name without one). The entry read
+            # whose stale resolution must write nothing is the catalog
+            # GET /locations, so that is what gets held.
+            "__hold('/locations'); "
             "const clicked = __clickButton('Поговорить'); "
-            "await __settle(); const held = __heldCount('/characters/npc_1'); "
-            "__setHash('#/world'); await __settle(); const afterNav = __facts(); "
-            "const released = __release('/characters/npc_1'); "
+            "await __settle(); const held = __heldCount('/locations'); "
+            "__setHash('#/world'); await __settle(); "
+            # The superseding world load's OWN catalog read joins the hold
+            # (request order: the chat's is idx 0, the world's idx 1).
+            # Release the WORLD's first — the newer navigation must complete
+            # and own the DOM while the chat load is still parked.
+            "const released = __releaseAt('/locations', 1); "
+            "await __settle(); const afterNav = __facts(); "
+            # Now release the chat's STALE catalog read — it resolves after
+            # the supersede and must write nothing.
+            "const releasedStale = __releaseAt('/locations', 0); "
             "await __settle(); const after = __facts(); "
-            "globalThis.__result = { place, clicked, held, afterNav, released, after };"
+            "globalThis.__result = { place, clicked, held, afterNav, "
+            "released, releasedStale, after };"
         ),
     },
 ]
@@ -1149,26 +1167,49 @@ def test_d_logout_relogin_no_leak(results):
     _assert_clean_context(after_relogin, "after relogin")
 
 
-# ---------- (e) carried NPC left the place → dropped, not addressed ----------
+# ---------- (e) in-chat selection updates the carry; ghost never addressed ----------
+# #305: the #302 drop-on-absence semantics are SUPERSEDED. The carry
+# (gameUiContext.npcId) now reflects the ACTUAL conversation partner: an
+# explicit in-chat selection updates it, and a stale carry pointing at a
+# departed NPC is retained and identifiable («NPC не рядом», sending
+# disabled — pinned by m305 test_02), never silently dropped to None. The
+# core #302 intent is preserved and strengthened: the ghost NPC is never
+# addressed — the composer keeps the user's chosen present NPC and ZERO
+# dialogue POSTs go to the departed one.
 
 def test_e_ghost_npc_dropped(results):
     r = _facts(results, "E_ghost_npc_dropped")
     switched, mid, after = r["switched"], r["mid"], r["after"]
     assert switched is True, "the chat NPC select is present and switchable"
     assert mid["S_chatNpcId"] == "npc_2", "the user switched the dialogue to npc_2"
-    assert mid["guc"]["npcId"] == "npc_1", (
-        "the «Рядом» carry still points at npc_1 (the NPC that is about to leave)"
+    # #305: the explicit selection IS the new intended target — the carry
+    # updates to the chosen NPC (it is the restoration source for
+    # chat → place → chat and the presence machine's target).
+    assert mid["guc"]["npcId"] == "npc_2", (
+        "the in-chat selection updates the carry to the chosen npc_2 "
+        f"(#305 semantics), got {mid['guc']['npcId']!r}"
     )
-    # npc_1 has left the place; re-enter chat.
+    # npc_1 has left the place (the detail response); re-enter chat.
     assert after["hash"] == "#/chat"
-    assert after["guc"]["npcId"] is None, (
-        "viewChat drops the carried NPC that is absent from the fresh characters_here"
+    # #305: the carry points at the user's CURRENT target — the ghost is
+    # neither addressed nor allowed to hijack the dialogue.
+    assert after["guc"]["npcId"] == "npc_2", (
+        "the carry reflects the user's chosen present NPC, not the ghost"
     )
     assert after["S_chatNpcId"] == "npc_2", (
         "the ghost NPC is NOT addressed — S.chatNpcId is not switched to it"
     )
     assert after["chatNpcSel"] == "npc_2", (
         f"the composer addresses npc_2, not the ghost, got {after['chatNpcSel']!r}"
+    )
+    # #305: zero-POST proof of the same intent — re-entering the chat with a
+    # departed former carry fires NO dialogue POSTs at all (nothing is sent
+    # to the ghost; the composer waits for the user).
+    dialogue_posts = [e for e in after["fetchLog"]
+                      if e.startswith("POST /dialogue")]
+    assert dialogue_posts == [], (
+        f"the ghost NPC is never addressed — no dialogue POSTs may fire "
+        f"on re-entry, got {dialogue_posts!r}"
     )
 
 
@@ -1227,29 +1268,47 @@ def test_f_stale_focus_restore_skipped_after_move(results):
     assert unhandled == [], f"no unhandled errors may escape: {unhandled}"
 
 
-# ---------- (g) carry superseded during the names fetch → writes nothing ----------
+# ---------- (g) carry superseded during the chat entry's catalog read → writes nothing ----------
 
 def test_g_carry_superseded_during_names_fetch(results):
     r = _facts(results, "G_carry_superseded_during_names_fetch")
-    place, clicked, held, after_nav, released, after = (
-        r["place"], r["clicked"], r["held"], r["afterNav"], r["released"], r["after"])
+    place, clicked, held, after_nav, released, released_stale, after = (
+        r["place"], r["clicked"], r["held"], r["afterNav"], r["released"],
+        r["releasedStale"], r["after"])
     assert place["hasPlaceShell"], "the current place view renders"
     assert clicked is True, (
         "the place «Рядом» row offers a «Поговорить» button for the NPC "
         "occupant (#303 renamed it from roster «Диалог»)"
     )
+    # #305: the held fetch is the chat entry's catalog read — the new
+    # viewChat takes roster names from the /locations occupants (the
+    # per-NPC /characters/{id} names fetch is gone; a departed carry renders
+    # its name from the catalog). Same scenario intent, new mechanism: the
+    # in-flight entry read is held when the superseding navigation happens.
     assert held == 1, (
-        "the names fetch is in flight (held) when the superseding navigation happens"
+        "the chat entry's catalog read (/locations) is in flight (held) "
+        "when the superseding navigation happens"
     )
-    assert released is True, "the held names fetch is released after the supersede"
-    # The superseding navigation owns the DOM while the chat load is in flight.
+    # #305: the superseding world load's OWN catalog read joins the hold
+    # (request order idx 1) — it is released first so the newer navigation
+    # completes and owns the DOM.
+    assert released is True, (
+        "the superseding world load's catalog read is released — the newer "
+        "navigation completes over the parked chat load"
+    )
+    # The superseding navigation owns the DOM while the chat load is parked.
     assert after_nav["hash"] == "#/world", "the newer navigation is the world"
     assert after_nav["hasWorldShell"], "the world view renders over the pending chat"
-    # FIX 1: the dead load writes nothing — not even before the held fetch
-    # resolves (pre-fix the carry wrote S.* before the names-fetch guard).
+    # FIX 1: the dead load writes nothing — not even before its held catalog
+    # read resolves (the guard sits before every shared write).
     assert after_nav["S_chatNpcId"] is None, (
         "the superseded load writes nothing even before the held fetch resolves, "
         f"got {after_nav['S_chatNpcId']!r}"
+    )
+    # #305: the chat load's STALE catalog read is released after the
+    # supersede — the guard must discard it.
+    assert released_stale is True, (
+        "the stale catalog read is released after the supersede"
     )
     assert after["S_chatNpcId"] is None, (
         "a superseded carry must not switch the dialogue, "

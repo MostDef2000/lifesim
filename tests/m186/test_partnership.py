@@ -528,7 +528,10 @@ def test_ui_button_and_outcome_pins():
     # on the role ID (review F4: stable id, not a fragile title prefix).
     assert js.count('(r.roles || []).some((x) => x.id === "partner")') == 1
     # F1: the selection survives re-renders (persisted + restored).
-    assert js.count("S.chatNpcId = npcSel.value;") == 1
+    # #305: the literal gained `|| null` — the new explicit empty option
+    # means "no target" (null), never an unkeyed "" (m305 test_05 pins it);
+    # the F1 selection-survival intent (persisted + restored) is unchanged.
+    assert js.count("S.chatNpcId = npcSel.value || null;") == 1
     assert js.count("if (S.chatNpcId && S.chatNpcs.includes(S.chatNpcId)) {") == 1
     # Error path: ONE inline chat-error construction site (#63 pattern).
     assert js.count('class: "chat-error"') == 1

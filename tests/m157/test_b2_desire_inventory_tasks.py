@@ -607,9 +607,14 @@ def test_ui_tasks_screen_pins():
     assert js.count("S.mapFocusManual = true;") == 2
     assert js.count("if (S.mapFocusManual && S.mapFocusAnchor !== character.location_id)") == 1
     assert js.count("if (!S.mapFocusManual && character.location_id != null)") == 1
-    # Cold-load safety mirrors viewChat's authoritative character read.
-    # #170 review F1: viewDesire joins the pattern → 3 sites.
-    assert js.count("if (S.character.location_id == null)") == 5
+    # Cold-load safety: the conditional authoritative character read.
+    # #170 review F1: viewDesire joins the pattern.
+    # #305: viewChat's conditional cold-load read became an UNCONDITIONAL
+    # authoritative read (the by-user hydration omits location_id AND a
+    # populated one may be stale — the player may have moved since the last
+    # screen), so its guard literal is gone: 4 sites, same intent, stronger
+    # coverage (a stale populated location_id is now re-read too).
+    assert js.count("if (S.character.location_id == null)") == 4
 
 
 def test_ui_inventory_screen_pins():

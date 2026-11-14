@@ -118,7 +118,12 @@ def test_carry_forward_pins():
     js = _read(APP_JS)
     # m156: screen ids / composer / status / roles / visual.
     assert js.count('el("input", { id: "chat-msg-input", placeholder: "Сообщение…" })') == 1
-    assert js.count('"chat-send"') == 1
+    # #305: TWO occurrences — still exactly ONE construction site (the
+    # `id: "chat-send"` button in renderChat); the second is chatPaintPresence's
+    # live-node lookup (document.getElementById("chat-send")), which lets the
+    # poll-driven presence painter toggle the EXISTING button's disabled state
+    # without rebuilding the composer (the m311 composer-preservation contract).
+    assert js.count('"chat-send"') == 2
     assert js.count('"chat-view"') == 1
     assert js.count('"chat-status"') == 1
     assert js.count('"chat-roles"') == 1
@@ -128,7 +133,11 @@ def test_carry_forward_pins():
     assert js.count("const t0 = Date.now();") == 1
     assert js.count("Math.round((Date.now() - t0) / 1000)") == 1
     assert js.count("clearInterval(tick);") == 2
-    assert js.count("input.value = draft;") == 1
+    # #305: the failed-send catch no longer rewrites the composer — the
+    # draft never left the input, and text typed during the flight survives
+    # (m305 test_17); the restore line was the pre-#305 mechanism for a flow
+    # that cleared the input before the ack.
+    assert js.count("input.value = draft;") == 0
     assert js.count('input.value = "";') == 2
     assert js.count('"Не удалось отправить — проверьте связь и повторите"') == 1
     assert js.count('"LLM недоступен, отвечает fallback"') == 1

@@ -548,7 +548,12 @@ def test_ui_chat_screen_new_pins():
     js = _read(APP_JS)
     # New chat screen ids — construction and live-node lookup.
     assert js.count('el("input", { id: "chat-msg-input", placeholder: "Сообщение…" })') == 1
-    assert js.count('"chat-send"') == 1
+    # #305: TWO occurrences — still exactly ONE construction site (the
+    # `id: "chat-send"` button in renderChat); the second is chatPaintPresence's
+    # live-node lookup (document.getElementById("chat-send")), which lets the
+    # poll-driven presence painter toggle the EXISTING button's disabled state
+    # without rebuilding the composer (the m311 composer-preservation contract).
+    assert js.count('"chat-send"') == 2
     assert js.count('"chat-view"') == 1
     assert js.count('"chat-status"') == 1
     assert js.count('"chat-roles"') == 1
@@ -588,7 +593,12 @@ def test_ui_thinking_state_non_frozen_ticker():
 def test_ui_error_keeps_draft_and_shows_retry_fallback():
     js = _read(APP_JS)
     # Draft restore in the catch path — typed text survives recoverable errors.
-    assert js.count("input.value = draft;") == 1
+    # #305: the failed-send catch no longer rewrites the composer — the
+    # draft never left the input, and text typed during the flight survives
+    # (m305 test_17); the restore line was the pre-#305 mechanism for a flow
+    # that cleared the input before the ack. The intent above is
+    # STRENGTHENED: text survives because it never leaves the input.
+    assert js.count("input.value = draft;") == 0
     # Draft is cleared after a successful POST returns: once in the main
     # success path, once in the mid-flight-NPC-switch guard (the turn is
     # already logged server-side at that point — both are post-POST clears).

@@ -436,7 +436,8 @@ def test_ui_transient_failure_catch_pins():
     assert js.count('"Загрузка не удалась. " + RETRY_HINT') == 1
     assert js.count('el("button", { type: "button", onclick: retry }, "Повторить")') == 1
     # Scene act draft preservation (never uses the chat literals — m156 pins
-    # 'input.value = draft;' == 1 and 'input.value = "";' == 2 exactly).
+    # 'input.value = "";' == 2 exactly; the 'input.value = draft;' restore
+    # is gone — see the #305 note on the dialogue gold pattern below).
     # S-init + read + ok:false-keep + success-clear + error-set
     # + #175 oninput-capture (draft also saved on every keystroke)
     # + #304 session teardown (resetGameUiContext clears the draft too):
@@ -458,8 +459,12 @@ def test_ui_transient_failure_catch_pins():
         'S.travel = null;\n    const stale = '
         'document.getElementById("travel-status");') == 1
     assert js.count("toast(travelErrorText(e), true);") == 1
-    # Dialogue gold pattern (m156) still exactly as pinned.
-    assert js.count("input.value = draft;") == 1
+    # Dialogue gold pattern (m156) — the post-POST clears stay as pinned.
+    # #305: the failed-send catch no longer rewrites the composer — the
+    # draft never left the input, and text typed during the flight must
+    # survive (m305 test_17); the restore line was a pre-#305 mechanism for
+    # a flow that cleared the input before the ack.
+    assert js.count("input.value = draft;") == 0
     assert js.count('"Не удалось отправить — проверьте связь и повторите"') == 1
     assert js.count('input.value = "";') == 2
 
