@@ -1971,6 +1971,22 @@ function topbar(active) {
   );
 }
 
+// #313: compact contextual header — reuses the topbar() registry nodes.
+function ctxTopbar(back, title, tb, extraClass) {
+  const tabs = tb.querySelector(".tabs");
+  // #313 fix (m269 s10/s18): the clock span must survive the ctx header —
+  // the location/chat screens keep their live #clock node from topbar().
+  const clock = tb.querySelector("#clock");
+  // #313 R1: carry the remaining topbar() children too — h1 and the weather
+  // span (absent → null; el()/appendKids() drop null children) must not be
+  // silently discarded on the place/chat routes.
+  const h1 = tb.querySelector("h1");
+  const weather = tb.querySelector("#weather");
+  return el("div", { class: "ctx-topbar" + (extraClass ? " " + extraClass : "") },
+    back, title, h1, clock, weather,
+    el("details", { class: "ctx-sections" }, el("summary", {}, "Разделы"), tabs));
+}
+
 /* #269: cold-entry world bootstrap for the topbar clock. One fire-and-
    forget /world fetch per navigation while world data is missing — coalesced
    within the SAME session context, never a poll, never blocking the
@@ -2703,6 +2719,14 @@ function rerenderLivingMap() {
 
 /* ---------- #310: Living Map POI selection (click = select, never move) ---------- */
 
+// #313: contextual back target — source place when recorded, else World.
+function ctxBackHash() {
+  if (location.hash === "#/chat" && gameUiContext.chatSourceLocationId) {
+    return `#/location/${gameUiContext.chatSourceLocationId}`;
+  }
+  return "#/world";
+}
+
 /* Module-level once-guard: the Escape handler is bound exactly once per
    page load; it acts only while a selection card is open. No other Escape
    handling exists in app.js. */
@@ -2714,6 +2738,11 @@ function bindPoiSelectionKeys() {
   // keydown listener rides the same surface as the boot hashchange listener.
   window.addEventListener("keydown", (ev) => {
     if (ev.key !== "Escape") return;
+    // #313: Escape closes an open sections disclosure first, else contextual back.
+    const ctxBar = document.querySelector(".ctx-topbar");
+    const ctxDetails = ctxBar ? ctxBar.querySelector("details") : null;
+    if (ctxDetails && ctxDetails.open) { ctxDetails.open = false; return; }
+    if (ctxBar) { location.hash = ctxBackHash(); return; }
     if (!document.getElementById("poi-card")) return;
     gameUiContext.selectedPoiId = null;
     rerenderLivingMap();
@@ -4160,8 +4189,10 @@ function renderPlace(locId, place, locs, tasksData) {
 
   // Screen topbar: back to the island map + the place title. The back path
   // is the previous «К карте» mechanism verbatim (#92 manual focus, #302
-  // context stamp, #161 single-dispatch gotoWorld).
-  const placeTopbar = el("div", { class: "place-topbar" },
+  // context stamp, #161 single-dispatch gotoWorld). #313: the bar rides the
+  // compact contextual header; the registry tabs live in the disclosure.
+  const worldTopbar = topbar("#/world");
+  const placeTopbar = ctxTopbar(
     el("button", { type: "button", onclick: () => {
       // Same manual-focus mechanism as mapLink() (#92): survives polls,
       // releases when the player physically moves; gotoWorld() keeps the
@@ -4174,7 +4205,8 @@ function renderPlace(locId, place, locs, tasksData) {
       gotoWorld();
     } }, "← Остров"),
     el("span", { class: "place-topbar-title" },
-      `/ ${place.name || "Без названия"}`));
+      `/ ${place.name || "Без названия"}`),
+    worldTopbar, "place-topbar");
 
   // Stage: the #312 text-first scene visual — heading, live weather +
   // confirmed-data summary, image host, live-region status, and ONE stable
@@ -4350,9 +4382,8 @@ function renderPlace(locId, place, locs, tasksData) {
       eventsPanel));
   contextKids.push(details);
 
-  app.replaceChildren(topbar("#/world"),
+  app.replaceChildren(placeTopbar,
     el("main", { class: "place-shell place-game" },
-      placeTopbar,
       el("div", { class: "place-grid" },
         stage,
         el("section", { class: "panel place-context" }, ...contextKids))));
@@ -6017,8 +6048,12 @@ function renderChat(session, locName) {
   // (name · subtitle · roles · relationship widget) under it, then the log
   // (max-height 320), the assistive status line, suggestion chips and the
   // composer — all inside the shell so the cool :root tokens never leak in.
-  app.replaceChildren(topbar("#/chat"),
+  app.replaceChildren(ctxTopbar(
+      el("a", { href: ctxBackHash(), "aria-label": "Назад" }, "←"),
+      el("span", { class: "ctx-title" }, "Диалог"),
+      topbar("#/chat")),
     el("div", { class: "grid chat-shell" },
+      el("div", { class: "chat-backdrop" }),
       el("div", { class: "panel", id: "chat-view" },
         el("h2", {}, "Диалог"),
         // #311: the quiet live-events indicator — empty on render, filled by
@@ -6059,6 +6094,11 @@ function renderChat(session, locName) {
       el("div", { class: "panel" }, el("h2", {}, "Подсказки"),
         el("div", { class: "muted" },
           "Подсказки заполняют поле ввода, свободный текст — основной"))));
+  // #313: every render rebuilds .chatlog and loses the inline maxHeight —
+  // re-apply the viewport budget right after the tree is mounted (the
+  // function declaration is hoisted; the resize listener stays the only
+  // other caller).
+  applyChatViewportBudget();
   // #311: the feed controller starts (idempotent) + the chat view attaches
   // its quiet listener (draft/typing/send surface untouched).
   worldFeedController.start();
@@ -8214,4 +8254,13 @@ motionQuery.addEventListener("change", () => {
 });
 
 window.addEventListener("hashchange", route);
+
+// #313: soft-keyboard budget — layout-only, never re-renders the chat.
+function applyChatViewportBudget() {
+  const vv = window.visualViewport;
+  const vh = vv ? vv.height : window.innerHeight;
+  const log = document.querySelector(".chatlog");
+  if (log) log.style.maxHeight = Math.round(Math.min(320, Math.max(120, vh - 480))) + "px";
+}
+window.addEventListener("resize", applyChatViewportBudget);
 route();
