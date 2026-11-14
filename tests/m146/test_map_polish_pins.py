@@ -75,7 +75,10 @@ def test_map_polish_lane_a_pins():
     assert css.index(".anchor::before {") > css.index("@media (max-width: 520px) {")
 
     # ---------- no collateral growth (m121/m124/m128 guards mirrored) ----------
-    assert js.count("scene-view") == 3
+    # #304: the task-presentation adapter's refreshTaskPresentationHosts()
+    # adds a 4th "scene-view" reference (getElementById to refresh the
+    # scene result host) — census 3 → 4, intent unchanged.
+    assert js.count("scene-view") == 4
     assert js.count('"Открыть Scene"') == 1
     assert js.count("innerHTML") == 0
     assert js.count('location.hash = "#/profile";') == 3
