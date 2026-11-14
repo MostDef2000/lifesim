@@ -52,6 +52,8 @@ let gameUiContext = {
   lastWorldFocusPlayerLocId: null,  // player location when the focus was recorded — restore is skipped if the player moved since
   npcId: null,               // NPC carried Place → Chat (confirmed occupant id)
   draftByNpc: {},            // per-NPC composer drafts, keyed by occupant id
+  chatSourceLocationId: null,   // #305: the place «Поговорить» was clicked at — the chat back anchor's return target
+  chatSourceLocationName: null, // #305: the origin place's display name
 };
 
 /* #302: the last authoritatively observed player location — world truth,
@@ -78,6 +80,7 @@ function resetGameUiContext() {
     userRef: null, characterId: null, selectedLocationId: null,
     selectedPoiId: null, viewLocationId: null, lastWorldFocusId: null,
     lastWorldFocusPlayerLocId: null, npcId: null, draftByNpc: {},
+    chatSourceLocationId: null, chatSourceLocationName: null,  // #305
   };
   observedPlayerLocId = null;
   // #312: session teardown routes through the shared scene lifecycle — the
@@ -90,6 +93,15 @@ function resetGameUiContext() {
   S.chatDraft = "";
   S.chatNpcId = null;
   S.chatSessionId = null;
+  // #305: the chat presence runtime dies with the session — the orphaned
+  // render's «Печатает…» timer stops and every in-flight chat op fails its
+  // render-identity check (chatRuntime === rt) and discards itself.
+  if (chatRuntime && chatRuntime.typingTimer != null) {
+    clearInterval(chatRuntime.typingTimer);
+    chatRuntime.typingTimer = null;
+  }
+  chatRuntime = null;
+  chatPendingPresence = null;
   S.mapFocusManual = false;
   S.mapFocusAnchor = null;
   // #304: the action-lifecycle adapter dies with the session — the
@@ -4205,6 +4217,11 @@ function renderPlace(locId, place, locs, tasksData) {
           el("span", {}, o.name || "Без имени"),
           dialogueNpcs.includes(o)
             ? el("button", { class: "place-cta", type: "button", onclick: () => {
+                // #305: the dialogue origin — the place «Поговорить» was
+                // clicked at; the chat's back anchor returns here
+                // («← К месту»), a direct #/chat entry offers the map.
+                gameUiContext.chatSourceLocationId = locId;
+                gameUiContext.chatSourceLocationName = place.name || null;
                 gameUiContext.npcId = o.id;
                 location.hash = "#/chat";
               } }, "Поговорить")
@@ -4952,6 +4969,14 @@ async function pollEvents() {
     await pollEventsFeed();
     if (!worldFeedFlightCurrent(flight)) return;  // #311: stale flight — commit nothing
 
+    // #305: the chat presence hook — the revalidation token is captured
+    // BEFORE this tick's authoritative reads (a monotonic sequence: a send
+    // that starts mid-tick supersedes this verdict), and the verdict is
+    // applied after the fresh character + catalog land below. It paints
+    // ONLY the availability caption + the send state — a poll never
+    // rebuilds the composer (m311: input, focus, draft survive every tick).
+    const chatToken = chatBeginValidation();
+
     // A2 Living Map: refresh authoritative read state, then rebuild presentation.
     const previousDay = S.world ? S.world.day : null;
     const character = await api(`/characters/${S.character.id}`);
@@ -4988,6 +5013,10 @@ async function pollEvents() {
     }
     if (!S.mapFocusManual && character.location_id != null) S.mapFocusLocationId = character.location_id;
     S.mapLocations = locs;
+    // #305: apply this tick's chat presence verdict from the fresh reads —
+    // a stale token (a newer revalidation, render, navigation, session or
+    // target) discards itself inside chatApplyValidation.
+    if (chatToken) chatApplyValidation(chatToken, character, locs);
     // #269 S23: a stale tick's OLDER world must not republish over an
     // already-newer snapshot (viewWorld/viewLocation publications) — the
     // clock keeps the newer time too.
@@ -5278,6 +5307,110 @@ function connectWs() {
 
 /* ---------- chat (§77, #88 Dialogue alpha) ---------- */
 
+/* #305: the chat presence runtime — a render-owned state machine for the
+   in-place NPC dialogue. presence ∈ none|checking|valid|departed|
+   unavailable: departed means an authoritative read DISPROVED the target's
+   co-location («NPC не рядом»); a NETWORK failure is unavailable, never
+   departed. The runtime holds every identity token an async op must
+   re-check before touching shared state or the live DOM: the captured
+   navigation generation, the user OBJECT reference, the character id, the
+   dialogue target id, a monotonic validation sequence (captured BEFORE a
+   revalidation's reads — results apply only if the sequence still
+   matches), the per-render send-busy latch and the «Печатает…» typing
+   timer (stopped by a superseding render and by session teardown).
+   chatPendingPresence hands the entry revalidation's verdict from viewChat
+   to the fresh runtime renderChat builds. */
+let chatRuntime = null;
+let chatPendingPresence = null;
+
+/* #305: the NPC roster of ONE location record — the kind-based slice of
+   its occupants, mapped to ids. Shared by the chat entry load, the poll
+   hook and the send revalidation (a distinct spelling from the renderPlace
+   census pins — m238 counts those bodies, not this helper). */
+function chatRosterFor(character, locs) {
+  const locId = character && character.location_id;
+  const loc = (locs || []).find((l) => l && String(l.id) === String(locId));
+  return ((loc && loc.occupants) || [])
+    .filter((o) => o && o.kind === "npc").map((o) => o.id);
+}
+
+/* #305: the identity token every chat async op re-checks before it may
+   touch shared state or the live DOM: the SAME runtime object (render
+   identity), the same navigation generation, the same session identity and
+   the same dialogue target. seq additionally proves no newer revalidation
+   superseded this one (omitted for ops whose OWN fresh reads — not the
+   shared verdict slot — decide the outcome). */
+function chatOpCurrent(rt, seq) {
+  return chatRuntime === rt
+    && rt.navEpoch === navEpoch
+    && S.user === rt.userRef
+    && !!S.character && S.character.id === rt.charId
+    && S.chatNpcId === rt.npcId
+    && (seq === undefined || rt.validationSeq === seq);
+}
+
+/* #305: open a presence revalidation — the monotonic sequence is captured
+   BEFORE the caller's reads, so a superseded flight can never paint over
+   a newer verdict. */
+function chatBeginValidation() {
+  const rt = chatRuntime;
+  if (!rt) return null;
+  rt.validationSeq += 1;
+  return { rt, seq: rt.validationSeq };
+}
+
+/* #305: the player-visible availability wording. Departed never implies
+   co-location; a network failure is honestly unknown, never «не рядом». */
+function chatPresenceCaption(state) {
+  if (state === "departed") return "NPC не рядом";
+  if (state === "unavailable") return "Статус NPC неизвестен — проверьте связь";
+  if (state === "valid") return "NPC рядом";
+  return "";  // none | checking — nothing to claim yet
+}
+
+/* #305: the send affordance — a departed or missing target cannot send.
+   checking/unavailable keep the affordance honest: send() revalidates
+   fresh and speaks for itself (a failed revalidation aborts with zero
+   POSTs and its own caption). */
+function chatPresenceDisablesSend(state) {
+  return state === "departed" || state === "none";
+}
+
+/* #305: paint a presence verdict onto the LIVE chat DOM — the availability
+   caption + the send button state ONLY. The composer (input, focus, draft)
+   is never touched: a revalidation never rebuilds it (m311 contract). */
+function chatPaintPresence(rt, state) {
+  rt.presence = state;
+  if (chatRuntime !== rt) return;  // a superseded render owns the DOM now
+  const cap = document.getElementById("chat-presence");
+  if (cap) cap.textContent = chatPresenceCaption(state);
+  const btn = document.getElementById("chat-send");
+  if (btn) btn.disabled = chatPresenceDisablesSend(state);
+}
+
+/* #305: apply a verdict derived from an authoritative character + catalog
+   read (the poll's existing reads or the send-time revalidation). Stale
+   tokens — a newer revalidation, a newer render, a newer navigation,
+   session or target — are discarded silently. */
+function chatApplyValidation(token, character, locs) {
+  const rt = token.rt;
+  if (!chatOpCurrent(rt, token.seq)) return;
+  const roster = chatRosterFor(character, locs);
+  chatPaintPresence(rt, !rt.npcId ? "none"
+    : (roster.includes(rt.npcId) ? "valid" : "departed"));
+}
+
+/* #305: the initials fallback for a portrait-less NPC — the first codepoint
+   of each of the first two whitespace-separated words of the display name
+   (Unicode-aware via codePointAt/fromCodePoint: «Пётр Сидоров» → «ПС»,
+   «Марина» → «М»); an unknown name degrades to the honest «NPC». */
+function chatInitials(name) {
+  const words = String(name || "").trim().split(/\s+/).filter(Boolean);
+  if (!words.length) return "NPC";
+  return words.slice(0, 2).map((w) =>
+    String.fromCodePoint(w.codePointAt(0)).toUpperCase()).join("");
+}
+
 async function viewChat() {
   navEpoch++;  // #302: every load start is a new navigation generation
   location.hash = "#/chat";
@@ -5293,55 +5426,64 @@ async function viewChat() {
   const stale = () => epoch !== navEpoch || S.user !== ctxUser
     || !S.character || S.character.id !== ctxCharId;
   try {
-    // Cold-load safety: #/chat can be the first route after reload — the
-    // by-user hydration omits location_id, so read the authoritative
-    // character first (same pattern as viewWorld).
-    if (S.character.location_id == null) {
-      const me = await api(`/characters/${S.character.id}`);
-      // #302: guarded hydration — a superseded load must not write a dead
-      // context's character into shared state.
-      if (stale()) return;
-      S.character = { ...S.character, ...me };
-    }
-    const loc = await api(`/locations/${S.character.location_id}`);
+    // #305: the authoritative character is read on EVERY entry — the
+    // by-user hydration omits location_id (the cold-load shape) AND a
+    // populated one may be stale (the player may have moved since the
+    // last screen). Same read as viewWorld, now unconditional.
+    const me = await api(`/characters/${S.character.id}`);
+    // #302: guarded hydration — a superseded load must not write a dead
+    // context's character into shared state.
+    if (stale()) return;
+    S.character = { ...S.character, ...me };
+    // #305: the /locations catalog is the roster source — kind-based NPC
+    // occupants of the player's CURRENT location. The old npc_ prefix
+    // filter over the detail endpoint's characters_here excluded hyphen
+    // ids (npc-a) and duplicated a read the catalog already answers.
+    const locs = await api("/locations");
     // #302: staged loads — every fetch lands in LOCALS; shared state is
     // published only after the guard (a dropped load writes nothing and
     // renders nothing).
     if (stale()) return;
-    const npcs = (loc.characters_here || []).filter((id) => id.startsWith("npc_"));
-    // #302: a Place-roster «Диалог» carries the confirmed occupant id in
-    // gameUiContext.npcId. Revalidate it against the FRESH occupants list —
-    // a stale carry (the NPC has left, an older navigation) must not
-    // address a ghost NPC. A valid carry that differs from the persisted
-    // selection switches the dialogue: the session belongs to the previous
-    // NPC, and the per-NPC draft (if any) is restored into the composer.
-    // The carry itself is NOT cleared on success — it is the restoration
-    // source for chat → place → chat. The decision lands in LOCALS; the
-    // shared S.* writes are deferred to after the names-fetch guard below
-    // (a superseded load publishes nothing).
-    let carriedNpc = null;
-    let carriedDraft = "";
-    if (gameUiContext.npcId != null) {
-      if (!npcs.includes(gameUiContext.npcId)) {
-        gameUiContext.npcId = null;
-      } else if (gameUiContext.npcId !== S.chatNpcId) {
-        carriedNpc = gameUiContext.npcId;
-        carriedDraft = gameUiContext.draftByNpc[carriedNpc] || "";
+    const loc = ((locs || []).find((l) =>
+      l && String(l.id) === String(me.location_id))) || { name: "" };
+    const npcs = (loc.occupants || [])
+      .filter((o) => o && o.kind === "npc").map((o) => o.id);
+    // #305: display names come from the catalog occupants (every
+    // location) — a DEPARTED carry stays identifiable («Фар», not a raw
+    // id) without a doomed /characters fetch for an absent NPC.
+    const names = {};
+    for (const l of (locs || [])) {
+      for (const o of (l && l.occupants) || []) {
+        if (o && o.id != null && names[o.id] == null) names[o.id] = o.name || o.id;
       }
     }
-    // Resolve nearby NPC names for the select (bounded to NPCs present here).
-    const names = {};
-    await Promise.all(npcs.slice(0, 15).map(async (id) => {
-      try { const c = await api(`/characters/${id}`); names[id] = c.name || id; }
-      catch (e) { names[id] = id; }
-    }));
-    if (stale()) return;
-    // #302: the carried NPC is applied only after the names-fetch guard —
-    // a superseded load must not write shared chat state.
-    if (carriedNpc != null) {
-      S.chatNpcId = carriedNpc;
-      S.chatSessionId = null;
-      S.chatDraft = carriedDraft;
+    // #302/#305: a Place-roster «Поговорить» carries the intended target
+    // in gameUiContext.npcId. It is resolved BEFORE the select is built —
+    // a stale carry (the NPC has left) stays IDENTIFIABLE and keeps its
+    // draft, and never silently falls back to another nearby NPC (the
+    // #305 presence machine marks it departed and gates sending). With no
+    // carry, a still-valid persisted selection is kept; otherwise the
+    // first roster NPC is the keyed default (no unkeyed browser-selected
+    // state). The decision lands in LOCALS; the shared S.* writes are
+    // deferred to after the guard below (a superseded load publishes
+    // nothing — the m302 staged-loads discipline).
+    let targetNpc = null;
+    let targetDeparted = false;
+    if (gameUiContext.npcId != null) {
+      targetNpc = gameUiContext.npcId;
+      targetDeparted = !npcs.includes(targetNpc);
+    } else if (S.chatNpcId && npcs.includes(S.chatNpcId)) {
+      targetNpc = S.chatNpcId;
+    } else if (npcs.length) {
+      targetNpc = npcs[0];
+    }
+    // #302: the resolved target is applied only after the guard — a
+    // superseded load must not write shared chat state. The per-NPC draft
+    // (if any) is restored into the composer even for a departed target.
+    if (targetNpc != null && targetNpc !== S.chatNpcId) {
+      S.chatNpcId = targetNpc;
+      S.chatSessionId = null;  // the session belongs to the previous NPC
+      S.chatDraft = gameUiContext.draftByNpc[targetNpc] || "";
     }
     // #88: current session history comes from the authoritative read model.
     // #302: staged — the shared session id is updated only after the guard.
@@ -5354,9 +5496,15 @@ async function viewChat() {
     if (stale()) return;
     if (ctxSessId && !sess) S.chatSessionId = null;
     // #63: the meeting location IS the display location (S.chatNpcs is
-    // filtered to characters_here) — thread loc.name into the header.
+    // the NPC slice of the current location's occupants) — thread loc.name
+    // into the header.
     S.chatNpcs = npcs;
     S.chatNpcNames = names;
+    // #305: the entry revalidation's verdict rides to the fresh runtime
+    // renderChat builds below (a departed carry renders departed — caption
+    // + disabled send — never silently co-located).
+    chatPendingPresence = targetNpc == null ? "none"
+      : (targetDeparted ? "departed" : "valid");
     renderChat(sess, loc.name);
   } catch (e) {
     // #93: transient failure — explicit retry instead of a dead «Загрузка…».
@@ -5394,8 +5542,33 @@ function renderRelationshipScale(rel) {
 }
 
 function renderChat(session, locName) {
+  // #305: a fresh render owns a fresh presence runtime — the previous
+  // render's runtime is orphaned (its in-flight ops fail the identity
+  // check and discard themselves) and its typing timer must not outlive
+  // it. The entry revalidation's verdict (chatPendingPresence) seeds the
+  // initial state; an in-render switch re-renders with the picked roster
+  // NPC (optimistically valid — the send revalidates fresh anyway).
+  if (chatRuntime && chatRuntime.typingTimer != null) {
+    clearInterval(chatRuntime.typingTimer);  // #305: the orphaned «Печатает…» timer stops with its render
+    chatRuntime.typingTimer = null;
+  }
+  const rt = {
+    navEpoch, userRef: S.user,
+    charId: S.character ? S.character.id : null,
+    npcId: S.chatNpcId,
+    validationSeq: 0, sendBusy: false, typingTimer: null,
+    presence: chatPendingPresence || "checking",
+  };
+  chatPendingPresence = null;
+  chatRuntime = rt;
   let curSession = session;
   const npcSel = el("select", {},
+    // #305: an explicit empty option — the DOM selection can never
+    // silently disagree with S.chatNpcId (the old browser-default first
+    // option created an unkeyed selected state; a departed carry — whose
+    // id is intentionally not among the roster options — now renders as
+    // an honest empty select while the header keeps the identity).
+    el("option", { value: "" }, "— выберите NPC —"),
     ...S.chatNpcs.map((id) => el("option", { value: id },
       (S.chatNpcNames && S.chatNpcNames[id])
         ? `${S.chatNpcNames[id]} (${id})` : id)));
@@ -5408,10 +5581,19 @@ function renderChat(session, locName) {
     if (S.chatNpcId != null) {
       gameUiContext.draftByNpc[S.chatNpcId] = input.value;
     }
+    // #305: an explicit selection of a roster NPC is the new intended
+    // target — it updates the carry (the restoration source for
+    // chat → place → chat) and restores that NPC's own draft. The empty
+    // option means "no target" (null), never an unkeyed "".
     S.chatDraft = gameUiContext.draftByNpc[npcSel.value] || "";
     input.value = S.chatDraft;
-    S.chatNpcId = npcSel.value;  // 182: survive re-renders (review F1)
+    S.chatNpcId = npcSel.value || null;  // 182: survive re-renders (review F1)
+    if (S.chatNpcId != null) gameUiContext.npcId = S.chatNpcId;
     S.chatSessionId = null;
+    // #305: the picked roster NPC is the fresh runtime's seed verdict —
+    // optimistically valid (the send revalidates fresh anyway); the empty
+    // option is "no target".
+    chatPendingPresence = S.chatNpcId ? "valid" : "none";
     renderChat(null, locName);
   });
   // 182 (review F1): the rebuilt select loses the user's choice on any
@@ -5528,6 +5710,15 @@ function renderChat(session, locName) {
   const VISUAL_FALLBACK = "Визуал недоступен — диалог текстом";
   const visual = el("div", { class: "chat-hero", id: "chat-visual" });
   visual.append(el("div", { class: "portrait-status muted" }, "Портрет…"));
+  // #305: every fallback surface carries the target's initials — the
+  // identity survives a missing portrait («Марина» → «М», «Пётр Сидоров»
+  // → «ПС»). The node builder is shared by the fetch-failure catch, the
+  // img decode-failure listener and the no-portrait else-branch below.
+  const targetName = (S.chatNpcNames && S.chatNpcNames[S.chatNpcId])
+    || S.chatNpcId || "";
+  const visualFallbackNode = () => el("div", { class: "portrait-status muted" },
+    VISUAL_FALLBACK,
+    el("span", { class: "portrait-initials" }, chatInitials(targetName)));
   const visualOn = !S.visualDisabled;
   // #260: empty npcSel (no NPCs on the location) — no doomed //portrait
   // fetch; the fallback branch below renders the shared fallback directly
@@ -5538,17 +5729,23 @@ function renderChat(session, locName) {
         const asset = await api(`/visual/characters/${npcSel.value}/portrait`);
         const blob = await fetchPortraitBlob(`/visual/assets/${asset.id}/file`);
         const url = URL.createObjectURL(blob);
-        visual.replaceChildren(el("img", {
+        // #305: a DECODE failure is a fetch success — the broken <img> fires
+        // error asynchronously, so the listener (attached before the img
+        // enters the DOM) swaps in the same honest fallback + initials.
+        const img = el("img", {
           class: "portrait-img chat-visual-img", src: url, alt: "Портрет NPC",
-        }));
+        });
+        img.addEventListener("error",
+          () => visual.replaceChildren(visualFallbackNode()));
+        visual.replaceChildren(img);
       } catch (e) {
-        visual.replaceChildren(el("div", { class: "portrait-status muted" },
-          VISUAL_FALLBACK));
+        visual.replaceChildren(visualFallbackNode());
       }
     })();
   } else {
     visual.append(el("div", { class: "portrait-status muted" },
-      VISUAL_FALLBACK));
+      VISUAL_FALLBACK,
+      el("span", { class: "portrait-initials" }, chatInitials(targetName))));
   }
 
   const log = el("div", { class: "chatlog", id: "chat-log" });
@@ -5611,54 +5808,125 @@ function renderChat(session, locName) {
     id: "chat-send", class: "primary", "aria-label": "Отправить",
     onclick: () => send(),
   }, "→");
+  // #305: the send affordance reflects the presence verdict — a departed
+  // or missing target cannot send. The shim's click ignores disabled, so
+  // send() itself re-gates on a FRESH revalidation; this is the honest
+  // affordance, not the guard.
+  sendBtn.disabled = chatPresenceDisablesSend(rt.presence);
   input.addEventListener("keydown", (ev) => { if (ev.key === "Enter") send(); });
 
   async function send() {
+    // #305: per-render busy latch — repeated Enter/click while a send is
+    // in flight is ONE message POST.
+    if (rt.sendBusy) return;
     const draft = input.value;
     const content = draft.trim();
     if (!content) return;
     const sentNpc = npcSel.value;  // #88: guard against NPC switch mid-flight
+    if (!sentNpc) return;  // #305: the empty option is "no target"
+    rt.sendBusy = true;
     // #63: a stale inline error row must not survive a new attempt. All
     // rows go — a double-send race must not leave orphaned error rows
     // behind (peer review finding 1: querySelector removed only the first).
     log.querySelectorAll(".chat-error").forEach(n => n.remove());
-    // #88: LLM latency is 14-45s — visibly non-frozen wait with a ticking
-    // elapsed-seconds counter. #63: the wait is ALSO shown as a typing
-    // bubble inside the chatlog (name + three animated dots, reduced-motion
-    // safe); #chat-status keeps the assistive «Печатает… N с» line.
-    status.textContent = "Печатает…";
-    const typingBubble = el("div", { class: "chatmsg npc chat-typing" },
-      el("span", { class: "who" },
-        (S.chatNpcNames && S.chatNpcNames[sentNpc]) || "NPC"),
-      el("span", { class: "typing-dots", "aria-hidden": "true" },
-        el("i"), el("i"), el("i")));
-    log.append(typingBubble);
-    log.scrollTop = log.scrollHeight;
-    const t0 = Date.now();
-    const tick = setInterval(() => {
-      status.textContent = `Печатает… ${Math.round((Date.now() - t0) / 1000)} с`;
-    }, 1000);
+    // #305: send-time presence revalidation — fresh character + catalog
+    // reads BEFORE any dialogue POST (and before the typing surface): a
+    // target the authoritative reads disprove makes ZERO dialogue POSTs,
+    // paints «NPC не рядом» and never fakes a «Печатает…» wait. A failed
+    // revalidation is unavailable — never «не рядом» — and also aborts
+    // with zero POSTs (no co-location proof, no dialogue traffic).
+    rt.validationSeq += 1;
+    const valSeq = rt.validationSeq;
+    // #305: the message POST success — not the history refresh — is the
+    // acknowledgement; the failure handlers read this to distinguish
+    // "send failed" (draft retained + visible retry) from "committed"
+    // (draft stays cleared, NO duplicate-send retry).
+    let acknowledged = false;
+    let typingStarted = false;
+    let tick = null;
+    let typingBubble = null;
     try {
+      const me = await api(`/characters/${rt.charId}`);
+      const locs = await api("/locations");
+      // #305: identity check after the presence validation — a superseded
+      // render/session/target discards the whole send (zero POSTs, the
+      // fresh render's UI is never touched).
+      if (!chatOpCurrent(rt)) return;
+      const verdict = chatRosterFor(me, locs).includes(sentNpc)
+        ? "valid" : "departed";
+      if (chatOpCurrent(rt, valSeq)) chatPaintPresence(rt, verdict);
+      if (verdict !== "valid") return;  // zero dialogue POSTs
+      // #88: LLM latency is 14-45s — visibly non-frozen wait with a ticking
+      // elapsed-seconds counter. #63: the wait is ALSO shown as a typing
+      // bubble inside the chatlog (name + three animated dots, reduced-motion
+      // safe); #chat-status keeps the assistive «Печатает… N с» line.
+      status.textContent = "Печатает…";
+      typingBubble = el("div", { class: "chatmsg npc chat-typing" },
+        el("span", { class: "who" },
+          (S.chatNpcNames && S.chatNpcNames[sentNpc]) || "NPC"),
+        el("span", { class: "typing-dots", "aria-hidden": "true" },
+          el("i"), el("i"), el("i")));
+      log.append(typingBubble);
+      log.scrollTop = log.scrollHeight;
+      const t0 = Date.now();
+      tick = setInterval(() => {
+        status.textContent = `Печатает… ${Math.round((Date.now() - t0) / 1000)} с`;
+      }, 1000);
+      rt.typingTimer = tick;
+      typingStarted = true;
       const sid = curSession ? curSession.session_id
         : (await api("/dialogue/start",
           { method: "POST", body: { npc_id: sentNpc } })).session_id;
+      // #305: identity check AFTER /dialogue/start, BEFORE the message
+      // POST — an NPC switch (a fresh render) discards the stale start:
+      // no message POST on the stale session, the fresh render's shared
+      // state is never hijacked.
+      if (!chatOpCurrent(rt)) return;
       const r = await api(`/dialogue/${sid}/message`,
         { method: "POST", body: { content } });
+      acknowledged = true;
       clearInterval(tick);
       typingBubble.remove();
-      if (npcSel.value !== sentNpc) {
-        // The turn is logged server-side for the original NPC's session;
-        // a stale closure must not hijack the freshly re-rendered view.
-        // #175: S.chatDraft is intentionally NOT cleared here — it already
-        // belongs to the composer re-rendered for the switched-to NPC.
-        input.value = "";
+      rt.typingTimer = null;
+      // #305: identity check after the message POST — a stale op never
+      // touches the fresh render's composer, but the committed turn still
+      // consumes the ORIGINAL target's unchanged stored draft (the text
+      // was sent; keeping it invites a duplicate).
+      if (!chatOpCurrent(rt)) {
+        // #305: a stale op after an account switch must not touch the
+        // fresh session's draft store — the user-ref guard keeps the
+        // delete scoped to the session the send was born in.
+        if (S.user === rt.userRef && gameUiContext.draftByNpc[sentNpc] === draft) {
+          delete gameUiContext.draftByNpc[sentNpc];
+        }
+        input.value = "";  // #305: the detached composer of the superseded render — no live UI is touched
         return;
       }
-      const hist = await api(`/dialogue/${sid}`);
+      // #305: the session binds at the ACK (message POST success) — a
+      // history refresh failure must not orphan it (the next send would
+      // re-issue /dialogue/start and duplicate the conversation opener).
+      // It sits AFTER the identity check: a stale op never writes shared
+      // session state.
       curSession = curSession || {};
       curSession.session_id = sid;
-      curSession.messages = hist.messages;
       S.chatSessionId = sid;
+      // #305: the acknowledgement consumes the submitted draft — ONLY the
+      // unchanged submitted text; anything typed during the flight (a
+      // newer draft) survives in the composer and the per-NPC store.
+      if (input.value === draft) {
+        input.value = "";
+        S.chatDraft = "";  // #175: the send succeeded — the draft is consumed
+      }
+      if (gameUiContext.draftByNpc[sentNpc] === draft) {
+        delete gameUiContext.draftByNpc[sentNpc];
+      }
+      const hist = await api(`/dialogue/${sid}`);
+      // #305: identity check after the history GET — a superseded op never
+      // repaints the fresh render's log or shared session state. The
+      // session itself already bound at the ACK (above) — only the message
+      // list is refreshed here.
+      if (!chatOpCurrent(rt)) return;
+      curSession.messages = hist.messages;
       renderMessages(hist.messages);
       // #195: relationship milestone — driven ONLY by the fresh POST
       // response's relationship_formed field, and appended AFTER
@@ -5694,28 +5962,42 @@ function renderChat(session, locName) {
         relNote.textContent = "";
         relNote.hidden = true;
       }
-      input.value = "";
-      S.chatDraft = "";  // #175: the send succeeded — the draft is consumed
-      // #302: the consumed draft leaves the per-NPC store — ONLY the sent
-      // NPC's entry (other NPCs' stored drafts are untouched). The
-      // mid-flight NPC-switch guard above returns before this line, so a
-      // stale-closure send never deletes the switched-to NPC's draft.
-      delete gameUiContext.draftByNpc[sentNpc];
       status.textContent = r.source === "fallback"
         ? "LLM недоступен, отвечает fallback" : "";
     } catch (e) {
-      clearInterval(tick);
-      typingBubble.remove();
+      // #305: only a started typing surface needs teardown — a failed
+      // send-time revalidation never built one.
+      if (typingStarted) {
+        clearInterval(tick);
+        typingBubble.remove();
+        rt.typingTimer = null;
+      }
+      // #305: identity check in the failure handler — a stale op never
+      // restores drafts or paints error rows/toasts into the fresh render.
+      if (!chatOpCurrent(rt)) return;
       // #183: a failed send shows no effect note — a stale «Симпатия +2»
       // from a previous reply must not outlive its reply.
       relNote.textContent = "";
       relNote.hidden = true;
-      input.value = draft;  // #88: recoverable error keeps the typed draft
+      if (acknowledged) {
+        // #305: the message IS committed (POST succeeded) — the cleared
+        // draft stays cleared and NO duplicate-send retry is offered;
+        // only the history refresh failed.
+        status.textContent = "Сообщение отправлено — история не обновилась";
+        return;
+      }
+      // #305: the failed-send catch no longer rewrites the composer — the
+      // draft never left the input (nothing clears it before the ack), and
+      // text typed during the flight must survive (m305 test_17); the
+      // restore line was a pre-#305 mechanism for a flow that cleared the
+      // input before the ack.
       status.textContent = "Не удалось отправить — проверьте связь и повторите";
       // #63: the error is ALSO an inline row in the chatlog (the toast and
       // the assistive status line stay).
       chatErrorRow(`Не удалось отправить: ${e.message}`);
       toast(e.message, true);
+    } finally {
+      rt.sendBusy = false;  // #305: the latch releases on EVERY path
     }
   }
 
@@ -5731,22 +6013,32 @@ function renderChat(session, locName) {
         // #311: the quiet live-events indicator — empty on render, filled by
         // the chat listener on a LIVE event; never touches the composer.
         el("div", { id: "chat-feed-quiet", class: "muted" }, ""),
-        // #302: back to the Place the dialogue was opened from — rendered
-        // only when a VALIDATED place view is the origin (a direct #/chat
-        // deep link has no place to return to). Navigation rides the hash
-        // link (single dispatch through route()) — no location.hash
-        // assignment here; the anchor rides the shared global control
-        // styling (a { color: var(--accent) }, same idiom as «← К карте»).
-        ...(gameUiContext.viewLocationId != null
-          ? [el("a", { href: `#/location/${gameUiContext.viewLocationId}` },
+        // #305: the availability caption — the presence machine's verdict
+        // («NPC не рядом» for a departed target), painted IN PLACE by
+        // chatPaintPresence; the composer is never rebuilt for it.
+        el("div", { id: "chat-presence", class: "muted" },
+          chatPresenceCaption(rt.presence)),
+        // #302/#305: back to the Place the dialogue was opened from —
+        // keyed off the dialogue origin captured by the «Поговорить»
+        // handler (gameUiContext.chatSourceLocationId), NOT the generic
+        // viewLocationId. A direct #/chat deep link has no place to return
+        // to and offers the island map instead («← К карте»). Navigation
+        // rides the hash link (single dispatch through route()) — no
+        // location.hash assignment here; the anchor rides the shared global
+        // control styling (a { color: var(--accent) }).
+        ...(gameUiContext.chatSourceLocationId != null
+          ? [el("a", { href: `#/location/${gameUiContext.chatSourceLocationId}` },
               "← К месту")]
-          : []),
+          : [el("a", { href: "#/world" }, "← К карте")]),
         el("label", {}, "NPC на этой локации"), npcSel,
         visual,
         el("div", { class: "chat-head-info" },
           el("div", { id: "chat-npc-name" },
-            (S.chatNpcNames && S.chatNpcNames[npcSel.value])
-              ? S.chatNpcNames[npcSel.value] : npcSel.value),
+            // #305: keyed off the persisted target (S.chatNpcId), not the
+            // select value — a departed carry keeps its identity («Фар»)
+            // while the select honestly shows the empty option.
+            (S.chatNpcNames && S.chatNpcNames[S.chatNpcId])
+              ? S.chatNpcNames[S.chatNpcId] : (S.chatNpcId || "")),
           subLine, rolesLine, relBox, relNote),
         el("div", { style: "margin-top:8px" }, log),
         status,

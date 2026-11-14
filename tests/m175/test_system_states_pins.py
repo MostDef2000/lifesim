@@ -176,9 +176,13 @@ def test_chat_draft_survival_pins():
     # leak across logout/relogin; the send-success clear (#175) remains the only in-session site.
     assert js.count("S.chatDraft = \"\";") == 2
     # m156 gold literals untouched (mirrored guard; m156 pins them too):
-    # exactly two post-POST clears, one error-path restore.
+    # exactly two post-POST clears.
+    # #305: the failed-send catch no longer rewrites the composer — the
+    # draft never left the input, and text typed during the flight must
+    # survive (m305 test_17); the restore line was a pre-#305 mechanism for
+    # a flow that cleared the input before the ack.
     assert js.count("input.value = \"\";") == 2
-    assert js.count("input.value = draft;") == 1
+    assert js.count("input.value = draft;") == 0
     # #256: a suggestion-chip click also syncs the draft — the chip fills the
     # input programmatically (no input event fires), so without this the chip
     # text would be lost on the next composer re-render.
