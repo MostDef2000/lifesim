@@ -31,9 +31,9 @@
 //                     .chat-backdrop computed background
 //                     alpha > 0 (decorative dim scrim); composer (.chat-bar)
 //                     bottom edge <= innerHeight at 390.
-//   caseZoom        — 200% root font: contextual header + composer GROW
-//                     (rem/inherited), World nav pill + map card UNCHANGED
-//                     (px canon).
+//   caseZoom        — 200% root font: contextual header stays FIXED (by
+//                     design) and must not clip; composer GROWS (rem/
+//                     inherited), World nav pill + map card UNCHANGED (px canon).
 // Viewports: 390x844, 320x700, 1440x900. caseStageStates runs at 390 only
 // (the composition-critical viewport; the 36dvh band is viewport-relative
 // by construction).
@@ -167,6 +167,9 @@ async (page) => {
     await page.route("**/locations/*", getOnly(ok(LOC1_DETAIL)));
     await page.route("**/world/events*", getOnly(ok(EVENTS)));
     await page.route("**/visual/characters/1/portrait", getOnly(PORTRAIT_404));
+    await page.route("**/characters/2/roles", getOnly(ok({ roles: [] })));
+    await page.route("**/characters/1/relationships", getOnly(ok([])));
+    await page.route("**/visual/characters/2/portrait", getOnly(PORTRAIT_404));
     await page.route("**/visual/references", getOnly(ok(REFS_EMPTY)));
 
     // Scene lifecycle: POST /visual/scenes per scenePostMode ("error" -> 500,
@@ -231,9 +234,13 @@ async (page) => {
       };
       const stage = document.querySelector(".place-stage");
       const details = document.querySelector(".ctx-topbar details");
+      const headerEl = document.querySelector(".ctx-topbar");
+      const headerBox = box(headerEl);
       return {
-        header: box(document.querySelector(".ctx-topbar")),
-        headerPresent: !!document.querySelector(".ctx-topbar"),
+        header: headerBox
+          ? Object.assign({}, headerBox, { clip: headerEl.scrollHeight > headerEl.clientHeight + 1 })
+          : null,
+        headerPresent: !!headerEl,
         disclosureClosed: details ? !details.open : null,
         stagePct: stage ? Math.round(stage.getBoundingClientRect().height
           / window.innerHeight * 1000) / 10 : null,
@@ -271,6 +278,7 @@ async (page) => {
         backdropPresent: !!backdrop,
         backdropAlpha: alpha,
         composer: box(document.querySelector(".chat-bar")),
+        overflow: document.documentElement.scrollWidth > window.innerWidth,
       };
     }, exp);
   }
@@ -491,8 +499,9 @@ async (page) => {
       && same(world100.pill.h, world200.pill.h, 1);
     const mapSame = same(world100.mapPx, world200.mapPx, 2);
     const results = [
-      check("caseZoom/" + label + "/header-grows-at-200", h100 !== null && h200 !== null && h200 > h100,
-        "header " + h100 + "px -> " + h200 + "px at 200% root font"),
+      check("caseZoom/" + label + "/header-fixed-no-clip-at-200",
+        h100 !== null && h200 !== null && Math.abs(h200 - h100) <= 1 && place200.header.clip !== true,
+        "header " + h100 + "px -> " + h200 + "px at 200% root font (fixed by design; must not clip)"),
       check("caseZoom/" + label + "/composer-grows-at-200", c100 !== null && c200 !== null && c200 > c100,
         "composer " + c100 + "px -> " + c200 + "px at 200% root font"),
       check("caseZoom/" + label + "/world-pill-unchanged-at-200", pillSame,
