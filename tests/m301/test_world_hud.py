@@ -21,8 +21,10 @@ against the code):
   - tasksData == null (the tasks fetch failed) → span.world-now-state
     «Данные о делах недоступны»;
   - empty active+planned → span.world-now-state «Сейчас нет активных дел»;
-  - else active[0] else planned[0] → span.world-now-status =
-    codeLabel(TASK_STATUS_RU, status) + span.world-now-type =
+  - else active[0] else planned[0] → span.world-now-status = the #304
+    lifecycle caption (taskPresentationText: active/STARTED →
+    «Персонаж занят: {label}», planned/queued → «Задача принята.
+    Ожидает начала», terminal → its own caption) + span.world-now-type =
     codeLabel(TASK_TYPE_RU, task_type) || "—";
   - autonomous → p.world-now-mode (the AUTONOMOUS hint) +
     button.world-now-profile «Открыть Профиль»;
@@ -735,11 +737,15 @@ AUTONOMOUS_HINT = "Персонаж действует сам — переклю
 
 # Task fixtures — the server pre-orders active/planned oldest created_at
 # first, so the HUD takes active[0] (else planned[0]) without re-sorting.
-TASK_WORK_STARTED = {"status": "STARTED", "task_type": "WORK", "created_at": 100}
-TASK_EAT_STARTED = {"status": "STARTED", "task_type": "EAT", "created_at": 90}
-TASK_EAT_ACTIVE = {"status": "active", "task_type": "EAT", "created_at": 50}
-TASK_WORK_QUEUED = {"status": "queued", "task_type": "WORK", "created_at": 100}
-TASK_SLEEP_PLANNED = {"status": "planned", "task_type": "SLEEP", "created_at": 100}
+# #304: the stub rows carry realistic ids — the backend's task_to_dict
+# ALWAYS includes `id` on /characters/{id}/tasks rows, and the #304 adapter
+# keys/refreshes tracked tasks by that id (id-less rows are display-
+# ineligible). Distinct ids keep the combined scenarios collision-free.
+TASK_WORK_STARTED = {"id": 11, "status": "STARTED", "task_type": "WORK", "created_at": 100}
+TASK_EAT_STARTED = {"id": 12, "status": "STARTED", "task_type": "EAT", "created_at": 90}
+TASK_EAT_ACTIVE = {"id": 13, "status": "active", "task_type": "EAT", "created_at": 50}
+TASK_WORK_QUEUED = {"id": 14, "status": "queued", "task_type": "WORK", "created_at": 100}
+TASK_SLEEP_PLANNED = {"id": 15, "status": "planned", "task_type": "SLEEP", "created_at": 100}
 
 # Five island events (ids 1-5, oldest first) — two critical (id 3
 # CHARACTER_DIED, id 5 OBJECT_BURNING, both in CRITICAL_EVENT_TYPES). The
@@ -1047,9 +1053,13 @@ def test_tasks_endpoint_failed(results):
 
 def test_active_selected(results):
     r = _facts(results, "ACTIVE_SELECTED")
-    assert r["worldNowStatus"] == "начата", (
-        f"the HUD status is the Russian label of active[0] "
-        f"(STARTED → «начата»), got {r['worldNowStatus']!r}"
+    # #304: the HUD status is the lifecycle caption of active[0] — an
+    # active/STARTED task reads «Персонаж занят: {label}» (the raw-code
+    # label «начата» is gone; the caption still derives from the server
+    # status, never from the POST response).
+    assert r["worldNowStatus"] == "Персонаж занят: работа", (
+        f"the HUD status is the #304 lifecycle caption of active[0] "
+        f"(STARTED/WORK → «Персонаж занят: работа»), got {r['worldNowStatus']!r}"
     )
     assert r["worldNowType"] == "работа", (
         f"the HUD type is the Russian label of active[0] "
@@ -1071,9 +1081,12 @@ def test_active_selected(results):
 
 def test_planned_fallback(results):
     r = _facts(results, "PLANNED_FALLBACK")
-    assert r["worldNowStatus"] == "запланирована", (
+    # #304: the planned fallback renders the accepted caption — a planned
+    # task is a ACCEPTED task awaiting its start, not «запланирована».
+    assert r["worldNowStatus"] == "Задача принята. Ожидает начала", (
         f"an empty active list falls back to planned[0] "
-        f"(planned → «запланирована»), got {r['worldNowStatus']!r}"
+        f"(#304 planned → «Задача принята. Ожидает начала»), "
+        f"got {r['worldNowStatus']!r}"
     )
     assert r["worldNowType"] == "сон", (
         f"the planned task's type renders (SLEEP → «сон»), "
@@ -1087,8 +1100,10 @@ def test_planned_fallback(results):
 
 def test_queued_copy(results):
     r = _facts(results, "QUEUED_COPY")
-    assert r["worldNowStatus"] == "в очереди", (
-        f"queued maps to the new Russian copy «в очереди», "
+    # #304: queued renders the accepted caption (the dedicated «в очереди»
+    # copy is superseded — queued and planned share the accepted phase).
+    assert r["worldNowStatus"] == "Задача принята. Ожидает начала", (
+        f"queued maps to the #304 accepted caption, "
         f"got {r['worldNowStatus']!r}"
     )
     assert "queued" not in r["worldNowText"], (
@@ -1102,16 +1117,28 @@ def test_queued_copy(results):
 
 def test_active_over_planned(results):
     r = _facts(results, "ACTIVE_OVER_PLANNED")
-    assert r["worldNowStatus"] == "начата", (
-        f"the active task wins over the planned one, got {r['worldNowStatus']!r}"
+    # #304: the active task wins over the planned one (caption form).
+    assert r["worldNowStatus"] == "Персонаж занят: работа", (
+        f"the active task wins over the planned one "
+        f"(#304 caption), got {r['worldNowStatus']!r}"
     )
     assert r["worldNowType"] == "работа", (
         f"the HUD shows the active task's type (WORK → «работа»), "
         f"got {r['worldNowType']!r}"
     )
-    assert "сон" not in r["worldNowText"], (
-        f"the planned task's type (SLEEP → «сон») must be absent, "
+    # #304: the planned task must not be the selected one — its accepted
+    # caption and its type label are both absent. (The bare «сон» substring
+    # scan is superseded: the active caption «Персонаж занят: …» itself
+    # contains «сон» inside «Персонаж», so the check moved to the precise
+    # markers — the planned caption in the band text, the planned type in
+    # the type span.)
+    assert "Задача принята" not in r["worldNowText"], (
+        f"the planned task's accepted caption must be absent, "
         f"got {r['worldNowText']!r}"
+    )
+    assert "сон" not in r["worldNowType"], (
+        f"the type span shows the active task's type, not the planned "
+        f"task's (SLEEP → «сон»), got {r['worldNowType']!r}"
     )
     unhandled = _unhandled(results, "ACTIVE_OVER_PLANNED")
     assert unhandled == [], f"no unhandled errors may escape: {unhandled}"
@@ -1235,8 +1262,10 @@ def test_expand_toggle(results):
 
 def test_no_raw_status(results):
     r = _facts(results, "NO_RAW_STATUS")
-    assert r["worldNowStatus"] == "в очереди", (
-        f"active[0] (queued) renders its Russian label, "
+    # #304: active[0] (queued) renders the accepted caption — the no-raw-code
+    # doctrine is unchanged (the caption carries no status code either).
+    assert r["worldNowStatus"] == "Задача принята. Ожидает начала", (
+        f"active[0] (queued) renders its #304 caption, "
         f"got {r['worldNowStatus']!r}"
     )
     assert r["worldNowType"] == "работа", (

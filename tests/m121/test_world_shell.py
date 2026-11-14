@@ -85,8 +85,9 @@ def test_world_shell_pins():
     assert "Сейчас на острове тихо" in js
     # The scene-view lookup and the reduced-motion-aware scrollIntoView exist
     # twice: once in buildLivingMap (pinned byte-identical) and once in
-    # backToMap (the world re-render hand-off).
-    assert js.count('document.getElementById("scene-view")') == 2
+    # backToMap (the world re-render hand-off). #304: a third lookup —
+    # refreshTaskPresentationHosts patches the scene-result host in place.
+    assert js.count('document.getElementById("scene-view")') == 3
     assert js.count(
         'scene.scrollIntoView({ behavior: S.mapReducedMotion ? "auto" : "smooth",'
         ' block: "start" });'

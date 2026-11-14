@@ -338,7 +338,12 @@ def test_ui_travel_bar_pins_without_damaging_existing_pins():
     # button now runs the real inspect action (inspectSurroundings), so the
     # placeholder toast string is gone — pin updated 1 → 0 by A4.
     assert js.count("Осмотр — в следующем срезе") == 0
-    assert js.count("Уточняю маршрут") == 1
+    # #304: the interpreting-phase label is the honest local sending text
+    # («Отправляем запрос…» — no movement evidence yet); it appears in BOTH
+    # the travel bar (travelStatusLabel) and the shared submission line
+    # (taskSubmitLineText), so the census is 1 → 2 and the old string is gone.
+    assert js.count("Уточняю маршрут") == 0
+    assert js.count("Отправляем запрос") == 2
     # Carry-forward pins (m146/m149/m150 lineage) must survive.
     assert js.count("innerHTML") == 0
     assert js.count('location.hash = "#/profile";') == 3

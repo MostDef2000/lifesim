@@ -67,8 +67,13 @@ CONTROL_CHANGED_BLOCK = (
     "          }"
 )
 
+# #304: the doAction catch keeps its §61/#74 mappings byte-identical; the
+# generic fallback branch now writes the honest degradation caption to the
+# .task-submit-line (actionSubmitErrorText) instead of the raw-message
+# toast, and the latch release precedes the branches.
 ACTION_CATCH_BLOCK = (
     "  } catch (e) {\n"
+    "    finishActionSubmission(token);\n"
     "    // #144/§61: map the AUTONOMOUS refusal to the localized hint; every\n"
     "    // other server error keeps its raw message (out of scope here).\n"
     "    // #74: ONE SLEEP-specific mapping (moveTo's needs_move precedent) —\n"
@@ -80,19 +85,33 @@ ACTION_CATCH_BLOCK = (
     "    } else if (e.status === 422\n"
     "      && String(e.detail).includes(\"Energy already full\")) {\n"
     "      toast(\"Энергия уже полная — сон сейчас не нужен\", true);\n"
-    "    } else { toast(e.message, true); }\n"
+    "    } else {\n"
+    "      // #304: the honest degradation captions for the generic submission\n"
+    "      // failures — the feedback line owns them (the raw server detail\n"
+    "      // never reaches player-visible copy).\n"
+    "      taskSubmitFeedback = actionSubmitErrorText(e);\n"
+    "      refreshTaskPresentationHosts();\n"
+    "    }\n"
     "  }"
 )
 
+# #304: the moveTo catch keeps its §61/needs_move mappings byte-identical;
+# the generic fallback branch now writes the feedback-line caption (the
+# raw-message toast form is gone).
 MOVE_CATCH_BLOCK = (
     "  } catch (e) {\n"
+    "    finishActionSubmission(token);\n"
     "    if (isAutonomousRefusal(e)) {\n"
     "      // #144/§61: stale S.character (GUIDED shown, server AUTONOMOUS) — the\n"
     "      // client gate passed but the server refused; speak the hint, not §61.\n"
     "      toast(AUTONOMOUS_HINT, true);\n"
     "    } else if (e.status === 422 && String(e.detail).includes(\"needs_move\")) {\n"
     "      toast(\"Сначала дойдите до промежуточной точки\", true);\n"
-    "    } else { toast(e.message, true); }\n"
+    "    } else {\n"
+    "      // #304: the honest degradation captions on the feedback line.\n"
+    "      taskSubmitFeedback = actionSubmitErrorText(e);\n"
+    "      refreshTaskPresentationHosts();\n"
+    "    }\n"
     "  }"
 )
 
@@ -178,8 +197,12 @@ def test_autonomous_ui_gate_pins():
     travel_post = js.index('action_type: "TRAVEL_EXTERNAL"')
     assert js.index(EXTERNAL_CATCH_BLOCK) > travel_post
     # Raw passthrough stays for every other error (moveTo's pre-existing else
-    # branch + the doAction else branch).
-    assert js.count("} else { toast(e.message, true); }") == 2
+    # branch + the doAction else branch). #304: the raw message no longer
+    # reaches a toast — the generic fallback writes the honest degradation
+    # caption to the .task-submit-line (doAction + moveTo); the preserved
+    # specific toasts are pinned by the byte blocks above.
+    assert js.count("} else { toast(e.message, true); }") == 0
+    assert js.count("taskSubmitFeedback = actionSubmitErrorText(e);") == 2
 
     # ---------- Lane A regression guards (m146) ----------
     # onpointerdown label reveal is independent of the moveTo gate.
@@ -195,8 +218,12 @@ def test_autonomous_ui_gate_pins():
     assert js.count('location.hash = "#/profile";') == 3
     assert js.count("new WebSocket") == 1
     assert js.count("${proto}://${location.host}/ws") == 1
-    assert js.count("scene-view") == 3
-    assert js.count('document.getElementById("scene-view")') == 2
+    # #304: refreshTaskPresentationHosts adds a third getElementById("scene-view")
+    # lookup (the scene-result host patch) — the scene-view element census
+    # moves 3 → 4 and the getElementById census 2 → 3; the intent (one
+    # scene-view element, looked up per render + per adapter refresh) holds.
+    assert js.count("scene-view") == 4
+    assert js.count('document.getElementById("scene-view")') == 3
     assert js.count('"Открыть Scene"') == 1
     assert js.count("pollEventsFeed") == 2
     assert js.count("innerHTML") == 0

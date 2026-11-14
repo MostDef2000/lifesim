@@ -92,6 +92,14 @@ function resetGameUiContext() {
   S.chatSessionId = null;
   S.mapFocusManual = false;
   S.mapFocusAnchor = null;
+  // #304: the action-lifecycle adapter dies with the session — the
+  // registry, the followed-task pointer, the snapshot, the latch and the
+  // read flights (aborted) all reset; the travel/scene submission state
+  // rides along (a new session never inherits them).
+  resetTaskPresentation();
+  S.travel = null;
+  S.sceneAct = null;
+  S.sceneActDraft = null;
   // #311: the session-owned feed controller tears down destructively — the
   // transport dies, the stream state resets, the listeners invalidate
   // (logout / 401 / character switch start a clean feed).
@@ -239,7 +247,12 @@ async function api(path, opts = {}) {
   // #269: private routing metadata — never forwarded to fetch.
   // #311: feedPoll rides the same lane — the poll flight's session token,
   // used to exempt a STALE flight's 401 from the global fail-closed deauth.
-  const { worldBootstrap: bootstrapFlight, feedPoll: feedPollFlight, ...fetchOpts } = opts;
+  // #304: taskFlight rides it too — a tracked task's detail GET carries its
+  // session token, so a STALE flight's 401 (session torn down / relogin
+  // while the GET flew) must not deauthenticate the NEW session. A CURRENT
+  // flight's genuine 401 keeps the fail-closed deauth + reroute.
+  const { worldBootstrap: bootstrapFlight, feedPoll: feedPollFlight,
+    taskFlight: taskPollFlight, ...fetchOpts } = opts;
   // #269: /world GETs join the pending cold-entry bootstrap flight for the
   // SAME session context (one GET during a route handoff, S17/S18); with no
   // bootstrap in flight every caller still fetches fresh (existing loader
@@ -281,7 +294,10 @@ async function api(path, opts = {}) {
       || (feedPollFlight && (S.user !== feedPollFlight.userRef
         || !S.character || S.character.id !== feedPollFlight.charId
         || worldFeedPollFlight !== feedPollFlight
-        || worldFeedNavGen !== feedPollFlight.navGen));
+        || worldFeedNavGen !== feedPollFlight.navGen))
+      || (taskPollFlight && (taskPollFlight.gen !== taskSessionGeneration
+        || S.user !== taskPollFlight.userRef
+        || !S.character || S.character.id !== taskPollFlight.charId));
     if (!stale) {
       S.user = null;
       // #311: fail-closed — a 401 just proved this session dead, so mark it
@@ -1836,6 +1852,13 @@ function sceneActResultNode() {
       lines.push(el("div", {}, "Принято: "
         + (r.task_label || codeLabel(TASK_TYPE_RU, r.task_type))
         + " (задача " + r.task_id + ")" + ev));
+      // #304: the acceptance subsection reads the adapter — the tracked
+      // task's server-backed status owns the live line (the POST response
+      // alone never produces completion).
+      const entry = taskPresentation.get(String(r.task_id));
+      if (entry) {
+        lines.push(el("div", { class: "muted" }, taskPresentationText(entry)));
+      }
     }
   }
   return el("div", { id: "scene-act-result", class: "scene-act-line muted" }, ...lines);
@@ -1845,12 +1868,22 @@ async function submitSceneAct(refreshScene = true) {
   const input = document.getElementById("scene-act-input");
   const text = input ? input.value.trim() : "";
   if (!text) return;
+  // #304: the shared submission latch — Enter + click double-fire is ONE
+  // POST (the disabled button stays as today, but correctness no longer
+  // depends on it).
+  const token = beginActionSubmission();
+  if (!token) return;
   // A5: one submission in flight — the button is disabled for the request,
   // mirroring the A4 one-inspection guard philosophy.
   const go = document.getElementById("scene-act-go");
   if (go) go.disabled = true;
   try {
     const r = await api("/scene/act", { method: "POST", body: { text } });
+    // #304: guard (a) — navigation must not discard the task id, but a
+    // session change must not accept it. The acceptance runs while the
+    // token still owns the latch; the release is independent of the
+    // acceptance's own detail GET.
+    if (!taskContinuationCurrent(token)) return;
     S.sceneAct = r;
     if (r && r.ok === false) {
       // #93 review F2: 200 ok:false (unsupported/ambiguous/not_possible) is a
@@ -1858,15 +1891,21 @@ async function submitSceneAct(refreshScene = true) {
       // kept here exactly like the catch path below.
       S.sceneActDraft = text;
     } else {
+      // #304: a task-producing acceptance joins the registry — the POST
+      // response alone never produces completion; the tracked task's own
+      // reads own its status from here.
+      if (r && r.task_id != null) acceptTask(r, token);
       // Only a real success (or the discarded 200-ok shape) clears it.
       S.sceneActDraft = null;
     }
+    finishActionSubmission(token);
     // #312: a committed scene action is a PRESENTATION refresh only — the
     // visual lifecycle is owned by the explicit inspect affordance, so the
     // success path never re-inspects (no /visual/scenes POST from here).
     // Idle keeps the result line without a refresh.
     renderScenePanel();
   } catch (e) {
+    finishActionSubmission(token);
     // Same error phrasing as the A3 travel bar (409/401/4xx surfaces).
     // #303 review F2: the persistent result line localizes §61 refusals too —
     // the raw server detail never reaches player-visible copy (the toast
@@ -1881,6 +1920,7 @@ async function submitSceneAct(refreshScene = true) {
     renderScenePanel();
     toast(isAutonomousRefusal(e) ? AUTONOMOUS_HINT : e.message, true);
   } finally {
+    finishActionSubmission(token);  // idempotent — only while still current
     if (go) go.disabled = false;
   }
 }
@@ -2143,15 +2183,25 @@ async function viewWorld() {
 
     // Fetch tasks if owner
     let tasksData = null;
+    let tasksReadToken = null;
     if (me.is_owner) {
+      // #304: the World load's tasks read is an authoritative adapter
+      // refresher — token at START, the in-flight counter spans the await,
+      // the ingest lands after the #302 guard below (a superseded load
+      // commits nothing).
+      tasksReadToken = ++taskReadSequence;
+      taskListReadsInFlight++;
       try {
         tasksData = await api(`/characters/${ctxCharId}/tasks`);
       } catch (e) {
         console.error("Tasks fetch failed", e);
+      } finally {
+        taskListReadsInFlight--;
       }
     }
     if (S.user !== ctxUser || !S.character || S.character.id !== ctxCharId
       || epoch !== navEpoch) return;
+    if (tasksReadToken != null) ingestTaskSnapshot(tasksData, tasksReadToken);
     // #269 S23: freshness, not just context — an out-of-order OLDER
     // same-context load must not republish its world/weather over an
     // already-newer snapshot; it still renders (with the newer shared world).
@@ -2233,23 +2283,16 @@ function nowPanel(tasksData, autonomous) {
         if (poiHost) poiHost.setAttribute("style", expanded
           ? "--poi-top: calc(42vh + 20px)" : "--poi-top: 156px");
       } }, "Детали");
-  let taskNode;
-  if (tasksData == null) {
-    taskNode = el("span", { class: "world-now-state" }, "Данные о делах недоступны");
-  } else {
-    const active = tasksData.active || [];
-    const planned = tasksData.planned || [];
-    const current = active.length ? active[0] : (planned.length ? planned[0] : null);
-    taskNode = current
-      ? el("span", { class: "world-now-task" },
-          el("span", { class: "world-now-status" },
-            codeLabel(TASK_STATUS_RU, current.status)),
-          el("span", { class: "world-now-type" },
-            codeLabel(TASK_TYPE_RU, current.task_type) || "—"))
-      : el("span", { class: "world-now-state" }, "Сейчас нет активных дел");
-  }
+  // #304: the task slot is a dedicated host filled from the adapter (the
+  // selected task's lifecycle caption, the honest empty state, or the
+  // unavailable line) — refreshTaskPresentationHosts() fills it at mount
+  // and patches it in place on every adapter change (never a full-screen
+  // rerender for status). The expand button and the .world-now-* styling
+  // are untouched.
   const parts = [el("div", { class: "world-now-row" },
-    el("span", { class: "world-now-label" }, "Сейчас"), taskNode, expandBtn)];
+    el("span", { class: "world-now-label" }, "Сейчас"),
+    el("span", { class: "world-now-task-host", id: "world-now-task-host" }),
+    expandBtn)];
   if (autonomous) {
     // #301: the autonomy state line moved INTO the HUD (readable above the
     // map fold) — relocated from the below-fold actions card, same
@@ -2915,6 +2958,430 @@ function renderWorld(locs, tasksData) {
   // re-render; route() clears it on any hash change).
   bindPoiSelectionKeys();
   updatePoiSelectionCard();
+  // #304: the World HUD's task slot renders from the adapter (the ingest
+  // has already landed before renderWorld) — fill the host at mount.
+  refreshTaskPresentationHosts();
+}
+
+/* #304: action lifecycle — «команда принята ≠ действие выполнено». The
+   module-local task presentation adapter owns the ACCEPTED-task state: the
+   registry (String(task_id) → entry), the followed-task pointer, the
+   session generation, the monotonic read sequence, the submission latch,
+   and the in-flight task GET flights. The phase is DERIVED from
+   serverStatus + readState at caption time — never stored. The bindings
+   are module-locals (NOT S fields — the frozen initializer tail), exposed
+   to the m304 harness through its own epilogue. Ordinary route switches
+   clear NOTHING; only resetGameUiContext() (session teardown) is
+   destructive. */
+let taskPresentation = new Map();  // String(task_id) → entry
+let currentTaskId = null;  // the followed task — survives terminal completion
+let taskSessionGeneration = 0;  // monotonic; bumped by resetTaskPresentation
+let taskReadSequence = 0;  // monotonic; assigned WHEN EACH READ STARTS
+let actionSubmission = null;  // the session-owned submission latch token
+let taskReadFlights = new Map();  // String(task_id) → detail flight
+let latestTaskSnapshot = null;  // the last SUCCESSFULLY ingested list (null = none/failed)
+let taskListReadsInFlight = 0;  // list reads in flight (single-flight span)
+let taskSubmitFeedback = "";  // the last submission-failure caption (host line)
+
+/* #304: terminal/active predicates — the reconciliation vocabulary. */
+function isTerminalTaskStatus(st) {
+  return st === "completed" || st === "failed" || st === "cancelled";
+}
+function isActiveTaskStatus(st) {
+  return st === "active" || st === "STARTED";
+}
+
+/* #304: guard (a) — the model-write continuation token. A successful
+   POST's task id survives NAVIGATION (navigation is not a session change),
+   but a session teardown/relogin must not accept it: the generation, the
+   user OBJECT identity, and the character id must all still match, and the
+   token must still own the latch. */
+function taskContinuationCurrent(token) {
+  if (!token || actionSubmission !== token) return false;
+  if (token.gen !== taskSessionGeneration) return false;
+  if (!S.user || token.userRef !== S.user) return false;
+  if (!S.character || token.charId !== S.character.id) return false;
+  return true;
+}
+
+/* #304: the ONE session-owned submission latch, shared by doAction,
+   moveTo, submitSceneAct and submitTravel. Acquired synchronously BEFORE
+   the first await (a second click/Enter is a no-op — no second POST, no
+   fake acceptance; narrowly covers #327's double-submit without touching
+   the keyboard wiring). Released only while the token is still current. */
+function beginActionSubmission() {
+  if (actionSubmission) return null;
+  const token = {
+    gen: taskSessionGeneration,
+    userRef: S.user,
+    charId: S.character ? S.character.id : null,
+  };
+  actionSubmission = token;
+  taskSubmitFeedback = "";  // a new submission supersedes the last failure
+  refreshTaskPresentationHosts();  // the sending line appears
+  return token;
+}
+
+function finishActionSubmission(token) {
+  if (!token || actionSubmission !== token) return;
+  actionSubmission = null;
+  refreshTaskPresentationHosts();  // the sending line clears
+}
+
+/* #304: acceptance — create/merge the registry entry, move the pointer,
+   and start the immediate single-flight detail GET. The latch is released
+   by the CALLER independently of this GET. The acceptance response alone
+   never produces completion/needs/movement — only a planned/queued entry. */
+function acceptTask(response, token) {
+  if (!response || response.task_id == null) return;
+  if (!taskContinuationCurrent(token)) return;  // a dead session accepts nothing
+  const key = String(response.task_id);
+  const existing = taskPresentation.get(key);
+  const entry = existing || {
+    taskId: response.task_id,
+    serverStatus: null,
+    readState: "ok",
+    lastReadSequence: 0,
+    acceptedSequence: 0,
+  };
+  entry.taskType = response.task_type || entry.taskType || "";
+  entry.label = response.task_label || entry.label
+    || codeLabel(TASK_TYPE_RU, entry.taskType) || "";
+  if (!isTerminalTaskStatus(entry.serverStatus)) {
+    // terminal sticky: a re-acceptance never demotes a confirmed terminal
+    entry.serverStatus = response.status || "planned";
+    if (response.ends_at != null) entry.endsAt = response.ends_at;
+  }
+  entry.acceptedSequence = taskReadSequence;
+  entry.readState = "ok";
+  taskPresentation.set(key, entry);
+  currentTaskId = response.task_id;
+  refreshTaskPresentationHosts();
+  // The immediate single-flight detail GET: skipped while a list read is
+  // in flight (the landing list refreshes instead — one read, not two).
+  refreshTask(response.task_id, { corroborated: false });
+}
+
+/* #304: the single-flight detail GET for one tracked task. Skipped when a
+   detail flight for the SAME task is active, when a list read is in flight
+   (coalescing), or when the entry is a confirmed terminal (no recurring
+   lookups). The flight carries the session token — a stale 401 must not
+   deauthenticate a newer session (api()'s taskFlight lane). */
+function refreshTask(taskId, opts = {}) {
+  const key = String(taskId);
+  if (taskReadFlights.has(key)) return;
+  if (taskListReadsInFlight > 0) return;
+  const entry = taskPresentation.get(key);
+  if (entry && isTerminalTaskStatus(entry.serverStatus)) return;
+  let controller = null;
+  try { controller = new AbortController(); } catch (e) { controller = null; }
+  const token = ++taskReadSequence;
+  const flight = {
+    token,
+    gen: taskSessionGeneration,
+    userRef: S.user,
+    charId: S.character ? S.character.id : null,
+    controller,
+    corroborated: !!opts.corroborated,
+  };
+  taskReadFlights.set(key, flight);
+  const apiOpts = { taskFlight: flight };
+  if (controller) apiOpts.signal = controller.signal;
+  api(`/actions/${taskId}`, apiOpts).then((detail) => {
+    if (taskReadFlights.get(key) === flight) taskReadFlights.delete(key);
+    ingestTaskDetail(taskId, detail, flight);
+  }).catch((e) => {
+    if (taskReadFlights.get(key) === flight) taskReadFlights.delete(key);
+    ingestTaskDetailFailure(taskId, e, flight);
+  });
+}
+
+/* #304: the detail-GET landing. Stale-session responses are rejected; a
+   malformed body degrades to «unavailable»; the reconciliation rules apply
+   (terminal sticky / first confirmed terminal wins / nonterminal age
+   rejection / active never regresses). */
+function ingestTaskDetail(taskId, detail, flight) {
+  if (flight.gen !== taskSessionGeneration || !S.user
+    || flight.userRef !== S.user || !S.character
+    || S.character.id !== flight.charId) return;  // stale session — commit nothing
+  if (!detail || typeof detail !== "object" || detail.status == null) {
+    applyTaskReadFailure(taskId, { status: 0 }, flight);  // malformed → unavailable
+    return;
+  }
+  applyTaskRead(taskId, detail, flight.token);
+}
+
+function ingestTaskDetailFailure(taskId, e, flight) {
+  if (flight.gen !== taskSessionGeneration || !S.user
+    || flight.userRef !== S.user || !S.character
+    || S.character.id !== flight.charId) return;  // stale session — commit nothing
+  applyTaskReadFailure(taskId, e || {}, flight);
+}
+
+/* #304: the read-failure landing. A terminal entry survives ordinary read
+   failures (its caption is already confirmed). A 404 corroborated by a
+   post-acceptance list omission → «История задачи недоступна»; a 404 alone
+   (and 403/503/network) → «Не удаётся уточнить состояние». */
+function applyTaskReadFailure(taskId, e, flight) {
+  const entry = taskPresentation.get(String(taskId));
+  if (!entry) return;
+  if (isTerminalTaskStatus(entry.serverStatus)) return;  // terminal survives
+  if (e && e.status === 404 && flight.corroborated) {
+    entry.readState = "historyMissing";
+  } else {
+    entry.readState = "unavailable";
+  }
+  entry.lastReadSequence = flight.token;
+  refreshTaskPresentationHosts();
+}
+
+/* #304: the shared read-landing reconciliation. `readToken` is the token
+   the read carried from its START — a nonterminal update older than the
+   entry's committed token is rejected; a terminal update is always the
+   first-confirmed winner (the entry was nonterminal, else we bailed). */
+function applyTaskRead(taskId, data, readToken) {
+  const entry = taskPresentation.get(String(taskId));
+  if (!entry) return;  // not tracked (e.g. a pre-acceptance read's task)
+  if (isTerminalTaskStatus(entry.serverStatus)) return;  // terminal sticky
+  if (isTerminalTaskStatus(data.status)) {
+    entry.serverStatus = data.status;
+    entry.failureReason = (data.parameters && data.parameters.reason) || null;
+    if (data.ends_at != null) entry.endsAt = data.ends_at;
+    if (data.task_type) entry.taskType = data.task_type;
+    entry.readState = "ok";
+    entry.lastReadSequence = readToken;
+    refreshTaskPresentationHosts();
+    return;
+  }
+  if (readToken < entry.lastReadSequence) return;  // older nonterminal update
+  if (isActiveTaskStatus(entry.serverStatus) && !isActiveTaskStatus(data.status)) {
+    return;  // active never regresses to planned/queued
+  }
+  entry.serverStatus = data.status;
+  if (data.task_type) entry.taskType = data.task_type;
+  entry.label = data.task_label || entry.label
+    || codeLabel(TASK_TYPE_RU, entry.taskType) || "";
+  if (data.ends_at != null) entry.endsAt = data.ends_at;
+  entry.failureReason = null;
+  entry.readState = "ok";
+  entry.lastReadSequence = readToken;
+  refreshTaskPresentationHosts();
+}
+
+/* #304: the list-read landing — the existing reads become authoritative
+   refreshers (NO second timer). A null/malformed snapshot (a failed read)
+   drops the snapshot state (the hosts degrade honestly) but never touches
+   tracked entries (terminal survives ordinary read failures). A successful
+   list refreshes every tracked task it carries; a post-acceptance omission
+   of a tracked NONTERMINAL task triggers ONE corroborating detail GET
+   (failed tasks vanish from lists — fail_task writes no completed_at);
+   a pre-acceptance read's absence is ignored. Terminals are never looked
+   up and never regress. */
+function ingestTaskSnapshot(snapshot, readToken) {
+  if (!snapshot || typeof snapshot !== "object" || !Array.isArray(snapshot.active)
+    || !Array.isArray(snapshot.planned)) {
+    latestTaskSnapshot = null;
+    refreshTaskPresentationHosts();
+    return;
+  }
+  latestTaskSnapshot = snapshot;
+  const all = [...(snapshot.active || []), ...(snapshot.planned || []),
+    ...(snapshot.recent_terminal || [])];
+  const byId = new Map();
+  for (const t of all) {
+    const rid = taskRowId(t);
+    if (rid != null) byId.set(String(rid), t);
+  }
+  for (const [key, entry] of taskPresentation) {
+    if (isTerminalTaskStatus(entry.serverStatus)) continue;  // sticky, no lookups
+    const found = byId.get(key);
+    if (found) {
+      applyTaskRead(entry.taskId, found, readToken);
+    } else if (readToken > entry.acceptedSequence) {
+      // post-acceptance omission — corroborate with ONE detail GET
+      refreshTask(entry.taskId, { corroborated: true });
+    }
+    // a read started before the task's acceptance says nothing about it
+  }
+  refreshTaskPresentationHosts();
+}
+
+/* #304: the TASK_COMPLETED/TASK_FAILED feed events are RECHECK TRIGGERS
+   only — the payloads carry no task_id, so the adapter never assigns a
+   status or a reason by event type; the tracked nonterminal tasks' own
+   detail GETs decide. */
+function triggerTaskRechecks() {
+  for (const [key, entry] of taskPresentation) {
+    if (!isTerminalTaskStatus(entry.serverStatus)) {
+      refreshTask(entry.taskId, { corroborated: false });
+    }
+  }
+}
+
+/* #304: the list-row id — the POST/scene-act acceptance payloads carry
+   `task_id`, while the /characters/{id}/tasks list rows (backend
+   task_to_dict) carry `id`. The adapter accepts BOTH shapes everywhere it
+   reads a row id; a row with neither id is display-ineligible (it cannot
+   be tracked or refreshed). */
+function taskRowId(t) {
+  if (!t) return null;
+  if (t.task_id != null) return t.task_id;
+  if (t.id != null) return t.id;
+  return null;
+}
+
+/* #304: the selected task — the pointer first, else the latest snapshot's
+   active[0] (the server pre-orders oldest first), else planned[0]. Multiple
+   planned tasks are possible (the server activates the OLDEST); the pointer
+   survives terminal completion until the next acceptance or a session
+   reset; failed submissions never replace it. */
+function selectCurrentTask() {
+  if (currentTaskId != null) {
+    const entry = taskPresentation.get(String(currentTaskId));
+    if (entry) return entry;
+  }
+  if (latestTaskSnapshot) {
+    const active = latestTaskSnapshot.active || [];
+    const planned = latestTaskSnapshot.planned || [];
+    const current = active.length ? active[0] : (planned.length ? planned[0] : null);
+    const currentId = taskRowId(current);
+    if (currentId != null) {
+      return taskPresentation.get(String(currentId)) || {
+        taskId: currentId,
+        taskType: current.task_type || "",
+        label: current.task_label || codeLabel(TASK_TYPE_RU, current.task_type) || "",
+        serverStatus: current.status,
+        endsAt: current.ends_at != null ? current.ends_at : null,
+        failureReason: (current.parameters && current.parameters.reason) || null,
+        readState: "ok",
+        lastReadSequence: 0,
+        acceptedSequence: 0,
+      };
+    }
+  }
+  return null;
+}
+
+/* #304: the caption formatter — the exact RU strings of the lifecycle
+   contract. The phase is derived here (serverStatus + readState), never
+   stored. ends_at renders ONLY as the server-estimate caption (no
+   countdown/percentage/auto-transition); failed/cancelled keep neutral
+   wording, never «завершено». */
+function taskPresentationText(entry) {
+  if (!entry) return "";
+  if (entry.readState === "unavailable") return "Не удаётся уточнить состояние";
+  if (entry.readState === "historyMissing") return "История задачи недоступна";
+  const st = entry.serverStatus;
+  const endsPart = (entry.endsAt != null && !isTerminalTaskStatus(st))
+    ? ` · Плановое окончание по оценке сервера: ${dayTime(entry.endsAt)}` : "";
+  if (st === "completed") return "Действие завершено";
+  if (st === "failed") {
+    return entry.failureReason
+      ? `Не удалось: ${entry.failureReason}` : "Не удалось: причина не указана";
+  }
+  if (st === "cancelled") {
+    return entry.failureReason
+      ? `Действие отменено: ${entry.failureReason}` : "Действие отменено";
+  }
+  if (isActiveTaskStatus(st)) {
+    const label = entry.label || codeLabel(TASK_TYPE_RU, entry.taskType) || "—";
+    return `Персонаж занят: ${label}${endsPart}`;
+  }
+  if (st === "planned" || st === "queued") {
+    return `Задача принята. Ожидает начала${endsPart}`;
+  }
+  // unknown status — preserve the server value with the existing
+  // unknown-code fallback (codeLabel falls back to the raw code)
+  const label = codeLabel(TASK_STATUS_RU, st) || String(st == null ? "—" : st);
+  return `${label}${endsPart}`;
+}
+
+/* #304: the World HUD's task slot renderer — the adapter's selected task
+   (status caption + type label, the .world-now-* styling kept), the honest
+   empty state, or the unavailable line. Shared by the mount render and the
+   in-place refresh (one source, identical text on World and Place). */
+function taskStatusHostNode() {
+  const entry = selectCurrentTask();
+  if (entry) {
+    return el("span", { class: "world-now-task" },
+      el("span", { class: "world-now-status" }, taskPresentationText(entry)),
+      el("span", { class: "world-now-type" },
+        codeLabel(TASK_TYPE_RU, entry.taskType) || "—"));
+  }
+  if (latestTaskSnapshot == null) {
+    return el("span", { class: "world-now-state" }, "Данные о делах недоступны");
+  }
+  return el("span", { class: "world-now-state" }, "Сейчас нет активных дел");
+}
+
+/* #304: the Place task-content renderer — the SAME selected-task text as
+   the World HUD (identical caption, no re-derivation). */
+function placeTaskHostNode() {
+  const entry = selectCurrentTask();
+  if (entry) return el("span", {}, taskPresentationText(entry));
+  if (latestTaskSnapshot == null) {
+    return el("span", { class: "muted" }, "Данные о делах недоступны");
+  }
+  return el("span", { class: "muted" }, "нет активной задачи");
+}
+
+/* #304: the submission feedback line — the local sending text while the
+   latch is held, else the last submission-failure caption. A separate
+   line: the existing active task stays visible beside it. */
+function taskSubmitLineText() {
+  if (actionSubmission) return "Отправляем запрос…";
+  return taskSubmitFeedback;
+}
+
+/* #304: the in-place host refresher — patches every MOUNTED #304 host
+   (World HUD slot, Place task content, the submission lines, the Tasks
+   followed-task host, the scene-result hosts). Absent hosts are skipped:
+   origin-screen effects never resurrect a view that is not on screen
+   (guard (b) — no stale toast/callback/scene redraw after navigation). */
+function refreshTaskPresentationHosts() {
+  const worldHost = document.getElementById("world-now-task-host");
+  if (worldHost) worldHost.replaceChildren(taskStatusHostNode());
+  const placeHost = document.getElementById("place-task-content");
+  if (placeHost) placeHost.replaceChildren(placeTaskHostNode());
+  const lineText = taskSubmitLineText();
+  for (const line of document.querySelectorAll(".task-submit-line")) {
+    line.textContent = lineText;
+  }
+  const followed = document.getElementById("tasks-followed");
+  if (followed) {
+    const entry = currentTaskId != null
+      ? taskPresentation.get(String(currentTaskId)) : null;
+    const inSections = !entry || (followed._taskIds
+      && followed._taskIds.has(String(currentTaskId)));
+    followed.querySelector(".tasks-followed-body").textContent = inSections
+      ? "" : taskPresentationText(entry);
+  }
+  const rn = sceneActResultNode();
+  const sceneBox = document.getElementById("scene-view");
+  if (sceneBox && sceneBox._sceneHosts) {
+    sceneBox._sceneHosts.result.replaceChildren(...(rn ? [rn] : []));
+  }
+  const placeResult = document.querySelector(".place-scene-act-result");
+  if (placeResult) placeResult.replaceChildren(...(rn ? [rn] : []));
+}
+
+/* #304: session teardown — the registry, the pointer, the snapshot, the
+   latch and the read flights die destructively (abort first). The
+   monotonic counters stay monotonic: the generation bumps (in-flight
+   continuations lose their guard), the read sequence never rewinds. */
+function resetTaskPresentation() {
+  taskSessionGeneration++;
+  for (const flight of taskReadFlights.values()) {
+    try { if (flight.controller) flight.controller.abort(); } catch (e) { /* already dead */ }
+  }
+  taskReadFlights.clear();
+  taskListReadsInFlight = 0;
+  taskPresentation.clear();
+  currentTaskId = null;
+  latestTaskSnapshot = null;
+  actionSubmission = null;
+  taskSubmitFeedback = "";
+  refreshTaskPresentationHosts();
 }
 
 /* #303: the shared action vocabulary — the World actions card and the Place
@@ -2924,17 +3391,29 @@ function renderWorld(locs, tasksData) {
 const ACTION_VOCABULARY = [["WORK", "Пойти на работу"], ["EAT", "Поесть"], ["DRINK", "Попить"],
   ["SLEEP", "Отдохнуть / поспать"], ["SOCIALIZE", "Пообщаться"]];
 
-async function doAction(actionType, params = {}, after = viewWorld) {
+async function doAction(actionType, params = {}, after = () => {}) {
+  // #304: the session-owned submission latch — a second click while a
+  // submission is in flight is a no-op (no second POST, no fake
+  // acceptance). The default after() is a no-op: acceptance stays on the
+  // current screen (the lifecycle captions own the feedback now).
+  const token = beginActionSubmission();
+  if (!token) return;
   try {
-    await api("/actions", { method: "POST",
+    const r = await api("/actions", { method: "POST",
       body: { character_id: S.character.id, action_type: actionType, params } });
+    // #304: guard (a) — navigation must not discard the task id, but a
+    // session change must not accept it. The acceptance runs while the
+    // token still owns the latch; the release below is independent of the
+    // acceptance's own detail GET (it does not wait for it).
+    if (!taskContinuationCurrent(token)) return;
+    if (r && r.task_id != null) {
+      acceptTask(r, token);
+    }
+    finishActionSubmission(token);
     toast(`Задача ${actionType} принята`);
-    // #74: the success navigation is injectable — the Home screen's sleep
-    // passes a no-op stay (task acceptance is not a completed sleep; no
-    // yank to the world map, no fake refresh). Default keeps the historic
-    // behavior for every existing caller.
     after();
   } catch (e) {
+    finishActionSubmission(token);
     // #144/§61: map the AUTONOMOUS refusal to the localized hint; every
     // other server error keeps its raw message (out of scope here).
     // #74: ONE SLEEP-specific mapping (moveTo's needs_move precedent) —
@@ -2946,8 +3425,35 @@ async function doAction(actionType, params = {}, after = viewWorld) {
     } else if (e.status === 422
       && String(e.detail).includes("Energy already full")) {
       toast("Энергия уже полная — сон сейчас не нужен", true);
-    } else { toast(e.message, true); }
+    } else {
+      // #304: the honest degradation captions for the generic submission
+      // failures — the feedback line owns them (the raw server detail
+      // never reaches player-visible copy).
+      taskSubmitFeedback = actionSubmitErrorText(e);
+      refreshTaskPresentationHosts();
+    }
+  } finally {
+    finishActionSubmission(token);  // idempotent — only while still current
   }
+}
+
+/* #304: the generic submission-failure captions (409/422/503/network).
+   The preserved specific messages (AUTONOMOUS refusal, full-energy,
+   needs_move) keep their toasts and never reach this mapper. */
+function actionSubmitErrorText(e) {
+  if (e && e.status === 409) {
+    const d = String((e.data && e.data.detail) || e.detail || "");
+    // #304: the busy caption must match BOTH the synthetic busy detail and
+    // the REAL backend's 409-active detail "character already has an active
+    // task" (app.py:1164/:1243/:1507 — all three action paths send exactly
+    // this); anything else stays the generic unavailable caption.
+    return /busy|занят|already has an active task/i.test(d)
+      ? "Персонаж уже занят другим действием" : "Действие сейчас недоступно";
+  }
+  if (e && e.status === 422) {
+    return "Действие сейчас невозможно. Проверьте условия";
+  }
+  return "Не удалось подтвердить принятие запроса. Проверьте связь";
 }
 
 async function moveTo(loc) {
@@ -2958,20 +3464,37 @@ async function moveTo(loc) {
     toast(AUTONOMOUS_HINT);
     return;
   }
+  // #304: the shared submission latch + the lifecycle acceptance — the
+  // move request is a task like any other. NO viewWorld(): the map keeps
+  // its state and the poll/arrival path updates it; the POI card's own
+  // continuation still consumes the selection.
+  const token = beginActionSubmission();
+  if (!token) return;
   try {
-    await api("/actions", { method: "POST", body: {
+    const r = await api("/actions", { method: "POST", body: {
       character_id: S.character.id, action_type: "MOVE",
       params: { location_id: loc.id } } });
-    toast(`Идём в ${loc.name || loc.id}`);
-    viewWorld();
+    // #304: guard (a) — the acceptance runs while the token still owns the
+    // latch; the release is independent of the acceptance's detail GET.
+    if (!taskContinuationCurrent(token)) return;
+    if (r && r.task_id != null) acceptTask(r, token);
+    finishActionSubmission(token);
+    toast("Запрос на перемещение принят");
   } catch (e) {
+    finishActionSubmission(token);
     if (isAutonomousRefusal(e)) {
       // #144/§61: stale S.character (GUIDED shown, server AUTONOMOUS) — the
       // client gate passed but the server refused; speak the hint, not §61.
       toast(AUTONOMOUS_HINT, true);
     } else if (e.status === 422 && String(e.detail).includes("needs_move")) {
       toast("Сначала дойдите до промежуточной точки", true);
-    } else { toast(e.message, true); }
+    } else {
+      // #304: the honest degradation captions on the feedback line.
+      taskSubmitFeedback = actionSubmitErrorText(e);
+      refreshTaskPresentationHosts();
+    }
+  } finally {
+    finishActionSubmission(token);  // idempotent — only while still current
   }
 }
 
@@ -2979,8 +3502,16 @@ async function moveTo(loc) {
 
 function travelStatusLabel() {
   if (!S.travel) return "";
-  if (S.travel.state === "interpreting") return "Уточняю маршрут…";
+  // #304: the interpreting phase shows the LOCAL sending text — the plan
+  // POST is still in flight, no movement evidence exists yet.
+  if (S.travel.state === "interpreting") return "Отправляем запрос…";
   if (S.travel.state === "travelling") {
+    // #304: the travel task's status resolves through the adapter — the
+    // POST response alone is not movement evidence; the tracked task's
+    // server-backed status owns the line when the task is registered.
+    const entry = S.travel.taskId != null
+      ? taskPresentation.get(String(S.travel.taskId)) : null;
+    if (entry) return taskPresentationText(entry);
     return `Идём в ${S.travel.destName} — ~${S.travel.etaMinutes} мин`;
   }
   return "";
@@ -3012,19 +3543,37 @@ async function submitTravel() {
   const input = document.getElementById("travel-input");
   const text = input ? input.value.trim() : "";
   if (!text) return;
+  // #304: the travel plan reuses the ONE submission latch (no fourth
+  // /actions call site — the plan's task_id joins the registry at this
+  // existing call site).
+  const token = beginActionSubmission();
+  if (!token) return;
   S.travel = { state: "interpreting" };
   const status = document.getElementById("travel-status");
   if (status) status.textContent = travelStatusLabel();
   try {
     const plan = await api("/travel/plan", { method: "POST", body: { text } });
+    // #304: guard (a) — a session change must not accept the plan's task.
+    // The acceptance runs while the token still owns the latch.
+    if (!taskContinuationCurrent(token)) return;
     S.travel = { state: "travelling", destName: plan.name,
       etaMinutes: plan.travel_minutes, taskId: plan.task_id };
+    // #304: the travel task joins the registry — the poll's list reads and
+    // the detail GET refresh its server-backed status from here.
+    if (plan.task_id != null) {
+      acceptTask({ task_id: plan.task_id, task_type: "MOVE",
+        status: "planned" }, token);
+    }
+    finishActionSubmission(token);
     viewWorld();
   } catch (e) {
+    finishActionSubmission(token);
     S.travel = null;
     const stale = document.getElementById("travel-status");
     if (stale) stale.textContent = "";
     toast(travelErrorText(e), true);
+  } finally {
+    finishActionSubmission(token);  // idempotent — only while still current
   }
 }
 
@@ -3470,6 +4019,7 @@ async function viewLocation(locId) {
   // as the World HUD's «Сейчас» (viewWorld's /characters/{id}/tasks) — one
   // bounded read per place load, staged locally like world/weather.
   let tasksData = null;
+  let tasksReadToken = null;  // #304: the adapter read token (assigned at START)
   // #72 validator: world context is fetched into LOCALS — a stale response
   // must not mutate the SHARED S.world/S.weather for a screen that is about
   // to be dropped. Other screens read S.world/S.weather (topbar clock, map
@@ -3499,9 +4049,14 @@ async function viewLocation(locId) {
     // is_owner gate mirrors viewWorld; the cold by-user bootstrap payload
     // carries no is_owner and the place viewer always owns S.character,
     // so undefined counts as owner.
+    // #304: token at START, the in-flight counter spans the await; the
+    // ingest lands after the #302 guard below.
     if (S.character.is_owner !== false) {
+      tasksReadToken = ++taskReadSequence;
+      taskListReadsInFlight++;
       try { tasksData = await api(`/characters/${ctxCharId}/tasks`); }
       catch (e) { tasksData = null; }
+      finally { taskListReadsInFlight--; }
     }
   } catch (e) {
     // #93: transient failure — explicit retry instead of a dead «Загрузка…».
@@ -3522,6 +4077,9 @@ async function viewLocation(locId) {
     || !S.user || !S.character
     || S.user !== ctxUser || S.character.id !== ctxCharId
     || epoch !== navEpoch) return;
+  // #304: the guard passed — the tasks read lands in the adapter (a
+  // superseded load commits nothing).
+  if (tasksReadToken != null) ingestTaskSnapshot(tasksData, tasksReadToken);
   // Guard passed — only now do the fresh reads become shared state
   // (topbar clock, map ambience and the overview lines read them).
   // #269 S23: freshness, not just context — an out-of-order OLDER
@@ -3684,23 +4242,16 @@ function renderPlace(locId, place, locs, tasksData) {
       sceneActBar(submitPlaceSceneAct), actResult));
   }
 
-  // Current task — the same read-only source as the World HUD's «Сейчас»
-  // (fetched in viewLocation). Honest states: the top active (else planned)
-  // task, «нет активной задачи», or an explicit unavailable.
-  let taskNode;
-  if (tasksData == null) {
-    taskNode = el("span", { class: "muted" }, "Данные о делах недоступны");
-  } else {
-    const active = tasksData.active || [];
-    const planned = tasksData.planned || [];
-    const current = active.length ? active[0] : (planned.length ? planned[0] : null);
-    taskNode = current
-      ? el("span", {},
-          `${codeLabel(TASK_STATUS_RU, current.status)} · ${codeLabel(TASK_TYPE_RU, current.task_type) || "—"}`)
-      : el("span", { class: "muted" }, "нет активной задачи");
-  }
+  // Current task — #304: the SAME adapter source as the World HUD's
+  // «Сейчас» (identical selected-task text). The «Задача:» label stays;
+  // only the content host is adapter-driven and patched in place (never a
+  // full-screen rerender for status).
   contextKids.push(el("div", { class: "place-task" },
-    el("span", { class: "place-task-label" }, "Задача:"), taskNode));
+    el("span", { class: "place-task-label" }, "Задача:"),
+    el("span", { class: "place-task-content", id: "place-task-content" })));
+  // #304: the submission feedback line — the local sending text while a
+  // submission is in flight, else the last submission-failure caption.
+  contextKids.push(el("div", { class: "task-submit-line muted" }, ""));
 
   // Events: the request has its own failure/retry state, independent of the
   // main render — a feed failure never takes the whole screen down.
@@ -3781,6 +4332,9 @@ function renderPlace(locId, place, locs, tasksData) {
   // its quiet listener — a cold deep-link into a place starts the feed too.
   worldFeedController.start();
   worldFeedController.attachView(placeFeedListener);
+  // #304: the Place task host + the submission line render from the adapter
+  // (the ingest has already landed before renderPlace) — fill at mount.
+  refreshTaskPresentationHosts();
 }
 
 /* #312: the Place stage scene visual. Module-level on purpose: the m238
@@ -4458,7 +5012,23 @@ async function pollEvents() {
 
     // Handle Tasks (MOVE and TRAVEL_EXTERNAL)
     if (S.character.is_owner) {
-      const tasks = await api(`/characters/${S.character.id}/tasks`);
+      // #304: the poll's tasks read is an authoritative adapter refresher —
+      // the read token is assigned at START, the in-flight counter spans
+      // the await (finally-only: a failed fetch still propagates to the
+      // poll's own catch — the #175 liveness semantics are untouched), and
+      // the snapshot is ingested BEFORE the MOVE/badge processing below.
+      const listToken = ++taskReadSequence;
+      taskListReadsInFlight++;
+      let tasks;
+      try {
+        tasks = await api(`/characters/${S.character.id}/tasks`);
+      } finally {
+        taskListReadsInFlight--;
+      }
+      // #311: the missing flight guard — a tick superseded while the tasks
+      // fetch flew must not write the marker/badge from its stale read.
+      if (!worldFeedFlightCurrent(flight)) return;
+      ingestTaskSnapshot(tasks, listToken);
       const active = tasks.active && tasks.active[0];
       
       if (active && active.task_type === "MOVE") {
@@ -4553,6 +5123,13 @@ async function pollEventsFeed() {
       // transport into the view listeners (worldFeedPublishAll) — the
       // transport is view-agnostic now.
       worldFeedPublishAll(fresh);
+      // #304: completion/failure events are RECHECK TRIGGERS only (at
+      // committed publication) — the payloads carry no task_id; the tracked
+      // nonterminal tasks' own detail GETs decide. No artificial batches.
+      if (fresh.some((e) => e.event_type === "TASK_COMPLETED"
+        || e.event_type === "TASK_FAILED")) {
+        triggerTaskRechecks();
+      }
       // #82 (A3): REST fallback path mirrors the WS arrival hook.
       if (fresh.some((e) => isOwnMoveEvent(e))) onOwnArrival();
     }
@@ -4623,6 +5200,13 @@ function connectWs() {
           // transport into the view listeners (worldFeedPublishAll) — the
           // frame handler is view-agnostic now.
           worldFeedPublishAll(fresh);
+          // #304: completion/failure events are RECHECK TRIGGERS only (at
+          // committed publication) — the payloads carry no task_id; the
+          // tracked nonterminal tasks' own detail GETs decide.
+          if (fresh.some((e) => e.event_type === "TASK_COMPLETED"
+            || e.event_type === "TASK_FAILED")) {
+            triggerTaskRechecks();
+          }
           // #144: a CONTROL_CHANGED fired from another tab/session leaves
           // stale action pills behind — re-render the world view (it re-reads
           // the character). ws.onmessage fires on ALL views, so only refresh
@@ -5939,9 +6523,16 @@ function taskRow(t) {
     el("span", { class: "status" }, codeLabel(TASK_STATUS_RU, t.status) || ""),
     el("span", {}, codeLabel(TASK_TYPE_RU, t.task_type) || ""),
     t.source ? el("span", { class: "muted" }, ` · ${codeLabel(TASK_SOURCE_RU, t.source)}`) : null,
-    t.ends_at != null ? el("span", { class: "muted" }, ` · до ${dayTime(t.ends_at)}`) : null,
+    // #304: the ends_at estimate is the SERVER's estimate, worded as such —
+    // no countdown, no percentage, no auto-transition. Failed/cancelled
+    // completions keep the neutral «Окончание» (never «завершено»).
+    t.ends_at != null && t.completed_at == null
+      ? el("span", { class: "muted" },
+          ` · Плановое окончание по оценке сервера: ${dayTime(t.ends_at)}`) : null,
     t.completed_at != null
-      ? el("span", { class: "muted" }, ` · завершено ${dayTime(t.completed_at)}`) : null,
+      ? el("span", { class: "muted" },
+          ` · ${t.status === "failed" || t.status === "cancelled"
+            ? "Окончание" : "завершено"} ${dayTime(t.completed_at)}`) : null,
     reason ? el("span", { class: "muted" }, ` · ${reason}`) : null,
     loc ? mapLink(loc.id) : null);
 }
@@ -5950,6 +6541,11 @@ async function viewTasks() {
   location.hash = "#/tasks";
   const loading = el("div", { class: "muted" }, "Загрузка…");
   app.replaceChildren(topbar("#/tasks"), loading);
+  // #304: the load captures its generation + session identity — a newer
+  // navigation or a session change while it flies must not publish.
+  const epoch = navEpoch;
+  const ctxUser = S.user;
+  const ctxCharId = S.character.id;
   try {
     // Cold-load safety: #/tasks can be the first route after reload — the
     // by-user hydration omits location_id, so read the authoritative
@@ -5958,7 +6554,16 @@ async function viewTasks() {
       const me = await api(`/characters/${S.character.id}`);
       S.character = { ...S.character, ...me };
     }
-    const tasks = await api(`/characters/${S.character.id}/tasks`);
+    // #304: the Tasks screen's list read is an authoritative adapter
+    // refresher — token at START, the in-flight counter spans the await.
+    const listToken = ++taskReadSequence;
+    taskListReadsInFlight++;
+    let tasks;
+    try {
+      tasks = await api(`/characters/${S.character.id}/tasks`);
+    } finally {
+      taskListReadsInFlight--;
+    }
     const goals = await api(`/characters/${S.character.id}/goals`);
     let opps = [];
     let desire = null;
@@ -5968,6 +6573,10 @@ async function viewTasks() {
       desire = d.desire;
     } catch (e) { /* desire layer unavailable — sections stay explicitly empty */ }
     S.mapLocations = await api("/locations");
+    // #304: the session/navigation guard before publishing the async result.
+    if (epoch !== navEpoch || S.user !== ctxUser || !S.character
+      || S.character.id !== ctxCharId) return;
+    ingestTaskSnapshot(tasks, listToken);
     renderTasks(tasks, goals, opps, desire);
   } catch (e) {
     // #93: transient failure — explicit retry instead of a dead «Загрузка…».

@@ -822,7 +822,11 @@ CATALOG_UNNAMED = [LOC7_UNNAMED, LOC9, LOC10]
 
 # Task fixture — the server pre-orders active/planned oldest created_at
 # first, so the line takes active[0] (else planned[0]) without re-sorting.
-TASK_WORK_ACTIVE = {"status": "active", "task_type": "WORK", "created_at": 100}
+# #304: the stub row carries a realistic id — the backend's task_to_dict
+# ALWAYS includes `id` on /characters/{id}/tasks rows, and the #304 adapter
+# keys/refreshes tracked tasks by that id (id-less rows are display-
+# ineligible).
+TASK_WORK_ACTIVE = {"id": 21, "status": "active", "task_type": "WORK", "created_at": 100}
 
 
 def _resp(status, body, **extra):
@@ -905,7 +909,9 @@ SCENARIOS = [
             "await __settle(); "
             "const goClicked = __clickButton('Пойти сюда'); await __settle(); "
             "const after = __facts(); "
-            "globalThis.__result = { goClicked, after };"
+            "__setHash('#/world'); await __settle(); "
+            "const atWorld = __facts(); "
+            "globalThis.__result = { goClicked, after, atWorld };"
         ),
     },
     # ---------- 5. NO_POST_ON_ENTRY ----------
@@ -1280,7 +1286,7 @@ def test_remote_state(results):
 
 def test_remote_cta_move(results):
     r = _facts(results, "REMOTE_CTA_MOVE")
-    go_clicked, after = r["goClicked"], r["after"]
+    go_clicked, after, at_world = r["goClicked"], r["after"], r["atWorld"]
     assert go_clicked is True, "the «Пойти сюда» CTA is present and clickable"
     # The ONE move path: a single POST /actions with the MOVE body (the
     # existing moveTo path).
@@ -1293,11 +1299,26 @@ def test_remote_cta_move(results):
         f"the POST body is the MOVE action to location 9, "
         f"got {after['postActionBodies']!r}"
     )
-    assert after["hash"] == "#/world", (
-        f"the move returns to the world view, got {after['hash']!r}"
+    # #304: the move acceptance stays on the current screen — moveTo no
+    # longer force-navigates to the world map (the lifecycle captions own
+    # the feedback; the map keeps its state and the poll/arrival path
+    # updates it). The world view stays one explicit navigation away, and
+    # the acceptance feedback survives that navigation.
+    assert after["hash"] == "#/location/9", (
+        f"the move stays on the Place (no forced #/world), got {after['hash']!r}"
     )
-    assert after["toastText"] == "Идём в Remote", (
-        f"the move toast names the destination, got {after['toastText']!r}"
+    assert after["toastText"] == "Запрос на перемещение принят", (
+        f"the move acceptance toast, got {after['toastText']!r}"
+    )
+    # #304: the world view remains reachable by explicit navigation, and the
+    # acceptance feedback is not discarded by it (the toast persists; the
+    # HUD's task slot renders from the adapter).
+    assert at_world["hash"] == "#/world", (
+        f"explicit navigation reaches the world view, got {at_world['hash']!r}"
+    )
+    assert at_world["toastText"] == "Запрос на перемещение принят", (
+        f"the acceptance toast survives the navigation, "
+        f"got {at_world['toastText']!r}"
     )
     unhandled = _unhandled(results, "REMOTE_CTA_MOVE")
     assert unhandled == [], f"no unhandled errors may escape: {unhandled}"
@@ -1347,8 +1368,11 @@ def test_action_post(results):
     assert after["toastText"] == "Задача EAT принята", (
         f"the doAction success toast, got {after['toastText']!r}"
     )
-    assert after["hash"] == "#/world", (
-        f"doAction's default after() returns to the world view, got {after['hash']!r}"
+    # #304: the acceptance stays on the current screen — doAction's default
+    # after() is a no-op now (the lifecycle captions own the feedback; no
+    # yank to the world map out from under the Place).
+    assert after["hash"] == "#/location/7", (
+        f"doAction stays on the Place (no forced #/world), got {after['hash']!r}"
     )
     unhandled = _unhandled(results, "ACTION_POST")
     assert unhandled == [], f"no unhandled errors may escape: {unhandled}"
@@ -1448,8 +1472,12 @@ def test_scene_act_place(results):
 def test_task_line(results):
     r = _facts(results, "TASK_LINE")
     active, empty, failed = r["active"], r["empty"], r["failed"]
-    assert active["taskText"] == "Задача:активна · работа", (
-        f"an active task renders status·type labels, got {active['taskText']!r}"
+    # #304: the active task renders the lifecycle caption (the raw-label
+    # «активна · работа» form is superseded — the caption derives from the
+    # server status: active → «Персонаж занят: {label}»).
+    assert active["taskText"] == "Задача:Персонаж занят: работа", (
+        f"an active task renders the #304 lifecycle caption, "
+        f"got {active['taskText']!r}"
     )
     assert empty["taskText"] == "Задача:нет активной задачи", (
         f"empty tasks render the honest empty line, got {empty['taskText']!r}"

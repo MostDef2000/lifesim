@@ -133,8 +133,12 @@ def test_lane_b_invariants():
     assert js.count('location.hash = "#/profile";') == 3
     assert js.count("${proto}://${location.host}/ws") == 1
     assert js.count("new WebSocket") == 1
-    assert js.count("scene-view") == 3
-    assert js.count('document.getElementById("scene-view")') == 2
+    # #304: refreshTaskPresentationHosts adds a third getElementById("scene-view")
+    # lookup (the scene-result host patch) — the scene-view element census
+    # moves 3 → 4 and the getElementById census 2 → 3; the intent (one
+    # scene-view element, looked up per render + per adapter refresh) holds.
+    assert js.count("scene-view") == 4
+    assert js.count('document.getElementById("scene-view")') == 3
     assert js.count('"Открыть Scene"') == 1
     assert js.count("pollEventsFeed") == 2
     assert js.count("innerHTML") == 0
