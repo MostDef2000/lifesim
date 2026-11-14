@@ -1819,7 +1819,10 @@ function sceneActBar(onSubmit = submitSceneAct) {
       // #175: capture the draft on every keystroke too (the post-submit
       // pattern alone loses text to a re-inspect while typing).
       oninput: (ev) => { S.sceneActDraft = ev.target.value; },
-      onkeydown: (ev) => { if (ev.key === "Enter") onSubmit(); },
+      // #327: OS key auto-repeat must not re-send after a settled rejection.
+      onkeydown: (ev) => {
+        if (ev.key === "Enter" && !ev.repeat) onSubmit();
+      },
     }),
     el("button", { id: "scene-act-go", type: "button",
       onclick: () => onSubmit() }, "Сделать"));
