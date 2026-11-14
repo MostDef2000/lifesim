@@ -71,7 +71,9 @@ Fix pins (this file):
    (pre- AND post-#161-fix) — the m158 oracle pins `sceneActDraft == 5`
    without the prefix (4× S.sceneActDraft + 1× `sceneActDraft: null` init).
    #175 later added the scene-act oninput capture: the counts are now
-   sceneActDraft == 6 AND S.sceneActDraft == 5. #175 also raised the
+   sceneActDraft == 6 AND S.sceneActDraft == 5. #304 later added the
+   session-teardown clear in resetGameUiContext: sceneActDraft == 7 AND
+   S.sceneActDraft == 6. #175 also raised the
    loadRetryNode call sites 6 → 8 (viewExternal + viewAdmin) and rewrote the
    pollEvents silent catch (failure counting + connection banner) — the old
    byte literal is pinned == 0, the new finally/counter shape is pinned.
@@ -250,9 +252,10 @@ def test_regression_byte_pins_of_b3_survive():
     # #303: +1 — the scene-act catch persistent line localizes refusals
     assert JS.count("AUTONOMOUS_HINT") == 9
     assert JS.count("isAutonomousRefusal") == 7  # #303: +1 same-catch persistent-line hint
-    # m158 oracle pins `sceneActDraft == 6` (5× S.sceneActDraft + 1× init
-    # field); the bare-S count itself is 5 — #175 added the oninput capture
-    # (draft saved on every keystroke, not only on submit). See module
+    # m158 oracle pins `sceneActDraft == 7` (6× S.sceneActDraft + 1× init
+    # field); the bare-S count itself is 6 — #175 added the oninput capture
+    # (draft saved on every keystroke, not only on submit), #304 added the
+    # session-teardown clear in resetGameUiContext. See module
     # docstring for the pre-#175 counts.
-    assert JS.count("sceneActDraft") == 6
-    assert JS.count("S.sceneActDraft") == 5
+    assert JS.count("sceneActDraft") == 7
+    assert JS.count("S.sceneActDraft") == 6

@@ -622,8 +622,13 @@ def test_ui_legacy_pins_intact():
     assert js.count("innerHTML") == 0
     assert js.count('location.hash = "#/profile";') == 3
     assert js.count('location.hash === "#/world"') == 1
-    assert js.count("scene-view") == 3
-    assert js.count('document.getElementById("scene-view")') == 2
+    # #304: the task-presentation adapter's refreshTaskPresentationHosts()
+    # adds a 4th "scene-view" reference (getElementById to refresh the
+    # scene result host) — census 3 → 4, intent unchanged.
+    assert js.count("scene-view") == 4
+    # #304: the adapter's scene-host refresh is a third getElementById
+    # lookup — census 2 → 3, intent unchanged.
+    assert js.count('document.getElementById("scene-view")') == 3
     assert js.count('"Осмотреть окрестности"') == 1
     # #289: a new comment mentions the bare guillemet label, so pin the full
     # scene-fallback hint string (code-only, comment-robust) instead of the

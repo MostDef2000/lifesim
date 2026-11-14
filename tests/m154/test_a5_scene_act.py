@@ -495,8 +495,11 @@ def test_ui_scene_act_pins_without_damaging_existing_pins():
     assert js.count("innerHTML") == 0
     # Carry-forward pins (m146/m147/m149/m150/m151/m153 lineage) survive.
     assert js.count('location.hash = "#/profile";') == 3
-    assert js.count("scene-view") == 3
-    assert js.count('document.getElementById("scene-view")') == 2
+    # #304: refreshTaskPresentationHosts adds a third getElementById("scene-view")
+    # lookup (the scene-result host patch) — scene-view 3 → 4, getElementById
+    # 2 → 3; the one-element/one-lookup-per-render intent is unchanged.
+    assert js.count("scene-view") == 4
+    assert js.count('document.getElementById("scene-view")') == 3
     assert js.count('"Осмотреть окрестности"') == 1
     # #289: a new comment mentions the bare guillemet label, so pin the full
     # scene-fallback hint string (code-only, comment-robust) instead of the

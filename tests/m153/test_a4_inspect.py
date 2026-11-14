@@ -324,8 +324,13 @@ def test_ui_scene_state_pins_without_damaging_existing_pins():
     assert js.count("innerHTML") == 0
     assert js.count('location.hash = "#/profile";') == 3
     assert js.count('location.hash === "#/world"') == 1
-    assert js.count("scene-view") == 3
-    assert js.count('document.getElementById("scene-view")') == 2
+    # #304: the task-presentation adapter's refreshTaskPresentationHosts()
+    # adds a 4th "scene-view" reference (getElementById to refresh the
+    # scene result host) — census 3 → 4, intent unchanged.
+    assert js.count("scene-view") == 4
+    # #304: the adapter's scene-host refresh is a third getElementById
+    # lookup — census 2 → 3, intent unchanged.
+    assert js.count('document.getElementById("scene-view")') == 3
     assert js.count('"Осмотреть окрестности"') == 1
     assert js.count('"Осмотреть"') == 1
     assert js.count('"Открыть Scene"') == 1

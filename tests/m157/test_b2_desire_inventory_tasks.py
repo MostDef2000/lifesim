@@ -666,8 +666,11 @@ def test_ui_legacy_pins_intact():
     assert js.count("innerHTML") == 0
     assert js.count('location.hash = "#/profile";') == 3
     assert js.count('location.hash === "#/world"') == 1
-    assert js.count("scene-view") == 3
-    assert js.count('document.getElementById("scene-view")') == 2
+    # #304: refreshTaskPresentationHosts adds a third getElementById("scene-view")
+    # lookup (the scene-result host patch) — scene-view 3 → 4, getElementById
+    # 2 → 3; the one-element/one-lookup-per-render intent is unchanged.
+    assert js.count("scene-view") == 4
+    assert js.count('document.getElementById("scene-view")') == 3
     assert js.count('"Осмотреть окрестности"') == 1
     # #289: a new comment mentions the bare guillemet label, so pin the full
     # scene-fallback hint string (code-only, comment-robust) instead of the
@@ -697,7 +700,12 @@ def test_ui_legacy_pins_intact():
     assert js.count("AUTONOMOUS_HINT") == 9
     # +1 (#93 scene-act catch); #303: +1 same-catch persistent-line hint
     assert js.count("isAutonomousRefusal") == 7
-    assert js.count('} else { toast(e.message, true); }') == 2
+    # #304: the generic submission failures (409/422/503/network) surface on
+    # the .task-submit-line via actionSubmitErrorText — the raw-message toast
+    # fallback form is gone from doAction/moveTo (the preserved specific
+    # toasts — AUTONOMOUS/full-energy/needs_move — keep their own branches).
+    assert js.count('} else { toast(e.message, true); }') == 0
+    assert js.count("taskSubmitFeedback = actionSubmitErrorText(e);") == 2
     assert js.count('"Идти"') == 1
     assert js.count("/travel/plan") == 1
     # #309: the local login form (which held the second reset site) is gone —

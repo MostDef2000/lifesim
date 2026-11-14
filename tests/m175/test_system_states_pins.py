@@ -194,7 +194,9 @@ def test_scene_act_draft_oninput_pins():
     assert js.count("value: S.sceneActDraft || \"\"") == 1
     # The #175 edit left the post-submit pattern intact (m158 pins these).
     assert js.count("S.sceneActDraft = text;") == 2   # 200 ok:false AND catch
-    assert js.count("S.sceneActDraft = null;") == 1   # only a real success clears
+    # #304: +1 — resetGameUiContext also clears the draft on session teardown
+    # (a new session never inherits the previous identity's typed text).
+    assert js.count("S.sceneActDraft = null;") == 2
 
 
 # ---------- E: portrait 404 honest note ----------
@@ -300,7 +302,11 @@ def test_hygiene_and_neighbour_pins_untouched():
     assert js.count('location.hash === "#/world"') == 1
     assert js.count(
         "toast(isAutonomousRefusal(e) ? AUTONOMOUS_HINT : e.message, true);") == 1
-    assert js.count("} else { toast(e.message, true); }") == 2
+    # #304: the generic submission failures surface on the .task-submit-line
+    # via actionSubmitErrorText — the raw-message toast fallback form is gone
+    # from doAction/moveTo (the preserved specific toasts keep their branches).
+    assert js.count("} else { toast(e.message, true); }") == 0
+    assert js.count("taskSubmitFeedback = actionSubmitErrorText(e);") == 2
     # Shared retry helper unchanged: one const, one def, hint reused 4×
     # (#72: +1 — the Place screen's events-failure line reuses the hint).
     assert js.count("const RETRY_HINT =") == 1

@@ -438,10 +438,13 @@ def test_ui_transient_failure_catch_pins():
     # Scene act draft preservation (never uses the chat literals — m156 pins
     # 'input.value = draft;' == 1 and 'input.value = "";' == 2 exactly).
     # S-init + read + ok:false-keep + success-clear + error-set
-    # + #175 oninput-capture (draft also saved on every keystroke):
-    assert js.count("sceneActDraft") == 6
+    # + #175 oninput-capture (draft also saved on every keystroke)
+    # + #304 session teardown (resetGameUiContext clears the draft too):
+    assert js.count("sceneActDraft") == 7
     assert js.count("S.sceneActDraft = text;") == 2  # 200 ok:false AND catch — both recoverable
-    assert js.count("S.sceneActDraft = null;") == 1  # only a real success clears it
+    # #304: +1 — resetGameUiContext also clears the draft on session teardown
+    # (a new session never inherits the previous identity's typed text).
+    assert js.count("S.sceneActDraft = null;") == 2
     assert js.count("value: S.sceneActDraft || ") == 1
     # §61 refusals surface localized (F1): the raw-English toast form is gone.
     assert js.count("toast(isAutonomousRefusal(e) ? AUTONOMOUS_HINT : e.message, true);") == 1
