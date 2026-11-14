@@ -48,6 +48,21 @@ def _read(path):
         return f.read()
 
 
+def _fn_body(text, marker):
+    """Brace-balanced body of the function introduced by marker (m313 house
+    helper — lets byte-pins scope to one construction site)."""
+    i = text.index("{", text.index(marker))
+    depth = 0
+    for j in range(i, len(text)):
+        if text[j] == "{":
+            depth += 1
+        elif text[j] == "}":
+            depth -= 1
+            if depth == 0:
+                return text[i + 1 : j]
+    raise AssertionError(f"unbalanced function body at {marker!r}")
+
+
 def test_desire_screen_route_and_tab_pins():
     js = _read(APP_JS)
     # Route + tab + view, each exactly once — same shape as the m158
@@ -86,11 +101,13 @@ def test_desire_no_goal_free_text_primary_pins():
     # the single handler body proves nothing is submitted on click.
     assert js.count("field.value = s; field.focus();") == 1
     assert js.count('id: "desire-chips"') == 1
-    # Review F4: chips are real buttons (keyboard-operable for free), the
-    # ONLY new "sugg" button site — the chat suggestions stay spans, and
+    # Review F4: chips are real buttons (keyboard-operable for free), and
     # the scoped CSS resets the button look back to the .sugg style.
-    assert js.count('class: "sugg", type: "button"') == 1
-    assert js.count('el("span", { class: "sugg"') == 1
+    # #313: the chat suggestion chip joined the native-button pattern, so
+    # the button pin is scoped to the desire chip row (2 sugg-button sites
+    # file-wide now) and the clickable-span count is 0 file-wide.
+    assert _fn_body(js, "function desireChipRow(").count('class: "sugg", type: "button"') == 1
+    assert js.count('el("span", { class: "sugg"') == 0
 
 
 def test_desire_interpretation_and_lifecycle_pins():

@@ -242,6 +242,9 @@ textarea {
   line-height: 1;
   color: var(--w-dim);
   cursor: pointer;
+  /* #313: WCAG 2.5.8 — 44px minimum hit target. */
+  min-width: 44px;
+  min-height: 44px;
 }
 .poi-card-close:hover { color: var(--w-text); }
 .poi-card-actions {
@@ -261,6 +264,9 @@ textarea {
   font: 400 13px/1.2 system-ui, -apple-system, "Segoe UI", sans-serif;
   text-decoration: none;
   cursor: pointer;
+  /* #313: WCAG 2.5.8 — 44px minimum hit target. */
+  min-width: 44px;
+  min-height: 44px;
 }
 .poi-card-actions a:hover,
 .poi-card-actions button:hover { border-color: var(--w-warm-line); }
@@ -1565,6 +1571,11 @@ body.landing-mode #app {
 .world-pill svg { width: 20px; height: 20px; }
 .world-pill a:hover { background: rgba(48, 39, 31, 0.06); color: var(--w-text); }
 .world-pill a.active { background: var(--w-warm); color: var(--w-accent); }
+/* #313: WCAG 2.4.7 — visible keyboard focus on the nav pill. */
+.world-pill a:focus-visible {
+  outline: 2px solid var(--w-accent);
+  outline-offset: 2px;
+}
 
 /* ---- «Осмотреть окрестности»: zoom control bottom-right over the map ---- */
 .world-inspect {
@@ -1583,6 +1594,9 @@ body.landing-mode #app {
   font: 400 14px/1.2 system-ui, -apple-system, "Segoe UI", sans-serif;
   box-shadow: var(--w-shadow-soft);
   cursor: pointer;
+  /* #313: WCAG 2.5.8 — 44px minimum hit target. */
+  min-width: 44px;
+  min-height: 44px;
 }
 .world-inspect svg { width: 18px; height: 18px; color: var(--w-accent); }
 .world-inspect:hover { border-color: var(--w-warm-line); }
@@ -1705,13 +1719,24 @@ body.landing-mode #app {
     max-height: 42%;
     padding: 14px 16px 16px;
   }
+  /* #313: two-row 5-column grid — 9 destinations stay reachable one-handed;
+     explicit width gives the fr tracks a definite size (max-width keeps the
+     8px side margins), safe-area padding clears the home indicator. */
   .world-pill {
     bottom: 8px;
+    display: grid;
+    grid-template-columns: repeat(5, minmax(0, 1fr));
     gap: 1px;
+    /* #313: 100vw fallback for pre-dvw browsers (Safari <15.4) — same width. */
+    width: 100vw;
+    width: 100dvw;
     max-width: calc(100vw - 16px);
     padding: 5px 6px;
+    padding-bottom: calc(5px + env(safe-area-inset-bottom, 0px));
   }
-  .world-pill a { width: 46px; height: 46px; }
+  /* #313: anchors fill their grid cells (46px min height keeps the tap
+     target; the base 52px fixed box would break the track layout). */
+  .world-pill a { width: auto; height: auto; min-height: 46px; }
   .world-inspect { right: 12px; bottom: 176px; padding: 7px 12px; }
   .world-shell .map-toolbar { top: auto; bottom: 220px; right: 12px; }
   .world-shell .map-toolbar.map-quality { top: auto; bottom: 262px; }
@@ -2226,12 +2251,15 @@ button.danger:hover { background: #93301f; }
 }
 
 /* #63: composer — rounded input + circular send button. */
-.chat-shell .chat-bar { gap: 8px; margin-top: 10px; }
+/* #313: the bar reserves the home-indicator inset; the send button is a
+   44px WCAG 2.5.8 target (radius stays 50% — m63 pins it). */
+.chat-shell .chat-bar { gap: 8px; margin-top: 10px;
+  padding-bottom: calc(0px + env(safe-area-inset-bottom, 0px)); }
 .chat-shell #chat-msg-input { border-radius: 12px; }
 .chat-shell #chat-send {
-  width: 40px;
-  height: 40px;
-  flex: 0 0 40px;
+  width: 44px;
+  height: 44px;
+  flex: 0 0 44px;
   padding: 0;
   border-radius: 50%;
   font-size: 18px;
@@ -2239,6 +2267,13 @@ button.danger:hover { background: #93301f; }
   display: inline-flex;
   align-items: center;
   justify-content: center;
+}
+/* #313: WCAG 2.4.7 — visible keyboard focus on the composer controls. */
+.chat-shell #chat-msg-input:focus-visible,
+.chat-shell select:focus-visible,
+.chat-shell #chat-send:focus-visible {
+  outline: 2px solid var(--w-accent);
+  outline-offset: 2px;
 }
 
 /* #63: suggestion chips — translucent warm fill, rounded shortcuts that
@@ -2248,6 +2283,9 @@ button.danger:hover { background: #93301f; }
   background: var(--w-warm);
   border-color: var(--w-warm-line);
   padding: 8px 12px;
+  /* #313: chips are native <button>s now — keep the inherited text font
+     (UA button font would leak; same reset as .desire-chips .sugg). */
+  font: inherit;
 }
 .chat-shell .sugg:hover { color: #8a5a16; border-color: var(--w-accent); }
 
@@ -3130,6 +3168,12 @@ button.danger:hover { background: #93301f; }
   gap: 8px;
   align-items: center;
 }
+/* #313: WCAG 2.5.8 — 44px minimum hit target (padding/look ride the
+   global button rule; nothing else restyled). */
+.place-actions button {
+  min-width: 44px;
+  min-height: 44px;
+}
 
 /* people roster — name + kind rows, one per occupant (reference level
    inside «О месте» since #303). */
@@ -3479,6 +3523,12 @@ button.danger:hover { background: #93301f; }
     var(--w-panel-deep);
 }
 .place-stage-note { font-size: 12px; }
+/* #313: WCAG 2.5.8 — 44px minimum hit target for the primary stage control
+   (padding/colors ride the global button rule; nothing else restyled). */
+.place-stage button {
+  min-width: 44px;
+  min-height: 44px;
+}
 .place-context { display: grid; gap: 8px; align-content: start; }
 .place-context-name { font-size: 18px; font-weight: 600; color: var(--w-text); }
 .place-badge {
@@ -3501,6 +3551,16 @@ button.danger:hover { background: #93301f; }
   border: 1px solid var(--w-accent);
   border-radius: 8px;
   padding: 6px 12px;
+  /* #313: WCAG 2.5.8 — 44px minimum hit target. */
+  min-width: 44px;
+  min-height: 44px;
+}
+/* #313: WCAG 2.4.7 — visible keyboard focus on the place controls. */
+.place-cta:focus-visible,
+.place-actions button:focus-visible,
+.place-stage button:focus-visible {
+  outline: 2px solid var(--w-accent);
+  outline-offset: 2px;
 }
 .place-nearby-row {
   display: flex;

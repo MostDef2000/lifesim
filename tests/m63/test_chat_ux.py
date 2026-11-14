@@ -117,7 +117,10 @@ def test_carry_forward_pins():
     disturb the pinned construction strings."""
     js = _read(APP_JS)
     # m156: screen ids / composer / status / roles / visual.
-    assert js.count('el("input", { id: "chat-msg-input", placeholder: "Сообщение…" })') == 1
+    # #313: the composer input carries an accessible name now — same single
+    # construction site, same id/placeholder, plus "aria-label": "Сообщение".
+    assert js.count('el("input", { id: "chat-msg-input",'
+                    ' "aria-label": "Сообщение", placeholder: "Сообщение…" })') == 1
     # #305: TWO occurrences — still exactly ONE construction site (the
     # `id: "chat-send"` button in renderChat); the second is chatPaintPresence's
     # live-node lookup (document.getElementById("chat-send")), which lets the

@@ -547,7 +547,10 @@ def _read(path):
 def test_ui_chat_screen_new_pins():
     js = _read(APP_JS)
     # New chat screen ids — construction and live-node lookup.
-    assert js.count('el("input", { id: "chat-msg-input", placeholder: "Сообщение…" })') == 1
+    # #313: the composer input carries an accessible name now — same single
+    # construction site, same id/placeholder, plus "aria-label": "Сообщение".
+    assert js.count('el("input", { id: "chat-msg-input",'
+                    ' "aria-label": "Сообщение", placeholder: "Сообщение…" })') == 1
     # #305: TWO occurrences — still exactly ONE construction site (the
     # `id: "chat-send"` button in renderChat); the second is chatPaintPresence's
     # live-node lookup (document.getElementById("chat-send")), which lets the

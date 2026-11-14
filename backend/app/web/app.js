@@ -2911,6 +2911,11 @@ function renderWorld(locs, tasksData) {
     ...PILL_TABS.map(([hash, label, icon]) => el("a", {
       href: hash,
       class: hash === "#/world" ? "active" : "",
+      // #313: the active destination is the current page for assistive
+      // tech. Conditional spread — el() setAttribute()s every prop, so a
+      // null value would render the attribute as the string "null" on
+      // the other eight anchors.
+      ...(hash === "#/world" ? { "aria-current": "page" } : {}),
       title: label,
       "aria-label": label,
     }, svgIcon(icon), el("span", {}, label))));
@@ -4216,7 +4221,10 @@ function renderPlace(locId, place, locs, tasksData) {
       ? npcs.map((o) => el("div", { class: "place-nearby-row" },
           el("span", {}, o.name || "Без имени"),
           dialogueNpcs.includes(o)
-            ? el("button", { class: "place-cta", type: "button", onclick: () => {
+            ? el("button", { class: "place-cta", type: "button",
+              // #313: the visible «Поговорить» is ambiguous in the AT
+              // roster loop — name it for the NPC it opens a dialogue with.
+              "aria-label": `Поговорить с ${o.name}`, onclick: () => {
                 // #305: the dialogue origin — the place «Поговорить» was
                 // clicked at; the chat's back anchor returns here
                 // («← К месту»), a direct #/chat entry offers the map.
@@ -5562,7 +5570,7 @@ function renderChat(session, locName) {
   chatPendingPresence = null;
   chatRuntime = rt;
   let curSession = session;
-  const npcSel = el("select", {},
+  const npcSel = el("select", { id: "chat-npc-select" },
     // #305: an explicit empty option — the DOM selection can never
     // silently disagree with S.chatNpcId (the old browser-default first
     // option created an unkeyed selected state; a departed carry — whose
@@ -5777,7 +5785,7 @@ function renderChat(session, locName) {
   const sugg = el("div", { id: "chat-sugg" });
   function renderSugg(list) {
     sugg.replaceChildren(...(list || []).map((s) =>
-      el("span", { class: "sugg", onclick: () => {
+      el("button", { class: "sugg", type: "button", onclick: () => {
         const inp = document.getElementById("chat-msg-input");
         if (inp) { inp.value = s; inp.focus(); }
         S.chatDraft = s;  // #256: chip fills the input programmatically (no input event) — sync the draft so the text survives re-renders
@@ -5792,7 +5800,7 @@ function renderChat(session, locName) {
     ? lastNpc.suggested_responses : []);
 
   const status = el("div", { class: "muted", id: "chat-status" });
-  const input = el("input", { id: "chat-msg-input", placeholder: "Сообщение…" });
+  const input = el("input", { id: "chat-msg-input", "aria-label": "Сообщение", placeholder: "Сообщение…" });
   // #175: the typed draft survives NPC switches/re-renders — seeded from
   // S.chatDraft and kept in sync on every keystroke; cleared on send.
   input.value = S.chatDraft || "";
@@ -6030,7 +6038,7 @@ function renderChat(session, locName) {
           ? [el("a", { href: `#/location/${gameUiContext.chatSourceLocationId}` },
               "← К месту")]
           : [el("a", { href: "#/world" }, "← К карте")]),
-        el("label", {}, "NPC на этой локации"), npcSel,
+        el("label", { for: "chat-npc-select" }, "NPC на этой локации"), npcSel,
         visual,
         el("div", { class: "chat-head-info" },
           el("div", { id: "chat-npc-name" },

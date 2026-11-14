@@ -545,8 +545,10 @@ def test_ui_carry_forward_pins():
     assert js.count("VISUAL_FALLBACK") == 3  # const + 2 uses
     assert js.count("typingBubble.remove();") == 2
     assert js.count("renderChat(null, locName);") == 1
-    assert js.count('class: "sugg", type: "button"') == 1
-    assert js.count('el("span", { class: "sugg"') == 1
+    # #313: the chat suggestion chip is a native button now (the desire chip
+    # was already one) — 2 sugg-button sites file-wide, 0 clickable spans.
+    assert js.count('class: "sugg", type: "button"') == 2
+    assert js.count('el("span", { class: "sugg"') == 0
     assert js.count('"chat-status"') == 1
     assert js.count('"chat-roles"') == 1
 
