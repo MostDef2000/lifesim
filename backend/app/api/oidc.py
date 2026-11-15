@@ -31,11 +31,15 @@ from typing import Any
 
 import httpx
 import jwt
+from fastapi.responses import HTMLResponse
 
 # Login transaction TTL (state/nonce/verifier) and the browser-binding
 # cookie TTL (must outlive the transaction round-trip).
 TRANSACTION_TTL_S = 300
 BINDING_COOKIE_TTL_S = 600
+# Popup presentation marker TTL — deliberately longer than the transaction
+# TTL so an expired transaction can still render the popup error page.
+POPUP_COOKIE_TTL_S = 600
 # Discovery/JWKS cache lifetime; an unknown kid forces exactly one
 # controlled refresh inside this window (key rotation support).
 DISCOVERY_CACHE_TTL_S = 600
@@ -61,6 +65,34 @@ ERROR_CODES = (
     "registration_closed",
     "username_taken",
 )
+
+
+def _popup_response(*, ok: bool, error: str = "") -> HTMLResponse:
+    """The popup completion page. CSP-safe: the only script is the external
+    same-origin /static/auth-popup.js (the edge policy is script-src 'self').
+    The only interpolated values are a fixed boolean and an ALLOWLISTED error
+    code — never provider text, never request values."""
+    safe_error = "" if ok else (error if error in ERROR_CODES else "auth_failed")
+    ok_value = "true" if ok else "false"
+    html = (
+        "<!doctype html>\n"
+        '<html lang="ru">\n'
+        "<head>\n"
+        '<meta charset="utf-8">\n'
+        '<meta name="viewport" content="width=device-width, initial-scale=1">\n'
+        '<meta name="referrer" content="no-referrer">\n'
+        "<title>Вход — ВЛ1: Рейнеке</title>\n"
+        '<script src="/static/auth-popup.js" defer></script>\n'
+        "</head>\n"
+        f'<body data-ok="{ok_value}" data-error="{safe_error}">\n'
+        '<p id="auth-popup-status" role="status">Завершение входа…</p>\n'
+        '<p><a href="/">Вернуться в игру</a></p>\n'
+        "</body>\n"
+        "</html>"
+    )
+    return HTMLResponse(
+        html, status_code=200, headers={"cache-control": "no-store"}
+    )
 
 
 class OidcError(Exception):
@@ -390,6 +422,7 @@ def register_oidc_routes(
     client = OidcClient(cfg, client_secret, transport=transport)
     store = TransactionStore()
     bind_cookie = f"{settings.api.cookie_name}_bind"
+    popup_cookie = "auth_popup"
 
     def _cookie_kwargs() -> dict:
         # One attribute set for set AND delete (delete must match the set
@@ -401,12 +434,19 @@ def register_oidc_routes(
             "samesite": "lax",
         }
 
-    def _fail(code: str) -> RedirectResponse:
-        """Fail-closed redirect: allowlisted code only, no provider text,
-        transaction already consumed by the caller."""
-        resp = RedirectResponse(f"/?error={code}", status_code=302)
+    def _fail(code: str, *, popup: bool = False):
+        """Fail-closed: allowlisted code only, no provider text, transaction
+        already consumed by the caller. Popup mode renders the error page
+        instead of redirecting."""
+        safe_code = code if code in ERROR_CODES else "auth_failed"
+        resp = (
+            _popup_response(ok=False, error=safe_code)
+            if popup
+            else RedirectResponse(f"/?error={safe_code}", status_code=302)
+        )
         resp.headers["cache-control"] = "no-store"
         resp.delete_cookie(bind_cookie, **_cookie_kwargs())
+        resp.delete_cookie(popup_cookie, **_cookie_kwargs())
         return resp
 
     @app.get("/auth/login")
@@ -414,16 +454,23 @@ def register_oidc_routes(
         # Fail-closed: discovery down / malformed document raises OidcError
         # out of authorize_url() — same allowlisted redirect as every other
         # failure path, never an unhandled 500.
+        popup = request.query_params.get("mode") == "popup"
         try:
             txn = store.create(request.cookies.get(bind_cookie))
             authorize = client.authorize_url(txn)
         except OidcError:
-            return _fail("provider_error")
+            return _fail("provider_error", popup=popup)
         resp = RedirectResponse(authorize, status_code=302)
         resp.headers["cache-control"] = "no-store"
         resp.set_cookie(
             bind_cookie, txn["binding"], max_age=BINDING_COOKIE_TTL_S, **_cookie_kwargs()
         )
+        if popup:
+            resp.set_cookie(
+                popup_cookie, "1", max_age=POPUP_COOKIE_TTL_S, **_cookie_kwargs()
+            )
+        else:
+            resp.delete_cookie(popup_cookie, **_cookie_kwargs())
         return resp
 
     @app.get("/auth/callback")
@@ -437,23 +484,24 @@ def register_oidc_routes(
         # Atomic single-use consume FIRST: every path below — success or
         # failure — burns the transaction, so replays are dead on arrival.
         txn = store.consume(state or None, request.cookies.get(bind_cookie))
+        popup = request.cookies.get(popup_cookie) == "1"
         if error:
             # Provider signalled a failure; the text is never reflected.
-            return _fail("provider_error")
+            return _fail("provider_error", popup=popup)
         if txn is None:
-            return _fail("state_mismatch")
+            return _fail("state_mismatch", popup=popup)
         if not code:
-            return _fail("provider_error")
+            return _fail("provider_error", popup=popup)
         try:
             tokens = client.exchange_code(code, txn["verifier"])
             claims = client.validate_id_token(tokens["id_token"], txn["nonce"])
         except OidcError:
-            return _fail("provider_error")
+            return _fail("provider_error", popup=popup)
         if not client.check_groups(claims):
-            return _fail("group_denied")
+            return _fail("group_denied", popup=popup)
         email = claims.get("email")
         if not isinstance(email, str) or not email:
-            return _fail("auth_failed")
+            return _fail("auth_failed", popup=popup)
         sub = claims["sub"]
 
         # JIT provisioning: exact (issuer, sub) match ONLY — never email or
@@ -477,10 +525,10 @@ def register_oidc_routes(
             ):
                 # Invalid (spec-005 rule) or colliding username → reject:
                 # no linking, no suffixing.
-                return _fail("username_taken")
+                return _fail("username_taken", popup=popup)
             cap = settings.admin.max_players
             if cap > 0 and session.query(User).count() >= cap:
-                return _fail("registration_closed")
+                return _fail("registration_closed", popup=popup)
             user = User(
                 username=username,
                 email=email,
@@ -494,12 +542,16 @@ def register_oidc_routes(
                 session.commit()  # unique (issuer, sub)/(username/email) backstop
             except IntegrityError:
                 session.rollback()
-                return _fail("auth_failed")
+                return _fail("auth_failed", popup=popup)
         if user.disabled:
-            return _fail("auth_failed")
+            return _fail("auth_failed", popup=popup)
 
         # Success: the app's OWN HMAC session cookie (never a provider token).
-        resp = RedirectResponse("/", status_code=302)  # fixed target, never user-supplied
+        resp = (
+            _popup_response(ok=True)
+            if popup
+            else RedirectResponse("/", status_code=302)  # fixed target, never user-supplied
+        )
         resp.headers["cache-control"] = "no-store"
         token = sign_token(
             user.id,
@@ -515,4 +567,5 @@ def register_oidc_routes(
             **_cookie_kwargs(),
         )
         resp.delete_cookie(bind_cookie, **_cookie_kwargs())
+        resp.delete_cookie(popup_cookie, **_cookie_kwargs())
         return resp
