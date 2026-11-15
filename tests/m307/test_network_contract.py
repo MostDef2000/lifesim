@@ -3,16 +3,17 @@
 Behavioral tests for the canonical six-stage playable journey in the REAL
 production ``backend/app/web/app.js`` (boot included), run in the shared
 ``journey_harness`` vm context. The network contract pins the MUTATION surface
-of the canonical journey (deterministic identities: player=1, start location=1,
-destination=2, destination NPC=2, MOVE task=30701, scene task=30702, dialogue
-session=30703, DIRECT mode):
+of the canonical journey (deterministic identities: player="1", start
+location=1, destination=2, destination NPC="2", MOVE task=30701, scene
+task=30702, dialogue session="30703", DIRECT mode — character/session ids are
+STRINGS, task/location ids are INTEGERS):
 
   * exactly FIVE POSTs, in this order, with these exact bodies:
-      1. ``/actions``                ``{character_id:1, action_type:"MOVE",
+      1. ``/actions``                ``{character_id:"1", action_type:"MOVE",
                                       params:{location_id:2}}``
       2. ``/visual/scenes``          ``{location_id:2}``
       3. ``/scene/act``              ``{text:"Поговорить с Фаром"}``
-      4. ``/dialogue/start``         ``{npc_id:2}``
+      4. ``/dialogue/start``         ``{npc_id:"2"}``
       5. ``/dialogue/30703/message`` ``{content:"Привет, Фар"}``
   * no other non-GET/HEAD request (no PUT/DELETE/PATCH/…);
   * the contract deliberately does NOT pin an exact GET total — the journey is
@@ -44,12 +45,14 @@ CHAR1_AT_2_JSON = json.dumps(CHAR1_AT_2)
 TASKS_30701_DONE_JSON = json.dumps(_tasks_resp(recent=[TASK_30701]))
 
 # The canonical journey's five mutations, in order, with their exact bodies.
+# Character/session ids are STRINGS (production shape); task/location ids are
+# integers.
 EXPECTED_POSTS = [
-    ("/actions", {"character_id": 1, "action_type": "MOVE",
+    ("/actions", {"character_id": "1", "action_type": "MOVE",
                   "params": {"location_id": 2}}),
     ("/visual/scenes", {"location_id": 2}),
     ("/scene/act", {"text": "Поговорить с Фаром"}),
-    ("/dialogue/start", {"npc_id": 2}),
+    ("/dialogue/start", {"npc_id": "2"}),
     ("/dialogue/30703/message", {"content": "Привет, Фар"}),
 ]
 
@@ -236,7 +239,7 @@ def test_canonical_journey_post_urls_in_order(results):
 def test_move_post_body_is_exact(results):
     f = _final(results)
     move = next(p for p in f["posts"] if p["url"] == "/actions")
-    assert move["body"] == {"character_id": 1, "action_type": "MOVE",
+    assert move["body"] == {"character_id": "1", "action_type": "MOVE",
                             "params": {"location_id": 2}}, (
         f"the MOVE /actions body must be exact, got {move['body']!r}")
     uh = unhandled(results, "CANONICAL_JOURNEY_NET")
@@ -263,7 +266,7 @@ def test_dialogue_post_bodies_are_exact(results):
     f = _final(results)
     start = next(p for p in f["posts"] if p["url"] == "/dialogue/start")
     msg = next(p for p in f["posts"] if p["url"] == "/dialogue/30703/message")
-    assert start["body"] == {"npc_id": 2}, (
+    assert start["body"] == {"npc_id": "2"}, (
         f"the /dialogue/start body must be exact, got {start['body']!r}")
     assert msg["body"] == {"content": "Привет, Фар"}, (
         f"the /dialogue/30703/message body must be exact, got {msg['body']!r}")
