@@ -219,7 +219,7 @@ def test_six_stage_journey_preserves_authoritative_identity(results):
     # The authoritative identity is preserved at EVERY stage.
     for i, s in enumerate(stages):
         assert s["userId"] == 1, f"stage {i}: user identity lost, got {s['userId']}"
-        assert s["charId"] == 1, f"stage {i}: character identity lost, got {s['charId']}"
+        assert s["charId"] == "1", f"stage {i}: character identity lost, got {s['charId']}"
         assert s["charControl"] == "DIRECT", (
             f"stage {i}: control mode changed, got {s['charControl']!r}")
     # Stage 1: World at the origin, empty tasks.
@@ -240,7 +240,7 @@ def test_six_stage_journey_preserves_authoritative_identity(results):
     assert r["s3a"]["postCount"] == 1
     assert r["s3a"]["posts"][0]["url"] == "/actions"
     assert r["s3a"]["posts"][0]["body"] == {
-        "character_id": 1, "action_type": "MOVE", "params": {"location_id": 2}}
+        "character_id": "1", "action_type": "MOVE", "params": {"location_id": 2}}
     assert "30701" in r["s3a"]["taskRegistry"], (
         "the MOVE acceptance must register task 30701")
     assert r["s3a"]["charLocId"] == 1, "the player has not arrived yet"
@@ -263,7 +263,7 @@ def test_six_stage_journey_preserves_authoritative_identity(results):
     assert r["s5a"]["chatNpcSelectValue"] == "2"
     assert r["s5b"]["postCount"] == 5, (
         f"the full journey is exactly 5 POSTs, got {r['s5b']['postCount']}")
-    assert r["s5b"]["chatSessionId"] == 30703
+    assert r["s5b"]["chatSessionId"] == "30703"
     # Stage 6: Tasks shows 30702; the return lands on World at loc 2.
     assert r["s6a"]["hash"] == "#/tasks"
     assert r["s6a"]["hasTasksShell"] is True
@@ -308,7 +308,7 @@ def test_move_acceptance_hands_off_to_tasks_before_arrival(results):
     assert accepted["postCount"] == 1
     assert accepted["posts"][0]["url"] == "/actions"
     assert accepted["posts"][0]["body"] == {
-        "character_id": 1, "action_type": "MOVE", "params": {"location_id": 2}}
+        "character_id": "1", "action_type": "MOVE", "params": {"location_id": 2}}
     # The acceptance hands off to the task registry BEFORE arrival.
     assert "30701" in accepted["taskRegistry"], (
         "the MOVE acceptance must register task 30701 before arrival")
@@ -342,7 +342,7 @@ def test_scene_task_hands_off_from_place_through_chat_to_tasks(results):
     # The handoff continues through the chat (NPC 2, session 30703).
     assert at_chat["hash"] == "#/chat"
     assert at_chat["chatNpcSelectValue"] == "2"
-    assert at_chat["chatSessionId"] == 30703
+    assert at_chat["chatSessionId"] == "30703"
     # ...and lands on the Tasks screen showing 30702.
     assert at_tasks["hash"] == "#/tasks"
     assert at_tasks["hasTasksShell"] is True

@@ -532,7 +532,9 @@ def test_ui_button_and_outcome_pins():
     # means "no target" (null), never an unkeyed "" (m305 test_05 pins it);
     # the F1 selection-survival intent (persisted + restored) is unchanged.
     assert js.count("S.chatNpcId = npcSel.value || null;") == 1
-    assert js.count("if (S.chatNpcId && S.chatNpcs.includes(S.chatNpcId)) {") == 1
+    assert js.count(
+        "if (S.chatNpcId && S.chatNpcs.some((id) => "
+        "String(id) === String(S.chatNpcId))) {") == 1
     # Error path: ONE inline chat-error construction site (#63 pattern).
     assert js.count('class: "chat-error"') == 1
     assert js.count('log.querySelectorAll(".chat-error").forEach(n => n.remove())') == 1

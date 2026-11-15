@@ -130,7 +130,17 @@ const SHIM = `
     n.className = "";
     n.attributes = {};
     n.style = { removeProperty(k) { delete n.style[k]; } };
-    n.value = "";
+    if (n.tagName === "SELECT") {
+      let value = "";
+      Object.defineProperty(n, "value", {
+        enumerable: true,
+        configurable: true,
+        get() { return value; },
+        set(v) { value = String(v); },
+      });
+    } else {
+      n.value = "";
+    }
     n.disabled = false;
     n.checked = false;
     n.hidden = false;
@@ -1012,7 +1022,7 @@ USER = {"id": 1, "username": "u", "email": "e@x", "role": "player", "sessionTag"
 
 # The DIRECT-mode owner character at the origin (location 1).
 CHAR1 = {
-    "id": 1, "name": "P", "location_id": 1, "needs": {},
+    "id": "1", "name": "P", "location_id": 1, "needs": {},
     "control_mode": "DIRECT", "is_owner": True, "money": 100,
 }
 # The authoritative player after the MOVE completes (location 2).
@@ -1026,8 +1036,8 @@ WEATHER_OFF = {"enabled": False}
 # The Living Map requires ALL seven keyed POI types to carry coordinates for
 # mapReady to be true. The origin (1) carries the origin NPC; the destination
 # (2) carries the destination NPC (id 2, «Фар»).
-NPC_IVAN = {"id": 101, "name": "Иван", "kind": "npc"}
-NPC_FAR = {"id": 2, "name": "Фар", "kind": "npc"}
+NPC_IVAN = {"id": "101", "name": "Иван", "kind": "npc"}
+NPC_FAR = {"id": "2", "name": "Фар", "kind": "npc"}
 LOC1 = {"id": 1, "name": "Посёлок", "type": "settlement", "x": 45, "y": 50,
         "parent_id": None, "occupants": [NPC_IVAN]}
 LOC2 = {"id": 2, "name": "Магазин", "type": "shop", "x": 50, "y": 45,
@@ -1082,7 +1092,7 @@ SCENE_ASSET_1 = {
 # The dialogue fixtures — /dialogue/start ALWAYS returns session 30703 so the
 # failed-message retry (which re-issues start because the session binds only at
 # the message ACK) keeps the same session.
-DIALOGUE_START = {"session_id": 30703}
+DIALOGUE_START = {"session_id": "30703"}
 DIALOGUE_MESSAGE_OK = {
     "ok": True, "source": "llm",
     "messages": [
@@ -1091,7 +1101,7 @@ DIALOGUE_MESSAGE_OK = {
     ],
 }
 DIALOGUE_HISTORY = {
-    "session_id": 30703,
+    "session_id": "30703",
     "messages": [
         {"sender": "player", "content": "Привет, Фар", "game_timestamp": 1500},
         {"sender": "npc", "content": "Привет", "game_timestamp": 1500},
@@ -1100,7 +1110,7 @@ DIALOGUE_HISTORY = {
 
 # The feed event (30704) — a live event beyond the boot cursor.
 FEED_EVENT_30704 = {
-    "id": 30704, "event_type": "CHARACTER_MOVED", "actor_id": 1,
+    "id": 30704, "event_type": "CHARACTER_MOVED", "actor_id": "1",
     "location_id": 2, "game_timestamp": 1500,
     "text": "P дошёл до Магазина",
 }

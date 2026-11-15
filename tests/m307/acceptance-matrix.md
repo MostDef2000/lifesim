@@ -65,7 +65,13 @@ is asserted on every screen of every case.
 
 > **Run status (first fixture run):** the companion executed against local
 > candidate bytes and deterministically blocked at `caseJourneySixSteps` stage 5
-> (chat send) — a REAL product bug, not a companion defect (see GAP-1 / #338).
+> (chat send) — see the correction below and GAP-1 / #338 for the causal chain.
+> **Correction (#338, 2026-11-15):** the blocked send was caused by the
+> suite's NUMERIC character/session fixtures interacting with real-Chromium
+> DOMString `select.value` semantics, which exposed a defensive-normalization
+> gap in app.js — it is NOT evidence that production emits numeric character
+> ids (production character ids are strings). See the superseded-claim note
+> in «Gaps / open items» below.
 > BR-1..BR-13 therefore remain unverified until the #338 fix lands and the
 > companion is re-run to allPass. The m313 companion
 > (`tests/m313/composition.browser.js`, repaired in this change: 3 missing GET
@@ -93,5 +99,23 @@ is asserted on every screen of every case.
 
 | ID | requirement | layer | reproduction | expected | observed | status | issue URL | evidence | closure condition |
 |---|---|---|---|---|---|---|---|---|---|
-| GAP-1 | browser companion executed — blocked by a real product bug | browser companion | parent ran `journey.browser.js` fixture mode (real Chromium, local candidate bytes) | allPass=true, 26 case instances, 0 pageErrors | deterministic block at `caseJourneySixSteps` stage 5 (chat send): fill + click «→» → `#chat-log` never receives the message, draft retained, zero dialogue POSTs; live tab: `select.value="2"`, caption «NPC рядом», console clean except deliberate portrait-404s | fail (product defect caught, not a suite defect) | #338 | code chain `app.js:5867`→`:5897`→`:5376` (`[2].includes("2")`===false), introduced `6c3aa7f` (#305); error transcript in delivery session scratch | #338 fix lands → companion re-run allPass=true |
-| GAP-2 | harness fidelity: fake DOM select does not reproduce DOMString coercion | vm harness | `journey_harness.py` `makeElement` stores `.value` as a plain property; real `HTMLSelectElement.value` is always a string | harness `select.value` semantics === real DOM (string on set/read) | harness keeps numeric values → `includes(2)` succeeds in vm tests while the real browser fails (`includes("2")`) — the bug class in GAP-1/#338 is invisible to CI | fail (test-infra gap, documented) | #338 | same evidence chain as GAP-1 | harness coerces `.value` to string on set (ships with the #338 fix); vm suite then guards the bug class |
+| GAP-1 | browser companion executed — blocked by a real product bug | browser companion | parent ran `journey.browser.js` fixture mode (real Chromium, local candidate bytes) | allPass=true, 26 case instances, 0 pageErrors | deterministic block at `caseJourneySixSteps` stage 5 (chat send): fill + click «→» → `#chat-log` never receives the message, draft retained, zero dialogue POSTs; live tab: `select.value="2"`, caption «NPC рядом», console clean except deliberate portrait-404s | fail (see SUPERSEDED note below) | #338 | code chain `app.js:5867`→`:5897`→`:5376` (`[2].includes("2")`===false), introduced `6c3aa7f` (#305); error transcript in delivery session scratch | #338 fix lands → companion re-run allPass=true |
+| GAP-2 | harness fidelity: fake DOM select does not reproduce DOMString coercion | vm harness | `journey_harness.py` `makeElement` stores `.value` as a plain property; real `HTMLSelectElement.value` is always a string | harness `select.value` semantics === real DOM (string on set/read) | harness keeps numeric values → `includes(2)` succeeds in vm tests while the real browser fails (`includes("2")`) — the bug class in GAP-1/#338 is invisible to CI | fail (see SUPERSEDED note below) | #338 | same evidence chain as GAP-1 | harness coerces `.value` to string on set (ships with the #338 fix); vm suite then guards the bug class |
+
+> **SUPERSEDED (causal claim in GAP-1/GAP-2 only — rows kept as history,
+> correction 2026-11-15, #338):** the two rows above framed the companion
+> block as «a REAL product bug» caught in production-shaped data. The
+> corrected causal chain: the #307 fixtures carried NUMERIC character/session
+> ids, which production never emits (production character ids are STRINGS,
+> e.g. `npc_0001`/`plr_0001`; task/event/location ids are the integers). The
+> numeric fixtures were incompatible with the real browser's DOMString
+> `select.value` semantics, and THAT incompatibility exposed a real
+> defensive-normalization gap in app.js (strict `includes`/`===` roster and
+> relationship comparisons that silently required every producer to agree on
+> one type). The numeric fixtures are NOT evidence about production's id
+> types. The #338 fix: fixtures model the production types (character/session
+> ids → strings; task/event/location ids stay integers), the vm harness
+> coerces SELECT `.value` to string (select-only, no option-selection
+> semantics), and app.js normalizes the six affected comparisons with
+> `String(...)`. GAP closure is NOT claimed here: the companion re-run to
+> allPass is still pending, and BR-1..BR-13 remain unverified.

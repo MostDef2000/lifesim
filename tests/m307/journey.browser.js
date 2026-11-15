@@ -80,7 +80,7 @@ async (page) => {
   // ---- fixtures (shapes copied from the vm harness + backend/app/api/app.py) ----
   const USER = { id: 1, username: "audit", email: "audit@fixture.local", role: "player" };
   const CHAR1 = {
-    id: 1, name: "P", sex: "m", age: 30, alive: true, location_id: 1,
+    id: "1", name: "P", sex: "m", age: 30, alive: true, location_id: 1,
     control_mode: "DIRECT", is_owner: true, balance: 100,
     needs: { hunger: 70, energy: 80, thirst: 60, social: 50 }, job: "Рыбак",
     looks: null, biography: null, outfit_mode: "auto", home_location_id: 1,
@@ -88,8 +88,8 @@ async (page) => {
   };
   const WORLD = { id: 1, seed: 42, game_timestamp: 1500, day: 2, population: 12, time_scale: 1.0, is_paused: false };
   const WEATHER = { enabled: false };
-  const NPC_IVAN = { id: 101, name: "Иван", kind: "npc" };
-  const NPC_FAR = { id: 2, name: "Фар", kind: "npc" };
+  const NPC_IVAN = { id: "101", name: "Иван", kind: "npc" };
+  const NPC_FAR = { id: "2", name: "Фар", kind: "npc" };
   const LOCATIONS = [
     { id: 1, type: "settlement", name: "Посёлок", x: 45, y: 50, parent_id: null, occupants: [NPC_IVAN] },
     { id: 2, type: "shop", name: "Магазин", x: 50, y: 45, parent_id: 1, occupants: [NPC_FAR] },
@@ -110,7 +110,7 @@ async (page) => {
     asset: { id: "sc2", asset_type: "scene", location_id: 2,
       scene_descriptor: { location: { id: 2, name: "Магазин" } } },
   };
-  const DIALOGUE_START = { session_id: 30703 };
+  const DIALOGUE_START = { session_id: "30703" };
   const DIALOGUE_MESSAGE_OK = {
     ok: true, source: "llm",
     messages: [
@@ -203,7 +203,7 @@ async (page) => {
         return route.abort();
       };
       await page.route("**/auth/me", getOnly(ok(USER)));
-      await page.route("**/characters/by-user/1", getOnly(ok([{ id: 1, name: "P", alive: true, control_mode: "DIRECT" }])));
+      await page.route("**/characters/by-user/1", getOnly(ok([{ id: "1", name: "P", alive: true, control_mode: "DIRECT" }])));
       // Dynamic: the player's authoritative location flips after the MOVE.
       await page.route("**/characters/1", (route) => {
         if (route.request().method() !== "GET") {
@@ -305,7 +305,7 @@ async (page) => {
         requests.push({ url: req.url(), method: "POST", body: req.postData() || null });
         return json(route, ok(DIALOGUE_MESSAGE_OK));
       });
-      await page.route("**/dialogue/30703", getOnly(ok({ session_id: 30703, messages: DIALOGUE_MESSAGE_OK.messages })));
+      await page.route("**/dialogue/30703", getOnly(ok({ session_id: "30703", messages: DIALOGUE_MESSAGE_OK.messages })));
 
       // Pre-connect WebSocket interception: close WITHOUT connectToServer().
       await page.routeWebSocket("**/*", (wsRoute) => {

@@ -5439,7 +5439,7 @@ function chatApplyValidation(token, character, locs) {
   if (!chatOpCurrent(rt, token.seq)) return;
   const roster = chatRosterFor(character, locs);
   chatPaintPresence(rt, !rt.npcId ? "none"
-    : (roster.includes(rt.npcId) ? "valid" : "departed"));
+    : (roster.some((id) => String(id) === String(rt.npcId)) ? "valid" : "departed"));
 }
 
 /* #305: the initials fallback for a portrait-less NPC — the first codepoint
@@ -5513,8 +5513,8 @@ async function viewChat() {
     let targetDeparted = false;
     if (gameUiContext.npcId != null) {
       targetNpc = gameUiContext.npcId;
-      targetDeparted = !npcs.includes(targetNpc);
-    } else if (S.chatNpcId && npcs.includes(S.chatNpcId)) {
+      targetDeparted = !npcs.some((id) => String(id) === String(targetNpc));
+    } else if (S.chatNpcId && npcs.some((id) => String(id) === String(S.chatNpcId))) {
       targetNpc = S.chatNpcId;
     } else if (npcs.length) {
       targetNpc = npcs[0];
@@ -5641,7 +5641,7 @@ function renderChat(session, locName) {
   // 182 (review F1): the rebuilt select loses the user's choice on any
   // re-render — an accepted proposal re-render included. Restore the
   // persisted selection when it is still among the options.
-  if (S.chatNpcId && S.chatNpcs.includes(S.chatNpcId)) {
+  if (S.chatNpcId && S.chatNpcs.some((id) => String(id) === String(S.chatNpcId))) {
     npcSel.value = S.chatNpcId;
   }
 
@@ -5725,7 +5725,7 @@ function renderChat(session, locName) {
   }
   function refreshRel() {
     api(`/characters/${S.character.id}/relationships`).then((rels) => {
-      const rel = (rels || []).find((x) => x.other_id === npcSel.value);
+      const rel = (rels || []).find((x) => String(x.other_id) === String(npcSel.value));
       if (!rel) {
         applyRel(renderRelationshipScale(undefined), "пока незнакомы",
           "Отношения: пока незнакомы");
@@ -5894,7 +5894,7 @@ function renderChat(session, locName) {
       // render/session/target discards the whole send (zero POSTs, the
       // fresh render's UI is never touched).
       if (!chatOpCurrent(rt)) return;
-      const verdict = chatRosterFor(me, locs).includes(sentNpc)
+      const verdict = chatRosterFor(me, locs).some((id) => String(id) === String(sentNpc))
         ? "valid" : "departed";
       if (chatOpCurrent(rt, valSeq)) chatPaintPresence(rt, verdict);
       if (verdict !== "valid") return;  // zero dialogue POSTs

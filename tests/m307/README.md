@@ -77,13 +77,19 @@ Screenshots land under `/tmp/opencode/playwright-dumps/lifesim-307/`.
 The endpoint map is built by `journey_harness._journey_responses()` (boot + all
 five mutations). The deterministic fixtures:
 
+**Id types (issue #338):** character ids and dialogue session ids are STRINGS
+(`"1"`, `"101"`, `"2"`, `"30703"` — the production shape); task ids (30701,
+30702), the feed event id (30704), and location ids (1–7) are INTEGERS. The
+#307 fixtures originally carried numeric character/session ids; they now model
+the production types.
+
 - `CHAR1` (DIRECT, loc 1) / `CHAR1_AT_2` (loc 2) / `CHAR1_AUTONOMOUS`.
 - `CATALOG` (7 keyed POI types; loc 1 = origin NPC Иван/101, loc 2 =
   destination NPC Фар/2) / `CATALOG_NO_NPC` (loc 2 has no occupant).
 - `SCENE_ASSET_2` — passes BOTH `inspectSurroundings` validations
   (`asset.location_id === 2` AND `asset.scene_descriptor.location.id === 2`).
 - `TASK_30701` (MOVE, completed) / `TASK_30702` (SOCIALIZE, active).
-- `DIALOGUE_START` (`{session_id: 30703}`) / `DIALOGUE_MESSAGE_OK` /
+- `DIALOGUE_START` (`{session_id: "30703"}`) / `DIALOGUE_MESSAGE_OK` /
   `DIALOGUE_HISTORY`.
 - `FEED_EVENT_30704` (a live event beyond the boot cursor).
 
@@ -91,10 +97,10 @@ The five canonical mutations and their exact POST bodies:
 
 | # | URL | body |
 |---|---|---|
-| 1 | `/actions` | `{character_id:1, action_type:"MOVE", params:{location_id:2}}` |
+| 1 | `/actions` | `{character_id:"1", action_type:"MOVE", params:{location_id:2}}` |
 | 2 | `/visual/scenes` | `{location_id:2}` |
 | 3 | `/scene/act` | `{text:"Поговорить с Фаром"}` |
-| 4 | `/dialogue/start` | `{npc_id:2}` |
+| 4 | `/dialogue/start` | `{npc_id:"2"}` |
 | 5 | `/dialogue/30703/message` | `{content:"Привет, Фар"}` |
 
 ## Harness limits
@@ -109,13 +115,15 @@ is on an observable fact (the fetch census, the rendered DOM, the `S` /
 
 Known shim artifacts (faithful to browser semantics where it matters):
 
-- `select.value` is coerced to a string in the `chatNpcSelectValue` fact (a
-  real browser always stringifies `select.value`) — but the fake DOM itself
-  stores `.value` as a plain property WITHOUT DOMString coercion, so the
-  app-under-test reads numeric values in the harness where a real browser
-  would hand it strings. This fidelity gap (GAP-2, issue #338) is why the vm
-  suite cannot see the DOMString-vs-numeric id comparison bug the real-Chromium
-  companion caught; the harness upgrade ships with the #338 fix.
+- `select.value` carries DOMString semantics for SELECT nodes only: since the
+  #338 harness upgrade, the fake DOM coerces every value assigned to a SELECT
+  with `String(v)` (a real browser always stringifies `select.value`). The
+  coercion is select-only — no option/selectedIndex semantics are implemented
+  (the harness does not model options; the app assigns and reads `.value`
+  directly). Non-select elements keep the plain `.value` property. Before the
+  #338 fix the fake DOM stored `.value` as a plain property WITHOUT coercion,
+  which is why the vm suite could not see the DOMString-vs-numeric id
+  comparison bug the real-Chromium companion caught (GAP-2, issue #338).
 - The `taskSubmitLine` DOM host is only present when mounted; the
   `taskSubmitFeedback` module variable is the source of truth for the
   busy/offline captions.
