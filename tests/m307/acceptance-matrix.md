@@ -72,8 +72,10 @@ is asserted on every screen of every case.
 > gap in app.js — it is NOT evidence that production emits numeric character
 > ids (production character ids are strings). See the superseded-claim note
 > in «Gaps / open items» below.
-> BR-1..BR-13 therefore remain unverified until the #338 fix lands and the
-> companion is re-run to allPass. The m313 companion
+> **Run status (GAP-1 CLOSED, 2026-11-15):** the companion ran green in fixture
+> mode against the candidate bytes — allPass=true, 26 case instances (13 ×
+> {1440×900, 390×844}), 96/96 checks, 0 pageErrors, 0 SKIPPED, staticSha
+> matching the worktree bytes. BR-1..BR-13 are verified below. The m313 companion
 > (`tests/m313/composition.browser.js`, repaired in this change: 3 missing GET
 > fixtures + caseZoom header check aligned to the shipped fixed-56px design)
 > completed its fixture run green: allPass=true, 53/53 checks, 10/10 cases,
@@ -81,26 +83,26 @@ is asserted on every screen of every case.
 
 | ID | requirement | layer | reproduction | expected | observed | status | issue URL | evidence | closure condition |
 |---|---|---|---|---|---|---|---|---|---|
-| BR-1 | six-stage journey geometry | browser companion | `caseJourneySixSteps` @1440+390 | shells present at each stage, overflow=false everywhere, m313 thresholds on their screens | — | unverified | — | `journey.browser.js` (fixture/probe) | parent runs companion, allPass=true |
-| BR-2 | Normal place stage band | browser companion | `caseStateNormal` @1440+390 | badge «Вы здесь», stage 32–40% @390 (≥32 floor @1440), overflow=false | — | unverified | — | `journey.browser.js` | parent runs companion, allPass=true |
-| BR-3 | NoTasks empty states | browser companion | `caseStateNoTasks` @1440+390 | tasks shell, both empty states, overflow=false | — | unverified | — | `journey.browser.js` | parent runs companion, allPass=true |
-| BR-4 | Remote place (no scene-act bar) | browser companion | `caseStateRemote` @1440+390 | badge «Другое место», scene-act input absent, overflow=false | — | unverified | — | `journey.browser.js` | parent runs companion, allPass=true |
-| BR-5 | Current place (scene-act bar) | browser companion | `caseStateCurrent` @1440+390 | badge «Вы здесь», scene-act input present, overflow=false | — | unverified | — | `journey.browser.js` | parent runs companion, allPass=true |
-| BR-6 | NoNpc empty roster | browser companion | `caseStateNoNpc` @1440+390 | nearby empty, overflow=false | — | unverified | — | `journey.browser.js` | parent runs companion, allPass=true |
-| BR-7 | FailedImage handled | browser companion | `caseStateFailedImage` @1440+390 | scene-status set, overflow=false | — | unverified | — | `journey.browser.js` | parent runs companion, allPass=true |
-| BR-8 | Busy move rejected | browser companion | `caseStateBusy` @1440+390 | stays at origin, overflow=false | — | unverified | — | `journey.browser.js` | parent runs companion, allPass=true |
-| BR-9 | Offline move fails | browser companion | `caseStateOffline` @1440+390 | stays at origin, overflow=false | — | unverified | — | `journey.browser.js` | parent runs companion, allPass=true |
-| BR-10 | Autonomous move gated | browser companion | `caseStateAutonomous` @1440+390 | no POST /actions, overflow=false | — | unverified | — | `journey.browser.js` | parent runs companion, allPass=true |
-| BR-11 | Critical scene act (draft kept) | browser companion | `caseStateCritical` @1440+390 | draft kept, overflow=false | — | unverified | — | `journey.browser.js` | parent runs companion, allPass=true |
-| BR-12 | keyboard journey (Tab traversal) | browser companion | `caseKeyboardJourney` @1440+390 | focus records on interactive elements, overflow=false | — | unverified | — | `journey.browser.js` | parent runs companion, allPass=true |
-| BR-13 | reduced-motion journey | browser companion | `caseReducedMotionJourney` @1440+390 | place shell + stage present, overflow=false | — | unverified | — | `journey.browser.js` | parent runs companion, allPass=true |
+| BR-1 | six-stage journey geometry | browser companion | `caseJourneySixSteps` @1440+390 | shells present at each stage, overflow=false everywhere, m313 thresholds on their screens | shells present at each stage, overflow=false everywhere | pass | — | `report-m307-fixture8.json (96/96 checks)` | met (fixture run green) |
+| BR-2 | Normal place stage band | browser companion | `caseStateNormal` @1440+390 | badge «Вы здесь», stage 32–40% @390 (≥32 floor @1440), overflow=false | badge «Вы здесь», stage 36% @390 (band [32,40]) | pass | — | `report-m307-fixture8.json (96/96 checks)` | met (fixture run green) |
+| BR-3 | NoTasks empty states | browser companion | `caseStateNoTasks` @1440+390 | tasks shell, both empty states, overflow=false | tasks shell + both empty states | pass | — | `report-m307-fixture8.json (96/96 checks)` | met (fixture run green) |
+| BR-4 | Remote place (no scene-act bar) | browser companion | `caseStateRemote` @1440+390 | badge «Другое место», scene-act input absent, overflow=false | badge «Другое место», scene-act input absent | pass | — | `report-m307-fixture8.json (96/96 checks)` | met (fixture run green) |
+| BR-5 | Current place (scene-act bar) | browser companion | `caseStateCurrent` @1440+390 | badge «Вы здесь», scene-act input present, overflow=false | badge «Вы здесь», scene-act input present | pass | — | `report-m307-fixture8.json (96/96 checks)` | met (fixture run green) |
+| BR-6 | NoNpc empty roster | browser companion | `caseStateNoNpc` @1440+390 | nearby empty, overflow=false | nearby empty | pass | — | `report-m307-fixture8.json (96/96 checks)` | met (fixture run green) |
+| BR-7 | FailedImage handled | browser companion | `caseStateFailedImage` @1440+390 | scene-status set, overflow=false | scene-status set | pass | — | `report-m307-fixture8.json (96/96 checks)` | met (fixture run green) |
+| BR-8 | Busy move rejected | browser companion | `caseStateBusy` @1440+390 | stays at origin, overflow=false | stays at origin (marker loc 1) | pass | — | `report-m307-fixture8.json (96/96 checks)` | met (fixture run green) |
+| BR-9 | Offline move fails | browser companion | `caseStateOffline` @1440+390 | stays at origin, overflow=false | stays at origin (marker loc 1) | pass | — | `report-m307-fixture8.json (96/96 checks)` | met (fixture run green) |
+| BR-10 | Autonomous move gated | browser companion | `caseStateAutonomous` @1440+390 | no POST /actions, overflow=false | no POST /actions (count unchanged) | pass | — | `report-m307-fixture8.json (96/96 checks)` | met (fixture run green) |
+| BR-11 | Critical scene act (draft kept) | browser companion | `caseStateCritical` @1440+390 | draft kept, overflow=false | draft kept | pass | — | `report-m307-fixture8.json (96/96 checks)` | met (fixture run green) |
+| BR-12 | keyboard journey (Tab traversal) | browser companion | `caseKeyboardJourney` @1440+390 | focus records on interactive elements, overflow=false | focus records on interactive elements | pass | — | `report-m307-fixture8.json (96/96 checks)` | met (fixture run green) |
+| BR-13 | reduced-motion journey | browser companion | `caseReducedMotionJourney` @1440+390 | place shell + stage present, overflow=false | place shell + stage present | pass | — | `report-m307-fixture8.json (96/96 checks)` | met (fixture run green) |
 
 ## Gaps / open items
 
 | ID | requirement | layer | reproduction | expected | observed | status | issue URL | evidence | closure condition |
 |---|---|---|---|---|---|---|---|---|---|
-| GAP-1 | browser companion executed — blocked by a real product bug | browser companion | parent ran `journey.browser.js` fixture mode (real Chromium, local candidate bytes) | allPass=true, 26 case instances, 0 pageErrors | deterministic block at `caseJourneySixSteps` stage 5 (chat send): fill + click «→» → `#chat-log` never receives the message, draft retained, zero dialogue POSTs; live tab: `select.value="2"`, caption «NPC рядом», console clean except deliberate portrait-404s | fail (see SUPERSEDED note below) | #338 | code chain `app.js:5867`→`:5897`→`:5376` (`[2].includes("2")`===false), introduced `6c3aa7f` (#305); error transcript in delivery session scratch | #338 fix lands → companion re-run allPass=true |
-| GAP-2 | harness fidelity: fake DOM select does not reproduce DOMString coercion | vm harness | `journey_harness.py` `makeElement` stores `.value` as a plain property; real `HTMLSelectElement.value` is always a string | harness `select.value` semantics === real DOM (string on set/read) | harness keeps numeric values → `includes(2)` succeeds in vm tests while the real browser fails (`includes("2")`) — the bug class in GAP-1/#338 is invisible to CI | fail (see SUPERSEDED note below) | #338 | same evidence chain as GAP-1 | harness coerces `.value` to string on set (ships with the #338 fix); vm suite then guards the bug class |
+| GAP-1 | browser companion executed — blocked by a real product bug | browser companion | parent ran `journey.browser.js` fixture mode (real Chromium, local candidate bytes) | allPass=true, 26 case instances, 0 pageErrors | allPass=true, 26 case instances, 96/96 checks, 0 pageErrors, 0 SKIPPED, staticSha match | pass (closed 2026-11-15) | #338 | `report-m307-fixture8.json` | met |
+| GAP-2 | harness fidelity: fake DOM select does not reproduce DOMString coercion | vm harness | `journey_harness.py` `makeElement` stores `.value` as a plain property; real `HTMLSelectElement.value` is always a string | harness `select.value` semantics === real DOM (string on set/read) | harness SELECT .value coerces to string (test_chat_id_normalization.py test_shim_select_coercion + the numeric-roster tests) | pass (closed 2026-11-15) | #338 | same evidence chain as GAP-1 | met |
 
 > **SUPERSEDED (causal claim in GAP-1/GAP-2 only — rows kept as history,
 > correction 2026-11-15, #338):** the two rows above framed the companion
@@ -119,3 +121,4 @@ is asserted on every screen of every case.
 > semantics), and app.js normalizes the six affected comparisons with
 > `String(...)`. GAP closure is NOT claimed here: the companion re-run to
 > allPass is still pending, and BR-1..BR-13 remain unverified.
+> **Closure (2026-11-15):** both gaps are closed — the companion run is green and the harness coercion ships with the #338 fix.

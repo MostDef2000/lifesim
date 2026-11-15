@@ -131,6 +131,7 @@ async (page) => {
   // read (the poll) reports the arrival — the same handoff the vm harness
   // simulates with __setResponse.
   let playerLoc = 1;
+  let locationsCatalog = LOCATIONS;
   // Per-case scene-act / dialogue / move response overrides (the failure
   // matrix cases set these before driving).
   let sceneActResponse = { ok: true, task_id: 30702, task_type: "SOCIALIZE", task_label: "Пообщаться" };
@@ -154,6 +155,22 @@ async (page) => {
     checkLog.push({ name, status: "SKIPPED", reason });
     console.log("SKIP: " + name + " — " + reason);
     return true; // a skipped check never fails the run
+  }
+
+  // ---- per-case fixture-state reset ----
+  // Cases mutate shared fixture vars (the journey's /actions handler and the
+  // state cases flip playerLoc; busy/offline/failed-image/critical swap the
+  // move/scene responses; no-NPC swaps the locations catalog). Without a reset
+  // the next case inherits the previous world state — e.g. caseStateBusy needs
+  // the player at loc 1 to render «Пойти сюда».
+  function resetFixtureState() {
+    playerLoc = 1;
+    locationsCatalog = LOCATIONS;
+    sceneActResponse = { ok: true, task_id: 30702, task_type: "SOCIALIZE", task_label: "Пообщаться" };
+    moveResponse = { task_id: 30701, task_type: "MOVE", task_label: "Перемещение", status: "planned" };
+    sceneFileReject = false;
+    autonomous = false;
+    moveNetworkFail = false;
   }
 
   // ---- setup (fail-closed, same discipline as m313) ----
@@ -227,7 +244,10 @@ async (page) => {
       await page.route("**/characters/1/desire/opportunities", getOnly(ok({ desire: null, opportunities: [] })));
       await page.route("**/world", getOnly(ok(WORLD)));
       await page.route("**/weather", getOnly(ok(WEATHER)));
-      await page.route("**/locations", getOnly(ok(autonomous ? LOCATIONS : LOCATIONS)));
+      await page.route("**/locations", (route) => {
+        if (route.request().method() !== "GET") return route.abort();
+        return route.fulfill({ status: 200, contentType: "application/json; charset=utf-8", body: JSON.stringify(locationsCatalog) });
+      });
       await page.route("**/world/events*", getOnly(ok([])));
       await page.route("**/visual/characters/1/portrait", getOnly(PORTRAIT_404));
       await page.route("**/visual/characters/2/portrait", getOnly(PORTRAIT_404));
@@ -505,6 +525,7 @@ async (page) => {
 
   // The Place screen in the normal/current state (the stage geometry band).
   async function caseStateNormal(exp) {
+    if (MODE === "fixture") { playerLoc = 2; }
     await gotoHash("#/location/2", ".place-shell", exp);
     await page.waitForFunction(() => !!document.querySelector(".place-stage"), undefined, { timeout: 8000 });
     const m = await journeyMetrics(exp);
@@ -552,6 +573,9 @@ async (page) => {
   // The current place (the player IS there): the scene-act bar is present.
   async function caseStateCurrent(exp) {
     if (MODE === "fixture") playerLoc = 2; // the player is at the destination
+    // Force a re-mount: a gotoHash to the CURRENT hash is a no-op (no
+    // hashchange, no re-render), so the previous case's DOM would be measured.
+    await gotoHash("#/world", ".world-shell", exp);
     await gotoHash("#/location/2", ".place-shell", exp);
     await page.waitForFunction(() => !!document.querySelector(".place-stage"), undefined, { timeout: 8000 });
     const m = await journeyMetrics(exp);
@@ -567,12 +591,9 @@ async (page) => {
   // The destination with no NPC: the nearby roster is empty.
   async function caseStateNoNpc(exp) {
     if (MODE === "fixture") {
-      // Re-route the locations fixture to the no-NPC catalog for this case.
-      await page.unroute("**/locations");
-      await page.route("**/locations", (route) => {
-        if (route.request().method() !== "GET") return route.abort();
-        return route.fulfill({ status: 200, contentType: "application/json; charset=utf-8", body: JSON.stringify(LOCATIONS_NO_NPC) });
-      });
+      // Point the locations fixture at the no-NPC catalog for this case
+      // (resetFixtureState restores the canonical catalog before the next case).
+      locationsCatalog = LOCATIONS_NO_NPC;
       playerLoc = 2;
       await gotoHash("#/world", ".world-shell", exp); // re-boot the world read
     }
@@ -614,10 +635,10 @@ async (page) => {
     await page.locator("button", { hasText: "Магазин" }).first().click();
     await page.waitForFunction(() => !!document.querySelector(".poi-card"), undefined, { timeout: 8000 });
     await page.locator("button", { hasText: "Пойти сюда" }).first().click();
-    await page.waitForFunction(() => {
-      const line = document.querySelector(".task-submit-line");
-      return line && line.textContent.length > 0;
-    }, undefined, { timeout: 8000 });
+    // The POI card closes when the move resolves (success or failure) — the
+    // observable on #/world (the .task-submit-line host lives only in the
+    // place view; the vm harness asserts the module caption instead).
+    await page.waitForFunction(() => !document.querySelector(".poi-card"), undefined, { timeout: 8000 });
     const m = await journeyMetrics(exp);
     const path = await shot("case-state-busy-" + exp.label + ".png");
     const markerLoc = await page.evaluate(() => {
@@ -641,10 +662,10 @@ async (page) => {
     await page.locator("button", { hasText: "Магазин" }).first().click();
     await page.waitForFunction(() => !!document.querySelector(".poi-card"), undefined, { timeout: 8000 });
     await page.locator("button", { hasText: "Пойти сюда" }).first().click();
-    await page.waitForFunction(() => {
-      const line = document.querySelector(".task-submit-line");
-      return line && line.textContent.length > 0;
-    }, undefined, { timeout: 8000 });
+    // The POI card closes when the move resolves (success or failure) — the
+    // observable on #/world (the .task-submit-line host lives only in the
+    // place view; the vm harness asserts the module caption instead).
+    await page.waitForFunction(() => !document.querySelector(".poi-card"), undefined, { timeout: 8000 });
     const m = await journeyMetrics(exp);
     const path = await shot("case-state-offline-" + exp.label + ".png");
     const markerLoc = await page.evaluate(() => {
@@ -663,7 +684,14 @@ async (page) => {
 
   // The character is AUTONOMOUS: the move is gated client-side (no POST).
   async function caseStateAutonomous(exp) {
-    if (MODE === "fixture") { autonomous = true; }
+    if (MODE === "fixture") {
+      // The client-side gate reads S.character.control_mode, which is set at
+      // boot from /characters/1 — so the AUTONOMOUS flag must be in place
+      // BEFORE the boot read (a post-boot flip would leave S.character DIRECT
+      // and the move would POST).
+      autonomous = true;
+      await loadWorld();
+    }
     await gotoHash("#/world", ".world-shell", exp);
     await page.locator("button", { hasText: "Магазин" }).first().click();
     await page.waitForFunction(() => !!document.querySelector(".poi-card"), undefined, { timeout: 8000 });
@@ -781,18 +809,49 @@ async (page) => {
     for (const [w, h, label] of VIEWPORTS) {
       await page.setViewportSize({ width: w, height: h });
       const exp = { w, h, base: BASE, vh: h, label };
+      // Fresh app boot per viewport: the scene cache (S.sceneCache) retains
+      // READY entries across navigations by design (#302), so a shared app
+      // instance would hand the next viewport a disabled «Сцена показана»
+      // stage button. loadWorld() re-boots the app; the page.route fixtures
+      // persist across navigations.
+      resetFixtureState();
+      await loadWorld();
       report.cases["caseJourneySixSteps-" + label] = await caseJourneySixSteps(exp);
+      resetFixtureState();
+      await loadWorld();
       report.cases["caseStateNormal-" + label] = await caseStateNormal(exp);
+      resetFixtureState();
+      await loadWorld();
       report.cases["caseStateNoTasks-" + label] = await caseStateNoTasks(exp);
+      resetFixtureState();
+      await loadWorld();
       report.cases["caseStateRemote-" + label] = await caseStateRemote(exp);
+      resetFixtureState();
+      await loadWorld();
       report.cases["caseStateCurrent-" + label] = await caseStateCurrent(exp);
+      resetFixtureState();
+      await loadWorld();
       report.cases["caseStateNoNpc-" + label] = await caseStateNoNpc(exp);
+      resetFixtureState();
+      await loadWorld();
       report.cases["caseStateFailedImage-" + label] = await caseStateFailedImage(exp);
+      resetFixtureState();
+      await loadWorld();
       report.cases["caseStateBusy-" + label] = await caseStateBusy(exp);
+      resetFixtureState();
+      await loadWorld();
       report.cases["caseStateOffline-" + label] = await caseStateOffline(exp);
+      resetFixtureState();
+      await loadWorld();
       report.cases["caseStateAutonomous-" + label] = await caseStateAutonomous(exp);
+      resetFixtureState();
+      await loadWorld();
       report.cases["caseStateCritical-" + label] = await caseStateCritical(exp);
+      resetFixtureState();
+      await loadWorld();
       report.cases["caseKeyboardJourney-" + label] = await caseKeyboardJourney(exp);
+      resetFixtureState();
+      await loadWorld();
       report.cases["caseReducedMotionJourney-" + label] = await caseReducedMotionJourney(exp);
     }
     report.screenshots = Object.values(report.cases).map((c) => c.screenshot);
@@ -818,8 +877,14 @@ async (page) => {
     return report;
   }
 
+  let bootSeq = 0;
   async function loadWorld() {
-    await page.goto(BASE + "/?m307=journey#/world", { waitUntil: "load" });
+    // A unique query param forces a FULL document load: a goto to the same
+    // URL with only a different hash is a same-document navigation (no
+    // reload), which would keep the in-memory scene cache (S.sceneCache)
+    // alive across cases/viewports.
+    bootSeq += 1;
+    await page.goto(BASE + "/?m307=journey&boot=" + bootSeq + "#/world", { waitUntil: "load" });
     await page.waitForFunction((clock) => {
       const c = document.getElementById("clock");
       return location.hash === "#/world" && !!document.querySelector(".world-shell")
