@@ -484,6 +484,16 @@ function consumeAuthError() {
 }
 const authErrorText = consumeAuthError();
 
+/* #342: the popup login completion. The message is only a reload hint —
+   the session cookie is the authority; the reload re-probes /auth/me. */
+window.addEventListener("message", (event) => {
+  if (event.origin !== location.origin) return;
+  const data = event.data;
+  if (!data || typeof data !== "object" || data.type !== "lifesim-auth"
+      || data.ok !== true) return;
+  location.reload();
+});
+
 function viewAuth() {
   location.hash = "#/login";
   document.body.classList.add("landing-mode");
@@ -524,7 +534,14 @@ function viewAuth() {
     el("p", { class: "landing-sub" }, "Симулятор жизни на острове Рейнеке. 18+"),
     el("div", { class: "landing-hero-actions" },
       el("button", { class: "landing-cta", type: "button",
-        onclick: () => { window.location.href = "/auth/login"; } }, "Войти")),
+        onclick: () => {
+          const popup = window.open(
+            "/auth/login?mode=popup",
+            "lifesim-auth",
+            "popup,width=520,height=680",
+          );
+          if (popup === null) window.location.href = "/auth/login";
+        } }, "Войти")),
     el("div", { class: "err-text landing-auth-error", role: "alert" },
       authErrorText || ""));
 

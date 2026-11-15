@@ -69,6 +69,7 @@ CLIENT_SECRET = "test-client-secret"
 
 COOKIE = "vl1_session"
 BIND = "vl1_session_bind"
+POPUP = "auth_popup"
 
 
 # ---------- runtime key material (never committed) ----------
@@ -152,6 +153,28 @@ def pkce_challenge(verifier: str) -> str:
 
 def parse_query(location: str) -> dict:
     return dict(parse_qsl(urlsplit(location).query))
+
+
+def cookie_fields(set_cookie_header: str) -> dict:
+    """Parse one Set-Cookie header into a lowercase {field: value} map
+    (flag fields like HttpOnly map to True)."""
+    parts = [p.strip() for p in set_cookie_header.split(";")]
+    out = {}
+    for part in parts[1:]:
+        if "=" in part:
+            k, v = part.split("=", 1)
+            out[k.strip().lower()] = v
+        else:
+            out[part.lower()] = True
+    return out
+
+
+def marker_headers(r: httpx.Response) -> list:
+    return [h for h in r.headers.get_list("set-cookie") if h.startswith(POPUP + "=")]
+
+
+def bind_headers(r: httpx.Response) -> list:
+    return [h for h in r.headers.get_list("set-cookie") if h.startswith(BIND + "=")]
 
 
 # ---------- in-memory OIDC provider behind httpx.MockTransport ----------
@@ -843,3 +866,266 @@ class TestBootFailClosed:
         factory = sessionmaker(bind=create_engine_factory(settings))
         app = create_app(settings, factory)
         assert app is not None
+
+
+# =====================================================================
+# 10. Popup presentation (#342): marker cookie, HTML completion page,
+#     allowlisted errors, expiry fallback, forgery resistance
+# =====================================================================
+
+class TestPopupFlow:
+    """The popup mode renders a same-origin HTML completion page instead of
+    the 302 redirect. The page carries only a fixed boolean + an allowlisted
+    error code; the session cookie remains the authority. Every assertion is
+    on the HTTP surface (status, headers, Set-Cookie, body) — the provider
+    transport stays mocked exactly as in sections 1-9."""
+
+    def _assert_popup_error(self, r: httpx.Response, code: str, env) -> None:
+        assert r.status_code == 200
+        assert r.headers["content-type"] == "text/html; charset=utf-8"
+        assert r.headers.get("cache-control") == "no-store"
+        assert "location" not in r.headers
+        assert 'data-ok="false"' in r.text
+        assert f'data-error="{code}"' in r.text
+        # no session was issued; both flow cookies are deleted
+        assert env.client.cookies.get(COOKIE) is None
+        assert env.client.cookies.get(BIND) is None
+        assert env.client.cookies.get(POPUP) is None
+
+    def _popup_login(self, env) -> dict:
+        r = env.client.get("/auth/login?mode=popup", follow_redirects=False)
+        assert r.status_code == 302
+        return parse_query(r.headers["location"])
+
+    # ---------- 1. login mode ----------
+
+    def test_popup_login_sets_marker_and_redirects(self, oidc_env):
+        env = oidc_env
+        r = env.client.get("/auth/login?mode=popup", follow_redirects=False)
+        assert r.status_code == 302
+        loc = r.headers["location"]
+        assert loc.startswith(f"{ISSUER}/authorize?")
+        params = parse_query(loc)
+        # the provider-facing redirect is unchanged: no popup flag in the
+        # authorize params (state/claims carry no presentation hint)
+        assert params["redirect_uri"] == CALLBACK
+        assert "popup" not in params
+        # marker cookie: value "1", Max-Age=600, Path=/, HttpOnly, SameSite=lax
+        headers = marker_headers(r)
+        assert len(headers) == 1
+        fields = cookie_fields(headers[0])
+        assert fields["max-age"] == "600"
+        assert fields["path"] == "/"
+        assert fields.get("httponly") is True
+        assert fields["samesite"] == "lax"
+        # the marker inherits the SAME security attributes as the bind cookie
+        # (one _cookie_kwargs source) — including Secure when configured.
+        bind_fields = cookie_fields(bind_headers(r)[0])
+        for attr in ("path", "httponly", "samesite", "secure"):
+            assert fields.get(attr) == bind_fields.get(attr), attr
+        assert env.client.cookies.get(POPUP) == "1"
+        # the transaction binding is unchanged: the bind cookie is still minted
+        assert env.client.cookies.get(BIND)
+
+    def test_plain_login_clears_preexisting_marker(self, oidc_env):
+        env = oidc_env
+        env.client.get("/auth/login?mode=popup", follow_redirects=False)
+        assert env.client.cookies.get(POPUP) == "1"
+        r = env.client.get("/auth/login", follow_redirects=False)
+        assert r.status_code == 302
+        # the plain (tab) login deletes the marker (Max-Age=0)
+        headers = marker_headers(r)
+        assert len(headers) == 1
+        assert cookie_fields(headers[0])["max-age"] == "0"
+        assert env.client.cookies.get(POPUP) is None
+
+    # ---------- 2. success ----------
+
+    def test_popup_success_page(self, oidc_env):
+        env = oidc_env
+        kid, key = env.keys[0]
+        params = self._popup_login(env)
+        token = make_id_token(
+            key, kid, nonce=params["nonce"], sub="sub-pup",
+            email="pup@example.com", preferred_username="pup",
+        )
+        env.provider.token_body = {
+            "id_token": token, "access_token": "at", "token_type": "Bearer"}
+        r = do_callback(env.client, params["state"])
+
+        # 200 HTML completion page — NOT a redirect
+        assert r.status_code == 200
+        assert r.headers["content-type"] == "text/html; charset=utf-8"
+        assert r.headers.get("cache-control") == "no-store"
+        assert "location" not in r.headers
+        body = r.text
+        assert 'data-ok="true"' in body
+        assert 'data-error=""' in body
+        # exactly one script tag: the external same-origin file, no inline JS
+        assert body.count("<script") == 1
+        assert '<script src="/static/auth-popup.js" defer></script>' in body
+        # the app's OWN v2 session cookie is set (same assertions as the 302 path)
+        sess = env.client.cookies.get(COOKIE)
+        assert sess
+        payload = verify_token(sess, get_secret(env.settings))
+        assert payload is not None
+        assert payload["v"] == 2
+        # both flow cookies are deleted
+        assert env.client.cookies.get(BIND) is None
+        assert env.client.cookies.get(POPUP) is None
+        # no secret material in the body: no provider token, no PKCE
+        # verifier, no session cookie value
+        assert token not in body
+        assert env.provider.last_token_form["code_verifier"] not in body
+        assert sess not in body
+
+    # ---------- 3. errors (each allowlisted code via a real branch) ----------
+
+    def test_popup_state_mismatch_bogus_state(self, oidc_env):
+        env = oidc_env
+        self._popup_login(env)
+        r = do_callback(env.client, "not-a-real-state")
+        self._assert_popup_error(r, "state_mismatch", env)
+
+    def test_popup_provider_error_param(self, oidc_env):
+        env = oidc_env
+        params = self._popup_login(env)
+        r = env.client.get(
+            f"/auth/callback?state={params['state']}&code=c1&error=access_denied",
+            follow_redirects=False)
+        self._assert_popup_error(r, "provider_error", env)
+
+    def test_popup_provider_error_exchange_failure(self, oidc_env):
+        env = oidc_env
+        params = self._popup_login(env)
+        env.provider.token_status = 400
+        r = do_callback(env.client, params["state"])
+        self._assert_popup_error(r, "provider_error", env)
+
+    def test_popup_group_denied(self, oidc_env):
+        env = oidc_env
+        params = self._popup_login(env)
+        kid, key = env.keys[0]
+        token = make_id_token(
+            key, kid, nonce=params["nonce"], sub="sub-pg",
+            email="pg@example.com", preferred_username="pg",
+            groups=["some-other-group"],
+        )
+        env.provider.token_body = {"id_token": token}
+        r = do_callback(env.client, params["state"])
+        self._assert_popup_error(r, "group_denied", env)
+
+    def test_popup_auth_failed_missing_email(self, oidc_env):
+        env = oidc_env
+        params = self._popup_login(env)
+        kid, key = env.keys[0]
+        token = make_id_token(
+            key, kid, nonce=params["nonce"], sub="sub-pne",
+            email="", preferred_username="pne",
+        )
+        env.provider.token_body = {"id_token": token}
+        r = do_callback(env.client, params["state"])
+        self._assert_popup_error(r, "auth_failed", env)
+
+    def test_popup_username_taken(self, oidc_env):
+        env = oidc_env
+        params = self._popup_login(env)
+        kid, key = env.keys[0]
+        # "ab" violates USERNAME_RE [a-zA-Z0-9_]{3,32}
+        token = make_id_token(
+            key, kid, nonce=params["nonce"], sub="sub-pu",
+            email="pu@example.com", preferred_username="ab",
+        )
+        env.provider.token_body = {"id_token": token}
+        r = do_callback(env.client, params["state"])
+        self._assert_popup_error(r, "username_taken", env)
+
+    def test_popup_registration_closed(self, oidc_env):
+        env = oidc_env
+        # the closure reads settings.admin.max_players at callback time
+        env.settings.admin.max_players = 1
+        with env.factory() as s:
+            s.add(User(
+                username="cap", email="cap@example.com", password_hash=None,
+                role="user", oidc_issuer="https://other", oidc_sub="sub-cap",
+                created_at=0,
+            ))
+            s.commit()
+        params = self._popup_login(env)
+        kid, key = env.keys[0]
+        token = make_id_token(
+            key, kid, nonce=params["nonce"], sub="sub-pc",
+            email="pc@example.com", preferred_username="pc1",
+        )
+        env.provider.token_body = {"id_token": token}
+        r = do_callback(env.client, params["state"])
+        self._assert_popup_error(r, "registration_closed", env)
+        # the rejected user was NOT provisioned
+        with env.factory() as s:
+            assert s.query(User).filter_by(oidc_sub="sub-pc").count() == 0
+
+    # ---------- 4. expiry ----------
+
+    def test_popup_expired_txn_renders_error_page(self, oidc_env, monkeypatch):
+        env = oidc_env
+        t = [1000.0]
+        monkeypatch.setattr(oidc_mod, "_now", lambda: t[0])
+        params = self._popup_login(env)  # txn expires at 1000 + 300
+        t[0] = 1000.0 + oidc_mod.TRANSACTION_TTL_S + 1
+        # marker still present → the popup error page, NOT a redirect
+        r = do_callback(env.client, params["state"])
+        self._assert_popup_error(r, "state_mismatch", env)
+
+    def test_expired_txn_then_marker_gone_falls_back_to_redirect(
+            self, oidc_env, monkeypatch):
+        env = oidc_env
+        t = [1000.0]
+        monkeypatch.setattr(oidc_mod, "_now", lambda: t[0])
+        params = self._popup_login(env)
+        t[0] = 1000.0 + oidc_mod.TRANSACTION_TTL_S + 1
+        # marker present → popup error page (the txn is burned by this call)
+        r = do_callback(env.client, params["state"])
+        self._assert_popup_error(r, "state_mismatch", env)
+        # marker gone (expired/deleted) → the documented 302 fallback
+        env.client.cookies.delete(POPUP)
+        assert env.client.cookies.get(POPUP) is None
+        assert_fail_redirect(do_callback(env.client, params["state"]),
+                             "state_mismatch")
+
+    # ---------- 5. forgery / allowlist ----------
+
+    def test_marker_alone_bogus_callback_no_exchange(self, oidc_env):
+        env = oidc_env
+        # a real (server-set) marker, but NO live transaction for the
+        # presented state: the second login from the same browser invalidates
+        # the first, so the marker alone must never trigger a provider token
+        # exchange
+        p1 = self._popup_login(env)
+        self._popup_login(env)
+        r = do_callback(env.client, p1["state"])
+        self._assert_popup_error(r, "state_mismatch", env)
+        assert env.provider.token_hits == 0
+
+    def test_non_one_marker_ignored_302_path(self, oidc_env):
+        env = oidc_env
+        # control: the exact value "1" (set directly on the jar) selects the
+        # popup page — proves the jar cookie is sent and honored
+        env.client.cookies.set(POPUP, "1")
+        r = do_callback(env.client, "forged-state")
+        assert r.status_code == 200
+        assert 'data-error="state_mismatch"' in r.text
+        # any other value is ignored → the documented 302 fallback
+        env.client.cookies.set(POPUP, "true")
+        assert_fail_redirect(do_callback(env.client, "forged-state"),
+                             "state_mismatch")
+
+    def test_popup_response_rejects_non_allowlisted_error(self):
+        resp = oidc_mod._popup_response(ok=False, error="<script>")
+        assert resp.status_code == 200
+        assert resp.headers["cache-control"] == "no-store"
+        body = resp.body.decode("utf-8")
+        assert 'data-error="auth_failed"' in body
+        # the malicious value is absent; the only script tag is the external one
+        assert "<script>" not in body
+        assert body.count("<script") == 1
+        assert '<script src="/static/auth-popup.js" defer></script>' in body
