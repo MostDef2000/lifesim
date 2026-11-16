@@ -24,6 +24,14 @@
 //              origin) via page.addInitScript BEFORE calling this function.
 //              In probe mode NO route interception is installed (the real
 //              backend serves the APIs) and the request/WS capture is passive.
+//              Only caseJourneySixSteps RUNS in probe mode — the other 12
+//              cases are structurally fixture-only (their state comes from
+//              mocked routes/responses) and are recorded as SKIPPED per
+//              viewport. The clock gate accepts any non-empty #clock (the
+//              real backend's live ticker advances the clock past the boot
+//              timestamp), and the stage-3 arrival wait is REAL with a
+//              generous timeout (the MOVE completes on the next ticker beat
+//              against the probe's zero-travel-time seeded world).
 //              If the probe backend is unreachable the function THROWS
 //              (fail-closed) — it never falls back to the fixture silently.
 //
@@ -420,12 +428,14 @@ async (page) => {
 
   // Wait for the authoritative player location to flip to `loc` (the poll
   // picks up the /characters/1 read after the MOVE). Generous timeout: the
-  // app's feed poll is a 5s interval.
-  async function waitForPlayerLoc(loc, exp) {
+  // app's feed poll is a 5s interval. `timeout` is optional (fixture
+  // default 12000); probe mode passes a larger window — the real backend
+  // completes the MOVE on the next live-ticker beat before the poll sees it.
+  async function waitForPlayerLoc(loc, exp, timeout) {
     await page.waitForFunction((loc) => {
       const m = document.getElementById("player-marker");
       return m && String(m.getAttribute("data-location-id")) === String(loc);
-    }, loc, { timeout: 12000 });
+    }, loc, { timeout: timeout || 12000 });
     await page.evaluate((exp) => {
       if (window.innerWidth !== exp.w) throw new Error("m307 GUARD: innerWidth=" + window.innerWidth + " != " + exp.w);
       if (!location.href.startsWith(exp.base)) throw new Error("m307 GUARD: location.href=" + location.href + " left " + exp.base);
@@ -465,19 +475,21 @@ async (page) => {
     results.push(overflowChecks("caseJourneySixSteps/" + exp.label + "/s2", s2));
     await page.locator("button", { hasText: "← Остров" }).first().click();
     await gotoHash("#/world", ".world-shell", exp);
-    // Stage 3: the explicit MOVE.
+    // Stage 3: the explicit MOVE. The arrival wait is UNCONDITIONAL: in
+    // fixture mode the mocked POST /actions flips the /characters/1 read;
+    // in probe mode the real backend completes the MOVE task on the next
+    // live-ticker beat (zero travel time in the probe-seeded world) and the
+    // 5s poll picks it up — hence the larger probe timeout.
     await page.locator("button", { hasText: "Магазин" }).first().click();
     await page.waitForFunction(() => !!document.querySelector(".poi-card"), undefined, { timeout: 8000 });
     await page.locator("button", { hasText: "Пойти сюда" }).first().click();
-    if (MODE === "fixture") await waitForPlayerLoc(2, exp);
+    await waitForPlayerLoc(2, exp, MODE === "probe" ? 45000 : 12000);
     const s3 = await journeyMetrics(exp);
     const markerLoc3 = await page.evaluate(() => {
       const el = document.getElementById("player-marker");
       return el ? el.getAttribute("data-location-id") : null;
     });
-    results.push(MODE === "probe"
-      ? skip("caseJourneySixSteps/" + exp.label + "/s3-arrived-loc2", "probe mode: server-driven arrival")
-      : check("caseJourneySixSteps/" + exp.label + "/s3-arrived-loc2", markerLoc3 === "2", "player-marker loc " + markerLoc3));
+    results.push(check("caseJourneySixSteps/" + exp.label + "/s3-arrived-loc2", markerLoc3 === "2", "player-marker loc " + markerLoc3));
     results.push(overflowChecks("caseJourneySixSteps/" + exp.label + "/s3", s3));
     // Stage 4: enter the current Place 2, inspect the scene, submit a scene act.
     await gotoHash("#/location/2", ".place-shell", exp);
@@ -806,57 +818,65 @@ async (page) => {
       });
     }
 
+    // The case table (fixture mode runs ALL of them; probe mode runs ONLY
+    // caseJourneySixSteps — the other 12 are structurally fixture-only:
+    // their state comes from mocked routes/responses, which do not exist
+    // against a real backend).
+    const CASE_RUNNERS = [
+      ["caseJourneySixSteps", caseJourneySixSteps],
+      ["caseStateNormal", caseStateNormal],
+      ["caseStateNoTasks", caseStateNoTasks],
+      ["caseStateRemote", caseStateRemote],
+      ["caseStateCurrent", caseStateCurrent],
+      ["caseStateNoNpc", caseStateNoNpc],
+      ["caseStateFailedImage", caseStateFailedImage],
+      ["caseStateBusy", caseStateBusy],
+      ["caseStateOffline", caseStateOffline],
+      ["caseStateAutonomous", caseStateAutonomous],
+      ["caseStateCritical", caseStateCritical],
+      ["caseKeyboardJourney", caseKeyboardJourney],
+      ["caseReducedMotionJourney", caseReducedMotionJourney],
+    ];
+
     for (const [w, h, label] of VIEWPORTS) {
       await page.setViewportSize({ width: w, height: h });
       const exp = { w, h, base: BASE, vh: h, label };
-      // Fresh app boot per viewport: the scene cache (S.sceneCache) retains
-      // READY entries across navigations by design (#302), so a shared app
-      // instance would hand the next viewport a disabled «Сцена показана»
-      // stage button. loadWorld() re-boots the app; the page.route fixtures
-      // persist across navigations.
-      resetFixtureState();
-      await loadWorld();
-      report.cases["caseJourneySixSteps-" + label] = await caseJourneySixSteps(exp);
-      resetFixtureState();
-      await loadWorld();
-      report.cases["caseStateNormal-" + label] = await caseStateNormal(exp);
-      resetFixtureState();
-      await loadWorld();
-      report.cases["caseStateNoTasks-" + label] = await caseStateNoTasks(exp);
-      resetFixtureState();
-      await loadWorld();
-      report.cases["caseStateRemote-" + label] = await caseStateRemote(exp);
-      resetFixtureState();
-      await loadWorld();
-      report.cases["caseStateCurrent-" + label] = await caseStateCurrent(exp);
-      resetFixtureState();
-      await loadWorld();
-      report.cases["caseStateNoNpc-" + label] = await caseStateNoNpc(exp);
-      resetFixtureState();
-      await loadWorld();
-      report.cases["caseStateFailedImage-" + label] = await caseStateFailedImage(exp);
-      resetFixtureState();
-      await loadWorld();
-      report.cases["caseStateBusy-" + label] = await caseStateBusy(exp);
-      resetFixtureState();
-      await loadWorld();
-      report.cases["caseStateOffline-" + label] = await caseStateOffline(exp);
-      resetFixtureState();
-      await loadWorld();
-      report.cases["caseStateAutonomous-" + label] = await caseStateAutonomous(exp);
-      resetFixtureState();
-      await loadWorld();
-      report.cases["caseStateCritical-" + label] = await caseStateCritical(exp);
-      resetFixtureState();
-      await loadWorld();
-      report.cases["caseKeyboardJourney-" + label] = await caseKeyboardJourney(exp);
-      resetFixtureState();
-      await loadWorld();
-      report.cases["caseReducedMotionJourney-" + label] = await caseReducedMotionJourney(exp);
+      if (MODE === "probe") {
+        // The real backend keeps the player at the destination after the
+        // previous viewport's MOVE. Reset via the probe-only endpoint so
+        // each viewport starts from the origin (fixture mode does this via
+        // resetFixtureState()). Fail closed if the reset does not succeed.
+        const resetResp = await page.request.post(BASE + "/__probe/reset-player");
+        if (!resetResp.ok()) {
+          throw new Error("m307 PROBE: player reset failed — HTTP " + resetResp.status());
+        }
+      }
+      for (const [name, runCase] of CASE_RUNNERS) {
+        if (MODE === "probe" && name !== "caseJourneySixSteps") {
+          // Probe mode: recorded as SKIPPED (excluded from pass/fail
+          // counting via the skip() record) — report.skipped already lists
+          // all 24 fixture-only cases, so do NOT add them to report.cases
+          // (that would break the mode-aware REQUIRED case-count check).
+          // No boot, no drive — the fixture state they exercise cannot
+          // exist against a real backend.
+          skip(name + "/" + label, "fixture-mode-only case (state comes from mocked routes/responses)");
+          continue;
+        }
+        // Fresh app boot per viewport: the scene cache (S.sceneCache) retains
+        // READY entries across navigations by design (#302), so a shared app
+        // instance would hand the next viewport a disabled «Сцена показана»
+        // stage button. loadWorld() re-boots the app; the page.route fixtures
+        // persist across navigations.
+        resetFixtureState();
+        await loadWorld();
+        report.cases[name + "-" + label] = await runCase(exp);
+      }
     }
-    report.screenshots = Object.values(report.cases).map((c) => c.screenshot);
+    report.screenshots = Object.values(report.cases).map((c) => c.screenshot).filter(Boolean);
     const names = Object.keys(report.cases);
-    const REQUIRED = 26; // 13 cases x 2 viewports
+    // Fixture: 13 cases x 2 viewports. Probe: only caseJourneySixSteps runs
+    // (1 case x 2 viewports); the fixture-only cases are SKIPPED records.
+    const REQUIRED = MODE === "probe" ? 2 : 26;
     // SKIPPED records (probe-mode server-driven checks) are listed but never
     // count toward pass/fail — only real checks (with a `pass` field) do.
     const realChecks = checkLog.filter((c) => c.status !== "SKIPPED");
@@ -885,11 +905,22 @@ async (page) => {
     // alive across cases/viewports.
     bootSeq += 1;
     await page.goto(BASE + "/?m307=journey&boot=" + bootSeq + "#/world", { waitUntil: "load" });
-    await page.waitForFunction((clock) => {
-      const c = document.getElementById("clock");
-      return location.hash === "#/world" && !!document.querySelector(".world-shell")
-        && !!c && c.textContent === clock;
-    }, CLOCK, { timeout: 8000 });
+    if (MODE === "fixture") {
+      await page.waitForFunction((clock) => {
+        const c = document.getElementById("clock");
+        return location.hash === "#/world" && !!document.querySelector(".world-shell")
+          && !!c && c.textContent === clock;
+      }, CLOCK, { timeout: 8000 });
+    } else {
+      // Probe mode: the real backend's live ticker advances the clock past
+      // the boot timestamp, so the exact «День 2, 01:00» text cannot be
+      // pinned — the gate is a booted World shell with a non-empty clock.
+      await page.waitForFunction(() => {
+        const c = document.getElementById("clock");
+        return location.hash === "#/world" && !!document.querySelector(".world-shell")
+          && !!c && c.textContent.length > 0;
+      }, undefined, { timeout: 8000 });
+    }
   }
 
   await setup();
