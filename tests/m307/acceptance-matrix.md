@@ -122,3 +122,11 @@ is asserted on every screen of every case.
 > `String(...)`. GAP closure is NOT claimed here: the companion re-run to
 > allPass is still pending, and BR-1..BR-13 remain unverified.
 > **Closure (2026-11-15):** both gaps are closed — the companion run is green and the harness coercion ships with the #338 fix.
+
+## Real-backend probe run (2026-11-16) — GAP-3
+
+| ID | requirement | layer | reproduction | expected | observed | status | issue URL | evidence | closure condition |
+|---|---|---|---|---|---|---|---|---|---|
+| GAP-3 | six-stage journey against a REAL backend (not mocked routes) | browser companion, probe mode | parent boots `boot_probe307.py` (real uvicorn + SQLite + signed session cookie, no OIDC), injects `window.__M307_PROBE_BACKEND`, runs `journey.browser.js` | allPass=true, 2 case instances (journey × {1440,390}), real MOVE arrival in both, 0 pageErrors | allPass=true; 2 cases; 30/30 real checks pass; `s3-arrived-loc2` PASS at 1440 and 390 (marker loc 2); 24 fixture-only cases SKIPPED; pageErrors=[] | pass | #307 | `shared/lifesim-307/report-probe6.json`, `probe-summary-final.md`, 2 PNGs (1440×900 / 390×844) | met |
+
+Probe-env data choices (test-only, never product code): zero `LocationLink.travel_minutes` so the REAL MOVE lifecycle completes on the next ticker beat; `time_scale=30`; visual `transport=stub` (offline renderer); origin coords 45/50; a probe-only `POST /__probe/reset-player` between viewports (the real backend's ticker is the only writer of `character.location_id`). The 12 state cases are structurally fixture-only (their state comes from mocked routes/responses) and are recorded as SKIPPED against a real backend.
