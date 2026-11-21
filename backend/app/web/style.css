@@ -1484,7 +1484,25 @@ body.landing-mode #app {
   min-width: 0;
 }
 /* #341: the submit-feedback host is mounted on #/world so the authoritative
-   caption can be painted there; hide it while empty so it takes no flex slot. */
+   caption can be painted there; hide it while empty so it takes no flex slot.
+   When present, keep it to ONE line with ellipsis: the collapsed mobile panel
+   is hard-capped at 136px (overflow:hidden), so a wrapping caption would clip
+   the «Детали» control along with itself (Codex P1 on PR #347). */
+.world-now-row .task-submit-line {
+  flex: 0 1 auto;
+  min-width: 96px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* The task caption yields space to the failure caption on narrow screens;
+   textContent is unchanged (m301 pins it), only the presentation truncates. */
+.world-now-row .world-now-task-host {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 .world-now-row .task-submit-line:empty { display: none; }
 .world-now-label {
   flex: 0 0 auto;
