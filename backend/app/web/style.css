@@ -1483,6 +1483,9 @@ body.landing-mode #app {
   gap: 8px;
   min-width: 0;
 }
+/* #341: the submit-feedback host is mounted on #/world so the authoritative
+   caption can be painted there; hide it while empty so it takes no flex slot. */
+.world-now-row .task-submit-line:empty { display: none; }
 .world-now-label {
   flex: 0 0 auto;
   color: var(--w-dim);
