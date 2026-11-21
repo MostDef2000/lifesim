@@ -2340,6 +2340,13 @@ function nowPanel(tasksData, autonomous) {
   const parts = [el("div", { class: "world-now-row" },
     el("span", { class: "world-now-label" }, "Сейчас"),
     el("span", { class: "world-now-task-host", id: "world-now-task-host" }),
+    // #341: the authoritative submission-feedback caption (409 busy, network
+    // failure, …) must be visible on #/world too. refreshTaskPresentationHosts()
+    // patches every MOUNTED .task-submit-line with taskSubmitLineText(); absent
+    // hosts are skipped (#304 discipline), so no stale caption survives
+    // navigation. Keep it separate from the task-status host (different
+    // semantics).
+    el("div", { class: "task-submit-line muted" }),
     expandBtn)];
   if (autonomous) {
     // #301: the autonomy state line moved INTO the HUD (readable above the
@@ -2755,6 +2762,11 @@ function bindPoiSelectionKeys() {
   // keydown listener rides the same surface as the boot hashchange listener.
   window.addEventListener("keydown", (ev) => {
     if (ev.key !== "Escape") return;
+    // #336: Escape inside a form control belongs to the control (e.g. closing
+    // a native <select>), not to contextual navigation. Null-safe: the vm
+    // harness fires synthetic key events without a `target`.
+    const keyTarget = ev.target;
+    if (keyTarget && ["INPUT", "TEXTAREA", "SELECT"].indexOf(keyTarget.tagName) >= 0) return;
     // #313: Escape closes an open sections disclosure first, else contextual back.
     const ctxBar = document.querySelector(".ctx-topbar");
     const ctxDetails = ctxBar ? ctxBar.querySelector("details") : null;
@@ -3588,7 +3600,7 @@ function travelBar() {
     el("input", {
       id: "travel-input", type: "text",
       placeholder: "Куда идти? Например: к причалу",
-      onkeydown: (ev) => { if (ev.key === "Enter") submitTravel(); },
+      onkeydown: (ev) => { if (ev.key === "Enter" && !ev.repeat) submitTravel(); },
     }),
     el("button", { id: "travel-go", type: "button", onclick: () => submitTravel() }, "Идти"),
     el("span", { id: "travel-status", class: "muted" }, travelStatusLabel()));
