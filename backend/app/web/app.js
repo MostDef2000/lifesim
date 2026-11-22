@@ -2629,6 +2629,28 @@ function mapBirdCorridorStyle(corridor, i) {
     + ` animation-duration:${28 + 8 * i}s; animation-delay:${-(9 + 12 * i)}s;`;
 }
 
+// #308: one authoritative map projection. World space = master 1600x900
+// (coords.json image_space). /locations x/y are percentages of the VISIBLE
+// container after object-fit:cover crops the 16:9 master horizontally.
+// Tiles and dynamic actors must share this transform so POIs cannot drift.
+const MAP_WORLD = { w: 1600, h: 900 };
+const MAP_COVER_CROP_X = (1 - (742 / 616) / (MAP_WORLD.w / MAP_WORLD.h)) / 2;
+function locationToWorld(loc) {
+  const px = (Number(loc && loc.x) || 0) / 100;
+  const py = (Number(loc && loc.y) || 0) / 100;
+  return {
+    x: (px * (1 - 2 * MAP_COVER_CROP_X) + MAP_COVER_CROP_X) * MAP_WORLD.w,
+    y: py * MAP_WORLD.h,
+  };
+}
+function worldToScreen(world) {
+  return {
+    x: ((world.x / MAP_WORLD.w) - MAP_COVER_CROP_X)
+       / (1 - 2 * MAP_COVER_CROP_X) * 100,
+    y: (world.y / MAP_WORLD.h) * 100,
+  };
+}
+
 function buildLivingMap(locs) {
   S.mapLocations = locs;
   const ch = S.character;
@@ -2653,9 +2675,10 @@ function buildLivingMap(locs) {
   const houseSpans = [];
   for (const l of visibleLocs) {
     if (l.type === "house") {
+      const pos = worldToScreen(locationToWorld(l));
       houseSpans.push(el("span", {
         class: "anchor anchor--house",
-        style: `left:${l.x}%; top:${l.y}%`,
+        style: `left:${pos.x}%; top:${pos.y}%`,
         "data-loc-id": String(l.id),
       }, el("span", { class: "dot" })));
       continue;
@@ -2666,9 +2689,10 @@ function buildLivingMap(locs) {
     // rerenderLivingMap rebuild re-derives it from gameUiContext and the
     // selection ring survives the ~5s poll rebuilds automatically.
     const isSelected = l.id === gameUiContext.selectedPoiId;
+    const pos = worldToScreen(locationToWorld(l));
     locationAnchors.push(el("button", {
       class: `anchor location-anchor ${isHere ? "here" : ""} ${l.y >= 20 ? "above" : ""} ${isSelected ? "anchor--selected" : ""}`,
-      style: `left:${l.x}%; top:${l.y}%`,
+      style: `left:${pos.x}%; top:${pos.y}%`,
       "aria-label": l.name,
       "data-loc-id": String(l.id),
       onpointerdown: markTouchedAnchor,
