@@ -20,8 +20,14 @@ Approved behavior under test (derived from the work order, not the code):
   ``location.href = "/auth/login"``;
 - A3: exactly ONE window ``message`` listener at module load, still exactly
   one after repeated ``viewAuth()`` renders;
-- A4: an own-origin ``{type:"lifesim-auth", ok:true}`` message reloads
-  exactly once;
+- A4: an own-origin ``{type:"lifesim-auth", ok:true}`` message with a live
+  /auth/me 200 enters the game IN PLACE — ``S.user`` set from the probe
+  response, ``S.authProbed`` cleared, ``route()`` dispatched exactly once,
+  ZERO reloads (no ``location.reload()`` on success);
+- A4d: a stalled (never-resolving) ``/auth/me`` probe is cut by the
+  listener's 3000ms ``AbortController`` timeout per attempt → three bounded
+  attempts → exactly one fail-closed reload, never an in-place enter
+  (Codex P2 #1 bounded probe);
 - A5: foreign origin / wrong type / ``ok:false`` / ``ok:"true"`` / null /
   string payload → ZERO reloads;
 - P1: ``data-ok="true"`` posts exactly ``{type:"lifesim-auth", ok:true}`` to
@@ -73,8 +79,16 @@ const scenarios = JSON.parse(fs.readFileSync(scenariosPath, "utf-8"));
 
 // Expose the lexical top-level bindings (const S/app/routes) to the driver.
 // Appended to the in-memory source only — the production file is untouched.
+// #342 P2 in-place contract: count post-boot route() dispatches. The wrap
+// runs AFTER appSrc (so the boot dispatch is not counted) and replaces the
+// global `route` binding; the hashchange listener captured the ORIGINAL
+// function object at registration, so only call sites that resolve `route`
+// by name after boot — the message listener's in-place enter — are counted.
 const EXPOSE = "\n;globalThis.__S = S; globalThis.__app = app; "
-  + "globalThis.__routes = routes; globalThis.__viewAuth = viewAuth;\n";
+  + "globalThis.__routes = routes; globalThis.__viewAuth = viewAuth; "
+  + "globalThis.__routeCalls = (function () { let n = 0; const orig = route; "
+  + "route = function (...args) { n++; return orig.apply(this, args); }; "
+  + "return function () { return n; }; })();\n";
 
 // The shim installs the browser surface on globalThis. It is infrastructure
 // only: no product behavior lives here.
@@ -425,11 +439,25 @@ const SHIM = `
     if (spec.__hold) {
       entry.held = true;
       __net.held.push(entry);
-      return new Promise((resolve) => {
+      return new Promise((resolve, reject) => {
         entry._resolve = () => {
           __net.held = __net.held.filter(h => h !== entry);
           resolve(makeResponse(entry._resp || spec));
         };
+        // #342 P2 bounded probe: a stalled request is cut by the caller's
+        // AbortSignal (the listener's 3000ms timeout) — real fetch
+        // semantics: an aborted fetch REJECTS, which is what lets the
+        // listener's retry loop advance past a hung probe (A4d).
+        const signal = opts && opts.signal;
+        if (signal) {
+          const onAbort = () => {
+            const err = new Error("The operation was aborted");
+            err.name = "AbortError";
+            reject(err);
+          };
+          if (signal.aborted) onAbort();
+          else signal.addEventListener("abort", onAbort);
+        }
       });
     }
     return Promise.resolve().then(() => makeResponse(spec));
@@ -519,11 +547,37 @@ const SHIM = `
 `;
 ;
 
+// #342 P2 bounded probe (Codex P2 #1): AbortController for the listener's
+// per-attempt 3000ms cap. The timeout lives on the harness's controlled
+// clock — it fires only when a scenario advances the virtual time (A4d);
+// the signal is what makes the shim's held fetch reject on abort (real
+// fetch semantics).
+class AbortController {
+  constructor() {
+    this.signal = {
+      aborted: false,
+      _listeners: [],
+      addEventListener(type, fn) {
+        if (type === "abort") this._listeners.push(fn);
+      },
+      removeEventListener(type, fn) {
+        this._listeners = this._listeners.filter((f) => f !== fn);
+      },
+    };
+  }
+  abort() {
+    if (this.signal.aborted) return;
+    this.signal.aborted = true;
+    for (const fn of this.signal._listeners.slice()) fn();
+  }
+}
+
 function runScenarioAsync(name, spec) {
   const context = {
     console, queueMicrotask, Promise, JSON, Math, Object, Array, String,
     Number, Boolean, Set, Map, Error, RegExp, Symbol, parseInt,
     parseFloat, isNaN, isFinite, encodeURIComponent, decodeURIComponent,
+    AbortController,
   };
   vm.createContext(context);
   try {
@@ -730,7 +784,8 @@ APP_SCENARIOS = [
     {
         # The popup's callback set the session cookie, so the opener's
         # /auth/me probe now sees 200 — the listener confirms the live
-        # session before reloading (the contract under test).
+        # session and enters the game IN PLACE (route(), no reload): the
+        # in-place contract under test.
         "name": "A4_own_origin_success_reloads",
         "initialHash": "#/login",
         "responses": dict(ANON),
@@ -740,12 +795,18 @@ APP_SCENARIOS = [
             "__dispatchMessage({ origin: location.origin, "
             "data: { type: 'lifesim-auth', ok: true } }); "
             "await __settle(); "
-            "globalThis.__result = { reloads: __reloadCount() };",
+            "globalThis.__result = { "
+            "reloads: __reloadCount(), "
+            "probes: __net.log.filter(e => e.url === '/auth/me').length, "
+            "routeCalls: __routeCalls(), "
+            "username: __S.user ? __S.user.username : null, "
+            "authProbed: __S.authProbed };",
         ),
     },
     {
         # Probes 1-2 see 401 (cookie not live yet), probe 3 sees 200 — the
-        # listener's retry loop must still yield exactly one reload.
+        # listener's retry loop must still yield the in-place enter with
+        # zero reloads.
         "name": "A4b_retry_then_success_reloads",
         "initialHash": "#/login",
         "responses": dict(ANON),
@@ -759,7 +820,12 @@ APP_SCENARIOS = [
             "__setResponse('/auth/me', { status: 200, body: " + json.dumps(USER_A) + " }); "
             "__advance(400); "
             "await __settle(); "
-            "globalThis.__result = { reloads: __reloadCount() };",
+            "globalThis.__result = { "
+            "reloads: __reloadCount(), "
+            "probes: __net.log.filter(e => e.url === '/auth/me').length, "
+            "routeCalls: __routeCalls(), "
+            "username: __S.user ? __S.user.username : null, "
+            "authProbed: __S.authProbed };",
         ),
     },
     {
@@ -780,6 +846,34 @@ APP_SCENARIOS = [
             "__advance(600); "
             "await __settle(); "
             "globalThis.__result = { reloads: __reloadCount() };",
+        ),
+    },
+    {
+        # Codex P2 #1 — bounded probe: /auth/me NEVER resolves, so the only
+        # way out of each attempt is the listener's 3000ms AbortController
+        # timeout. Every attempt must abort → retry; after three stalled
+        # attempts the listener must fail closed with exactly one reload and
+        # must never enter in place.
+        "name": "A4d_stalled_probe_aborts_fail_closed",
+        "initialHash": "#/login",
+        "responses": dict(ANON),
+        "driver": (
+            "await __settle(); "
+            "__hold('/auth/me'); "
+            "__dispatchMessage({ origin: location.origin, "
+            "data: { type: 'lifesim-auth', ok: true } }); "
+            "await __settle(); "
+            "__advance(3000); await __settle(); "  # attempt 1 aborted -> backoff 200 queued
+            "__advance(200); await __settle(); "   # attempt 2 starts, stalls
+            "__advance(3000); await __settle(); "  # attempt 2 aborted -> backoff 400 queued
+            "__advance(400); await __settle(); "   # attempt 3 starts, stalls
+            "__advance(3000); await __settle(); "  # attempt 3 aborted -> backoff 600 queued
+            "__advance(600); await __settle(); "   # loop ends -> fail-closed reload
+            "globalThis.__result = { "
+            "reloads: __reloadCount(), "
+            "probes: __net.log.filter(e => e.url === '/auth/me').length, "
+            "routeCalls: __routeCalls(), "
+            "username: __S.user ? __S.user.username : null };",
         ),
     },
     {
@@ -920,16 +1014,49 @@ class TestAppJsPopupFlow:
 
     def test_a4_own_origin_success_reloads(self, app_results):
         f = _facts(app_results, "A4_own_origin_success_reloads")
-        assert f["reloads"] == 1, (
-            "an own-origin {type:'lifesim-auth', ok:true} message must reload "
-            f"exactly once, got {f['reloads']}"
+        assert f["reloads"] == 0, (
+            "an own-origin {type:'lifesim-auth', ok:true} message with a live "
+            "session must enter the game IN PLACE (no reload), "
+            f"got reloads={f['reloads']}"
+        )
+        assert f["username"] == "u", (
+            "S.user must be set from the confirmed /auth/me probe response, "
+            f"got {f['username']!r}"
+        )
+        assert f["authProbed"] is False, (
+            "the in-place enter must clear S.authProbed, "
+            f"got {f['authProbed']}"
+        )
+        assert f["routeCalls"] == 1, (
+            "the in-place enter must dispatch route() exactly once, "
+            f"got routeCalls={f['routeCalls']}"
+        )
+        assert f["probes"] == 2, (
+            "exactly one boot probe + one listener probe (no retry needed), "
+            f"got {f['probes']}"
         )
 
     def test_a4b_retry_then_success_reloads(self, app_results):
         f = _facts(app_results, "A4b_retry_then_success_reloads")
-        assert f["reloads"] == 1, (
-            "probes 1-2 at 401 then probe 3 at 200 must still reload exactly "
-            f"once (the retry loop works), got {f['reloads']}"
+        assert f["reloads"] == 0, (
+            "probes 1-2 at 401 then probe 3 at 200 must enter the game IN "
+            f"PLACE (no reload), got reloads={f['reloads']}"
+        )
+        assert f["username"] == "u", (
+            "the succeeding probe's response must become S.user, "
+            f"got {f['username']!r}"
+        )
+        assert f["authProbed"] is False, (
+            "the in-place enter must clear S.authProbed, "
+            f"got {f['authProbed']}"
+        )
+        assert f["routeCalls"] == 1, (
+            "the in-place enter must dispatch route() exactly once, "
+            f"got routeCalls={f['routeCalls']}"
+        )
+        assert f["probes"] == 4, (
+            "the retry loop must be proven: 1 boot probe + exactly 3 listener "
+            f"attempts (401, 401, 200), got {f['probes']}"
         )
 
     def test_a4c_all_probes_401_fail_closed_reloads(self, app_results):
@@ -937,6 +1064,26 @@ class TestAppJsPopupFlow:
         assert f["reloads"] == 1, (
             "three 401 probes must still fail closed with exactly one reload "
             f"(the landing shows the honest state), got {f['reloads']}"
+        )
+
+    def test_a4d_stalled_probe_aborts_fail_closed(self, app_results):
+        f = _facts(app_results, "A4d_stalled_probe_aborts_fail_closed")
+        assert f["probes"] == 4, (
+            "the probe must be bounded: 1 boot probe + exactly 3 listener "
+            "attempts against a never-resolving /auth/me, "
+            f"got {f['probes']}"
+        )
+        assert f["reloads"] == 1, (
+            "three stalled (3000ms-aborted) probes must fail closed with "
+            f"exactly one reload, got {f['reloads']}"
+        )
+        assert f["routeCalls"] == 0, (
+            "a stalled probe must never enter the game in place, "
+            f"got routeCalls={f['routeCalls']}"
+        )
+        assert f["username"] is None, (
+            "S.user must never be set from a stalled probe, "
+            f"got {f['username']!r}"
         )
 
     def test_a5_bad_messages_no_reload(self, app_results):

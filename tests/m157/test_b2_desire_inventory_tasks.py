@@ -715,7 +715,7 @@ def test_ui_legacy_pins_intact():
     assert js.count("/travel/plan") == 1
     # #309: the local login form (which held the second reset site) is gone —
     # only the logout handler resets authProbed now.
-    assert js.count("S.authProbed = false") == 1
+    assert js.count("S.authProbed = false") == 2  # #342 popup confirm + logout
     # #311: +1 — the api() 401 deauth marks the session probed-dead
     # (fail-closed: the reroute's boot probe must not resurrect a dead
     # session from a stale /auth/me 200).

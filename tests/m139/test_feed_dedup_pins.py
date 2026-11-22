@@ -67,7 +67,7 @@ def test_feed_dedup_pins():
     # (fail-closed: the reroute's boot probe must not resurrect a dead
     # session from a stale /auth/me 200).
     assert js.count("S.authProbed = true") == 2
-    assert js.count("S.authProbed = false") == 1
+    assert js.count("S.authProbed = false") == 2  # #342 popup confirm + logout
     assert js.count("S.visualDisabled = true") == 1
     assert js.count("S.visualDisabled = false") == 1
     # S.feed is declared exactly once in the S init line.

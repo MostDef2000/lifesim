@@ -484,25 +484,38 @@ function consumeAuthError() {
 }
 const authErrorText = consumeAuthError();
 
-/* #342: the popup login completion. The message is only a reload hint —
-   the session cookie is the authority; the reload re-probes /auth/me. */
+/* #342: the popup login completion. The message is a confirmation trigger —
+   the opener verifies the session with /auth/me and reuses that response to
+   enter the game in place (no reload, no second authenticated request). */
 window.addEventListener("message", async (event) => {
   if (event.origin !== location.origin) return;
   const data = event.data;
   if (!data || typeof data !== "object" || data.type !== "lifesim-auth"
       || data.ok !== true) return;
   // #342 race fix: the popup's callback response sets the session cookie;
-  // confirm it is live before reloading so the opener's boot probe cannot
-  // race the cookie and fall back to the landing page. A raw fetch is used
-  // deliberately — it has no deauth side effects (api() would).
+  // confirm it is live before entering the game so the boot probe cannot
+  // race the cookie. Reuse the confirmed identity — a reload would issue a
+  // SECOND /auth/me and can hit the global rate-limit boundary (Codex P2).
   for (let attempt = 0; attempt < 3; attempt++) {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 3000);
     try {
-      const r = await fetch("/auth/me", { credentials: "same-origin" });
-      if (r.ok) { location.reload(); return; }
-    } catch (e) { /* transient — retry */ }
+      const r = await fetch("/auth/me", {
+        credentials: "same-origin", signal: controller.signal,
+      });
+      if (r.ok) {
+        S.user = await r.json();
+        S.authProbed = false;
+        S.character = null;
+        S.world = null;
+        route();
+        return;
+      }
+    } catch (e) { /* transient or aborted — retry */ }
+    finally { clearTimeout(timeout); }
     await new Promise((resolve) => setTimeout(resolve, 200 * (attempt + 1)));
   }
-  // Fail closed: still reload so the landing shows the honest state.
+  // Fail closed: reload so the landing shows the honest state.
   location.reload();
 });
 
