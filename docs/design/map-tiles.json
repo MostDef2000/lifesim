@@ -1,0 +1,44 @@
+{
+  "worldSize": [
+    1600,
+    900
+  ],
+  "tileSize": 512,
+  "bleedPx": 2,
+  "webpQuality": 84,
+  "layers": [
+    {
+      "id": "lod1",
+      "source": "backend/app/web/static/map/base.png",
+      "bounds": [
+        0,
+        0,
+        1600,
+        900
+      ],
+      "required": true
+    },
+    {
+      "id": "lod2",
+      "source": "docs/design/map-source/lod2-region.webp",
+      "bounds": [
+        320,
+        240,
+        960,
+        540
+      ],
+      "required": false
+    },
+    {
+      "id": "lod3",
+      "source": "docs/design/map-source/lod3-settlement.webp",
+      "bounds": [
+        480,
+        330,
+        480,
+        240
+      ],
+      "required": false
+    }
+  ]
+}
