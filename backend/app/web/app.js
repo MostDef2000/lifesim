@@ -535,6 +535,9 @@ window.addEventListener("message", async (event) => {
         creatorResetDraft();
         appearanceResetDraft();
         desireResetDraft();
+        // route() skips its own reset because the roster was prefetched here —
+        // do the full session-context teardown explicitly on relogin.
+        resetGameUiContext();
         // Leave the login route before dispatching the game. replaceState
         // avoids a hashchange (which would dispatch route() a second time and
         // issue another request at the rate-limit boundary).

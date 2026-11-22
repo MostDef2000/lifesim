@@ -100,7 +100,9 @@ const EXPOSE = "\n;globalThis.__S = S; globalThis.__app = app; "
   // per-session drafts exactly once each. Wrapped the same way as route —
   // after appSrc, so boot-time calls (none today) would not be counted.
   + "globalThis.__resetCalls = (function () { "
-  + "const c = { creator: 0, appearance: 0, desire: 0 }; "
+  + "const c = { creator: 0, appearance: 0, desire: 0, context: 0 }; "
+  + "const og = resetGameUiContext; "
+  + "resetGameUiContext = function (...args) { c.context++; return og.apply(this, args); }; "
   + "const oc = creatorResetDraft; "
   + "creatorResetDraft = function (...args) { c.creator++; return oc.apply(this, args); }; "
   + "const oa = appearanceResetDraft; "
@@ -108,7 +110,8 @@ const EXPOSE = "\n;globalThis.__S = S; globalThis.__app = app; "
   + "const od = desireResetDraft; "
   + "desireResetDraft = function (...args) { c.desire++; return od.apply(this, args); }; "
   + "return function () { return { creator: c.creator, "
-  + "appearance: c.appearance, desire: c.desire }; }; })();\n";
+  + "appearance: c.appearance, desire: c.desire, "
+  + "context: c.context }; }; })();\n";
 
 // The shim installs the browser surface on globalThis. It is infrastructure
 // only: no product behavior lives here.
@@ -1168,8 +1171,9 @@ class TestAppJsPopupFlow:
             "the listener's character pre-fetch must land in S.character, "
             f"got {f['charId']!r}"
         )
-        assert f["resets"] == {"creator": 1, "appearance": 1, "desire": 1}, (
-            "the success branch must reset each private draft exactly once, "
+        assert f["resets"] == {"creator": 1, "appearance": 1, "desire": 1, "context": 2}, (
+            "drafts reset once by the listener; full context reset twice — "
+            "once by the boot 401 (dead session) and once by the popup enter, "
             f"got {f['resets']}"
         )
 
@@ -1206,8 +1210,9 @@ class TestAppJsPopupFlow:
             "the character pre-fetch must land in S.character after the "
             f"probe retry, got {f['charId']!r}"
         )
-        assert f["resets"] == {"creator": 1, "appearance": 1, "desire": 1}, (
-            "the success branch must reset each private draft exactly once, "
+        assert f["resets"] == {"creator": 1, "appearance": 1, "desire": 1, "context": 2}, (
+            "drafts reset once by the listener; full context reset twice — "
+            "once by the boot 401 (dead session) and once by the popup enter, "
             f"got {f['resets']}"
         )
 
