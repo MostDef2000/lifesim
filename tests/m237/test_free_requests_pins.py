@@ -77,7 +77,7 @@ def test_free_request_request_state_reset_pins():
     # Two auth-transition call sites: logout, account deletion. (#309: the
     # login site is gone with local auth — OIDC SSO has no in-app login
     # form to reset from.)
-    assert js.count("desireResetDraft();") == 2
+    assert js.count("desireResetDraft();") == 3  # #342 popup in-place login
     # Adjacency (W118-RV1 F1 precedent): each call sits immediately after
     # the #65 appearanceResetDraft() call at that site.
     assert js.count("appearanceResetDraft();  // #65: logout clears the "
@@ -156,7 +156,7 @@ def test_free_request_pending_state_pins():
     # exactly as long as the fetch. #342 adds exactly one legitimate delay —
     # the cookie-commit tick in the popup message listener — and it sits far
     # before the desire handler, so scoping by position keeps the intent.
-    assert js.count("await new Promise") == 1
+    assert js.count("await new Promise") == 2  # #342 popup probe + character retry
     assert js.index("await new Promise") < js.index("const seq = ++desireInterpSeq;")
 
 

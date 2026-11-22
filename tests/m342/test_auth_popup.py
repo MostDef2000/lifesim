@@ -22,8 +22,15 @@ Approved behavior under test (derived from the work order, not the code):
   one after repeated ``viewAuth()`` renders;
 - A4: an own-origin ``{type:"lifesim-auth", ok:true}`` message with a live
   /auth/me 200 enters the game IN PLACE — ``S.user`` set from the probe
-  response, ``S.authProbed`` cleared, ``route()`` dispatched exactly once,
-  ZERO reloads (no ``location.reload()`` on success);
+  response, ``S.authProbed`` cleared, the /characters/by-user roster
+  pre-fetched into ``S.character``, the three private drafts reset exactly
+  once each, the address moved to ``#/world`` via ``history.replaceState``
+  (no hashchange → no second dispatch), ``route()`` dispatched exactly
+  once, ZERO reloads (no ``location.reload()`` on success);
+- A4e: a 429 on the character pre-fetch followed by a 200 must recover
+  in place (bounded retry, one route dispatch, zero reloads);
+- A4f: an EMPTY roster is not an error — the creator path stays (``#/create``
+  rendered), zero reloads, one route dispatch;
 - A4d: a stalled (never-resolving) ``/auth/me`` probe is cut by the
   listener's 3000ms ``AbortController`` timeout per attempt → three bounded
   attempts → exactly one fail-closed reload, never an in-place enter
@@ -88,7 +95,20 @@ const EXPOSE = "\n;globalThis.__S = S; globalThis.__app = app; "
   + "globalThis.__routes = routes; globalThis.__viewAuth = viewAuth; "
   + "globalThis.__routeCalls = (function () { let n = 0; const orig = route; "
   + "route = function (...args) { n++; return orig.apply(this, args); }; "
-  + "return function () { return n; }; })();\n";
+  + "return function () { return n; }; })();"
+  // #342 draft-reset contract: the success branch must reset the three
+  // per-session drafts exactly once each. Wrapped the same way as route —
+  // after appSrc, so boot-time calls (none today) would not be counted.
+  + "globalThis.__resetCalls = (function () { "
+  + "const c = { creator: 0, appearance: 0, desire: 0 }; "
+  + "const oc = creatorResetDraft; "
+  + "creatorResetDraft = function (...args) { c.creator++; return oc.apply(this, args); }; "
+  + "const oa = appearanceResetDraft; "
+  + "appearanceResetDraft = function (...args) { c.appearance++; return oa.apply(this, args); }; "
+  + "const od = desireResetDraft; "
+  + "desireResetDraft = function (...args) { c.desire++; return od.apply(this, args); }; "
+  + "return function () { return { creator: c.creator, "
+  + "appearance: c.appearance, desire: c.desire }; }; })();\n";
 
 // The shim installs the browser surface on globalThis. It is infrastructure
 // only: no product behavior lives here.
@@ -330,6 +350,12 @@ const SHIM = `
     },
   };
   let _hash = "";
+  // #342 popup-login contract: the listener builds its replaceState url from
+  // location.pathname + location.search, so both must be real (a browser
+  // address always has them) instead of undefined.
+  let _pathname = "/";
+  let _search = "";
+  let __hashChangeCount = 0;  // #342: hashchange events actually fired
   let __reloadCount = 0;  // #342: location.reload() counter
   const location = {
     get hash() { return _hash; },
@@ -339,9 +365,12 @@ const SHIM = `
       if (old === v) return;  // browser: no hashchange when the value is unchanged
       // browser: hashchange fires async (after current task)
       queueMicrotask(() => {
+        __hashChangeCount++;  // #342: observable proof of replaceState vs hash
         (winListeners["hashchange"] || []).forEach(fn => fn({ type: "hashchange" }));
       });
     },
+    get pathname() { return _pathname; },
+    get search() { return _search; },
     protocol: "http:",
     host: "localhost",
     origin: "http://localhost",  // #342
@@ -358,7 +387,23 @@ const SHIM = `
     __openCalls.push([url, name, features]);
     return __openReturn;
   };
-  const history = { replaceState() {}, pushState() {} };
+  // #342 popup-login contract: replaceState/pushState move the address
+  // WITHOUT firing hashchange (real History API semantics) — that is what
+  // lets the listener's own route() call be the single dispatch. The url is
+  // parsed for fragment, path and query exactly like the History API would.
+  function applyHistoryUrl(url) {
+    const u = String(url === undefined || url === null ? "" : url);
+    const hashAt = u.indexOf("#");
+    _hash = hashAt >= 0 ? u.slice(hashAt) : "";
+    const noHash = hashAt >= 0 ? u.slice(0, hashAt) : u;
+    const qAt = noHash.indexOf("?");
+    _search = qAt >= 0 ? noHash.slice(qAt) : "";
+    _pathname = qAt >= 0 ? noHash.slice(0, qAt) : noHash;
+  }
+  const history = {
+    replaceState(state, title, url) { applyHistoryUrl(url); },
+    pushState(state, title, url) { applyHistoryUrl(url); },
+  };
 
   // ---------- URL / WebSocket ----------
   const URL = { createObjectURL: () => "blob:mock", revokeObjectURL() {} };
@@ -526,6 +571,7 @@ const SHIM = `
   globalThis.__timers = __timers;
   globalThis.__settle = __settle;
   globalThis.__setHash = __setHash;
+  globalThis.__hash = () => location.hash;
   // Set the address BEFORE boot without firing hashchange — a real cold load
   // starts at the URL and the app's own boot route() is the ONLY dispatch.
   globalThis.__setInitialHash = (h) => { _hash = String(h); };
@@ -539,6 +585,7 @@ const SHIM = `
   globalThis.__openCalls = __openCalls;
   globalThis.__setOpenReturn = (v) => { __openReturn = v; };
   globalThis.__reloadCount = () => __reloadCount;
+  globalThis.__hashChangeCount = () => __hashChangeCount;
   globalThis.__winListeners = winListeners;
   globalThis.__dispatchMessage = (event) => {
     (winListeners["message"] || []).forEach(fn => fn(event));
@@ -741,6 +788,11 @@ ANON = {"/auth/me": _resp(401, None)}
 # The session the popup's callback establishes — the opener's /auth/me probe
 # sees this (200) once the cookie is live.
 USER_A = {"id": 1, "username": "u", "email": "e@x", "role": "player"}
+# The pre-fetched character the success branch must place in S.character
+# (the /characters/by-user/<uid> roster the listener reads).
+CHAR_7 = {"id": 7, "name": "T", "alive": True, "control_mode": "DIRECT"}
+CHAR_BY_USER_1 = "/characters/by-user/1"
+CHAR_7_ROSTER = json.dumps([CHAR_7])
 
 APP_SCENARIOS = [
     {
@@ -792,6 +844,10 @@ APP_SCENARIOS = [
         "driver": (
             "await __settle(); "
             "__setResponse('/auth/me', { status: 200, body: " + json.dumps(USER_A) + " }); "
+            # The roster the listener pre-fetches; without it the harness's
+            # catchAll 404 leaves the listener parked on the character backoff.
+            "__setResponse('" + CHAR_BY_USER_1 + "', { status: 200, body: "
+            + CHAR_7_ROSTER + " }); "
             "__dispatchMessage({ origin: location.origin, "
             "data: { type: 'lifesim-auth', ok: true } }); "
             "await __settle(); "
@@ -800,7 +856,11 @@ APP_SCENARIOS = [
             "probes: __net.log.filter(e => e.url === '/auth/me').length, "
             "routeCalls: __routeCalls(), "
             "username: __S.user ? __S.user.username : null, "
-            "authProbed: __S.authProbed };",
+            "authProbed: __S.authProbed, "
+            "hash: __hash(), "
+            "charId: __S.character ? __S.character.id : null, "
+            "hashChanges: __hashChangeCount(), "
+            "resets: __resetCalls() };",
         ),
     },
     {
@@ -812,6 +872,8 @@ APP_SCENARIOS = [
         "responses": dict(ANON),
         "driver": (
             "await __settle(); "
+            "__setResponse('" + CHAR_BY_USER_1 + "', { status: 200, body: "
+            + CHAR_7_ROSTER + " }); "
             "__dispatchMessage({ origin: location.origin, "
             "data: { type: 'lifesim-auth', ok: true } }); "
             "await __settle(); "
@@ -825,7 +887,11 @@ APP_SCENARIOS = [
             "probes: __net.log.filter(e => e.url === '/auth/me').length, "
             "routeCalls: __routeCalls(), "
             "username: __S.user ? __S.user.username : null, "
-            "authProbed: __S.authProbed };",
+            "authProbed: __S.authProbed, "
+            "hash: __hash(), "
+            "charId: __S.character ? __S.character.id : null, "
+            "hashChanges: __hashChangeCount(), "
+            "resets: __resetCalls() };",
         ),
     },
     {
@@ -874,6 +940,58 @@ APP_SCENARIOS = [
             "probes: __net.log.filter(e => e.url === '/auth/me').length, "
             "routeCalls: __routeCalls(), "
             "username: __S.user ? __S.user.username : null };",
+        ),
+    },
+    {
+        # Codex P2 rate-limit boundary: the roster endpoint answers 429 on the
+        # first attempt and 200 on the second. The listener's bounded
+        # character retry must recover IN PLACE — no reload, one route
+        # dispatch, the character in S.character.
+        "name": "A4e_character_429_then_200",
+        "initialHash": "#/login",
+        "responses": dict(ANON),
+        "driver": (
+            "await __settle(); "
+            "__setResponse('/auth/me', { status: 200, body: " + json.dumps(USER_A) + " }); "
+            "__setResponse('" + CHAR_BY_USER_1 + "', "
+            "{ status: 429, body: { detail: 'rate limited' } }); "
+            "__dispatchMessage({ origin: location.origin, "
+            "data: { type: 'lifesim-auth', ok: true } }); "
+            "await __settle(); "  # attempt 1: /auth/me 200, roster 429 -> 200ms backoff
+            "__setResponse('" + CHAR_BY_USER_1 + "', { status: 200, body: "
+            + CHAR_7_ROSTER + " }); "
+            "__advance(200); "
+            "await __settle(); "  # attempt 2: roster 200 -> success path
+            "globalThis.__result = { "
+            "reloads: __reloadCount(), "
+            "routeCalls: __routeCalls(), "
+            "charId: __S.character ? __S.character.id : null, "
+            "hash: __hash(), "
+            "hashChanges: __hashChangeCount(), "
+            "charFetches: __net.log.filter(e => e.url === '"
+            + CHAR_BY_USER_1 + "').length };",
+        ),
+    },
+    {
+        # An EMPTY roster is not an error: the success branch must keep the
+        # creator path (a user without a character lands on #/create) with
+        # zero reloads and a single route dispatch.
+        "name": "A4f_no_character_keeps_creator",
+        "initialHash": "#/login",
+        "responses": dict(ANON),
+        "driver": (
+            "await __settle(); "
+            "__setResponse('/auth/me', { status: 200, body: " + json.dumps(USER_A) + " }); "
+            "__setResponse('" + CHAR_BY_USER_1 + "', { status: 200, body: [] }); "
+            "__dispatchMessage({ origin: location.origin, "
+            "data: { type: 'lifesim-auth', ok: true } }); "
+            "await __settle(); "
+            "globalThis.__result = { "
+            "reloads: __reloadCount(), "
+            "routeCalls: __routeCalls(), "
+            "hash: __hash(), "
+            "charId: __S.character ? __S.character.id : null, "
+            "hasCreator: !!document.querySelector('.creator-shell') };",
         ),
     },
     {
@@ -1035,6 +1153,23 @@ class TestAppJsPopupFlow:
             "exactly one boot probe + one listener probe (no retry needed), "
             f"got {f['probes']}"
         )
+        assert f["hash"] == "#/world", (
+            "the in-place enter must leave the login route for #/world "
+            "WITHOUT a hashchange (replaceState), "
+            f"got {f['hash']!r}"
+        )
+        assert f["hashChanges"] == 0, (
+            "replaceState must not fire hashchange — a second route dispatch "
+            f"would issue another request at the rate-limit boundary, got {f['hashChanges']}"
+        )
+        assert f["charId"] == 7, (
+            "the listener's character pre-fetch must land in S.character, "
+            f"got {f['charId']!r}"
+        )
+        assert f["resets"] == {"creator": 1, "appearance": 1, "desire": 1}, (
+            "the success branch must reset each private draft exactly once, "
+            f"got {f['resets']}"
+        )
 
     def test_a4b_retry_then_success_reloads(self, app_results):
         f = _facts(app_results, "A4b_retry_then_success_reloads")
@@ -1057,6 +1192,21 @@ class TestAppJsPopupFlow:
         assert f["probes"] == 4, (
             "the retry loop must be proven: 1 boot probe + exactly 3 listener "
             f"attempts (401, 401, 200), got {f['probes']}"
+        )
+        assert f["hash"] == "#/world", (
+            "the retried in-place enter must still leave the login route for "
+            f"#/world without a hashchange, got {f['hash']!r}"
+        )
+        assert f["hashChanges"] == 0, (
+            f"replaceState must not fire hashchange, got {f['hashChanges']}"
+        )
+        assert f["charId"] == 7, (
+            "the character pre-fetch must land in S.character after the "
+            f"probe retry, got {f['charId']!r}"
+        )
+        assert f["resets"] == {"creator": 1, "appearance": 1, "desire": 1}, (
+            "the success branch must reset each private draft exactly once, "
+            f"got {f['resets']}"
         )
 
     def test_a4c_all_probes_401_fail_closed_reloads(self, app_results):
@@ -1084,6 +1234,55 @@ class TestAppJsPopupFlow:
         assert f["username"] is None, (
             "S.user must never be set from a stalled probe, "
             f"got {f['username']!r}"
+        )
+
+    def test_a4e_character_429_then_200(self, app_results):
+        f = _facts(app_results, "A4e_character_429_then_200")
+        assert f["reloads"] == 0, (
+            "a 429 on the character pre-fetch must not fail the login: the "
+            f"bounded retry must still enter in place, got reloads={f['reloads']}"
+        )
+        assert f["routeCalls"] == 1, (
+            "the recovered enter must dispatch route() exactly once, "
+            f"got routeCalls={f['routeCalls']}"
+        )
+        assert f["charFetches"] == 2, (
+            "the rate-limit retry must be proven: exactly one 429 attempt + "
+            f"one succeeding attempt, got {f['charFetches']}"
+        )
+        assert f["charId"] == 7, (
+            "the succeeding roster response must land in S.character, "
+            f"got {f['charId']!r}"
+        )
+        assert f["hash"] == "#/world", (
+            "the recovered enter must leave the login route for #/world, "
+            f"got {f['hash']!r}"
+        )
+        assert f["hashChanges"] == 0, (
+            f"replaceState must not fire hashchange, got {f['hashChanges']}"
+        )
+
+    def test_a4f_no_character_keeps_creator(self, app_results):
+        f = _facts(app_results, "A4f_no_character_keeps_creator")
+        assert f["hash"] == "#/create", (
+            "an empty roster must land the player on the creator, "
+            f"got {f['hash']!r}"
+        )
+        assert f["hasCreator"] is True, (
+            "the creator view must actually render for an empty roster, "
+            f"got {f['hasCreator']}"
+        )
+        assert f["charId"] is None, (
+            "an empty roster must leave S.character null, "
+            f"got {f['charId']!r}"
+        )
+        assert f["reloads"] == 0, (
+            "an empty roster is not an error — no reload, "
+            f"got reloads={f['reloads']}"
+        )
+        assert f["routeCalls"] == 1, (
+            "the empty-roster enter must dispatch route() exactly once, "
+            f"got routeCalls={f['routeCalls']}"
         )
 
     def test_a5_bad_messages_no_reload(self, app_results):

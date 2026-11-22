@@ -485,8 +485,8 @@ function consumeAuthError() {
 const authErrorText = consumeAuthError();
 
 /* #342: the popup login completion. The message is a confirmation trigger —
-   the opener verifies the session with /auth/me and reuses that response to
-   enter the game in place (no reload, no second authenticated request). */
+   the opener verifies the session, pre-fetches the character, resets private
+   drafts and enters the game in place (no reload, no duplicate requests). */
 window.addEventListener("message", async (event) => {
   if (event.origin !== location.origin) return;
   const data = event.data;
@@ -506,8 +506,34 @@ window.addEventListener("message", async (event) => {
       if (r.ok) {
         S.user = await r.json();
         S.authProbed = false;
-        S.character = null;
         S.world = null;
+        // Pre-fetch the character with the same bounded retry so route()
+        // does not issue another request at the rate-limit boundary (Codex P2).
+        S.character = null;
+        for (let c = 0; c < 3; c++) {
+          const charController = new AbortController();
+          const charTimeout = setTimeout(() => charController.abort(), 3000);
+          try {
+            const cr = await fetch(`/characters/by-user/${S.user.id}`, {
+              credentials: "same-origin", signal: charController.signal,
+            });
+            if (cr.ok) {
+              const chars = await cr.json();
+              S.character = chars && chars.length ? chars[0] : null;
+              break;
+            }
+          } catch (e) { /* transient or aborted — retry */ }
+          finally { clearTimeout(charTimeout); }
+          await new Promise((resolve) => setTimeout(resolve, 200 * (c + 1)));
+        }
+        // Per-session private state must not survive a different account (Codex P2).
+        creatorResetDraft();
+        appearanceResetDraft();
+        desireResetDraft();
+        // Leave the login route before dispatching the game. replaceState
+        // avoids a hashchange (which would dispatch route() a second time and
+        // issue another request at the rate-limit boundary).
+        history.replaceState(null, "", location.pathname + location.search + "#/world");
         route();
         return;
       }
