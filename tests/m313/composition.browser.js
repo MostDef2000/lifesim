@@ -31,9 +31,13 @@
 //                     .chat-backdrop computed background
 //                     alpha > 0 (decorative dim scrim); composer (.chat-bar)
 //                     bottom edge <= innerHeight at 390.
-//   caseZoom        — 200% root font: contextual header stays FIXED (by
-//                     design) and must not clip; composer GROWS (rem/
-//                     inherited), World nav pill + map card UNCHANGED (px canon).
+//   caseZoom        — 200% root font: contextual header control labels
+//                     DOUBLE and stay inside their controls (wrapping, never
+//                     clipping) while the header itself only grows if the
+//                     content needs it; composer GROWS (rem/inherited); the
+//                     World nav pill labels DOUBLE and stay inside their
+//                     anchors (anchors may grow) and the map card is
+//                     UNCHANGED (tol 2px).
 // Viewports: 390x844, 320x700, 1440x900. caseStageStates runs at 390 only
 // (the composition-critical viewport; the 36dvh band is viewport-relative
 // by construction).
@@ -236,9 +240,41 @@ async (page) => {
       const details = document.querySelector(".ctx-topbar details");
       const headerEl = document.querySelector(".ctx-topbar");
       const headerBox = box(headerEl);
+      // #313: every visible actionable header control (back affordance,
+      // «Разделы» summary, disclosure tabs while rendered) — its computed
+      // font-size plus the text-line rectangles, so the 200% case can prove
+      // the labels double AND stay inside their own control.
+      const labels = headerEl
+        ? [...headerEl.querySelectorAll("button, a, summary")]
+          .filter((n) => n.getClientRects().length > 0)
+          .map((n) => {
+            const cr = n.getBoundingClientRect();
+            const lines = [];
+            const walker = document.createTreeWalker(n, NodeFilter.SHOW_TEXT);
+            let t;
+            while ((t = walker.nextNode())) {
+              if (!t.nodeValue.trim()) continue;
+              const range = document.createRange();
+              range.selectNodeContents(t);
+              for (const r of range.getClientRects()) {
+                lines.push({ l: r.left, t: r.top, r: r.right, b: r.bottom });
+              }
+            }
+            return {
+              tag: n.tagName.toLowerCase(),
+              text: (n.textContent || "").trim(),
+              fontSize: parseFloat(getComputedStyle(n).fontSize),
+              box: { l: cr.left, t: cr.top, r: cr.right, b: cr.bottom },
+              lines,
+            };
+          })
+        : null;
       return {
         header: headerBox
-          ? Object.assign({}, headerBox, { clip: headerEl.scrollHeight > headerEl.clientHeight + 1 })
+          ? Object.assign({}, headerBox, {
+            clip: headerEl.scrollHeight > headerEl.clientHeight + 1,
+            labels,
+          })
           : null,
         headerPresent: !!headerEl,
         disclosureClosed: details ? !details.open : null,
@@ -301,7 +337,35 @@ async (page) => {
         const r = card.getBoundingClientRect();
         mapPx = Math.max(0, Math.min(r.bottom, window.innerHeight) - Math.max(r.top, 0));
       }
-      return { pill: box(document.querySelector(".world-pill")), mapPx };
+      // #313: all nine pill labels — computed font-size, the label box, the
+      // per-line text rectangles (Range ink rects, see the fit check for the
+      // metric slack), horizontal overflow of the OWNING anchor, and whether
+      // the anchor still wins the hit test at its own centre.
+      const pillEl = document.querySelector(".world-pill");
+      const labels = pillEl ? [...pillEl.querySelectorAll("a")].map((a) => {
+        const cr = a.getBoundingClientRect();
+        const span = a.querySelector("span");
+        const sr = span ? span.getBoundingClientRect() : null;
+        const lines = [];
+        if (span) {
+          const range = document.createRange();
+          range.selectNodeContents(span);
+          for (const r of range.getClientRects()) {
+            lines.push({ l: r.left, t: r.top, r: r.right, b: r.bottom });
+          }
+        }
+        const hit = document.elementFromPoint(cr.left + cr.width / 2, cr.top + cr.height / 2);
+        return {
+          text: span ? span.textContent : "",
+          fontSize: span ? parseFloat(getComputedStyle(span).fontSize) : null,
+          box: { l: cr.left, t: cr.top, r: cr.right, b: cr.bottom },
+          labelBox: sr ? { l: sr.left, t: sr.top, r: sr.right, b: sr.bottom } : null,
+          lines,
+          overflow: a.scrollWidth > a.clientWidth + 1,
+          hitOk: !!hit && (hit === a || a.contains(hit)),
+        };
+      }) : null;
+      return { pill: box(pillEl), mapPx, labels };
     }, exp);
   }
 
@@ -324,8 +388,10 @@ async (page) => {
 
   // 200% root font: double the MEASURED computed root font-size (robust to
   // UA defaults), kill transitions/animations so heights are settled, yield
-  // two frames, measure, then restore everything.
-  async function at200(measure, exp) {
+  // two frames, measure, then restore everything. An optional `onMeasured`
+  // hook runs while the doubled state is still applied (e.g. a screenshot
+  // that must show the doubled labels, not the restored 100% state).
+  async function at200(measure, exp, onMeasured) {
     await page.evaluate(() => {
       const base = parseFloat(getComputedStyle(document.documentElement).fontSize) || 16;
       document.documentElement.style.fontSize = (base * 2) + "px";
@@ -337,7 +403,11 @@ async (page) => {
     await page.evaluate(() => new Promise((r) => {
       requestAnimationFrame(() => requestAnimationFrame(r));
     }));
-    try { return await measure(exp); } finally {
+    try {
+      const m = await measure(exp);
+      if (onMeasured) m.at200 = await onMeasured(exp);
+      return m;
+    } finally {
       await page.evaluate(() => {
         document.documentElement.style.fontSize = "";
         const st = document.getElementById("__m313-notrans");
@@ -352,6 +422,41 @@ async (page) => {
     return path;
   }
   const inRange = (v, lo, hi) => v !== null && v >= lo && v <= hi;
+
+  // #313 200%-reflow helpers. A Range ink rect is ~3px taller than its 20px
+  // line box (font ascent/descent), so vertical containment allows a
+  // font-size-scaled slack around the measured LABEL box; the label box and
+  // the horizontal line extents must still sit inside the owning control.
+  const inkSlack = (fs) => Math.max(2, (fs || 0) * 0.35);
+  const lineInside = (ln, box, tol) => ln.l >= box.l - tol && ln.r <= box.r + tol
+    && ln.t >= box.t - tol && ln.b <= box.b + tol;
+  const headerLabelsFit = (labels) => !!labels && labels.length > 0
+    && labels.every((c) => c.lines.length > 0
+      && c.lines.every((ln) => lineInside(ln, c.box, 1.5)));
+  const labelsDouble = (a, b) => !!a && !!b && a.length > 0 && a.length === b.length
+    && a.every((c, i) => c.text === b[i].text
+      && c.fontSize !== null && b[i].fontSize !== null
+      && Math.abs(b[i].fontSize / c.fontSize - 2) <= 0.12);
+  const pillLabelWhy = (l) => {
+    const slack = inkSlack(l.fontSize);
+    if (!l.lines.length) return "no line rects";
+    if (l.overflow) return "anchor overflows";
+    if (!l.hitOk) return "anchor not hit-testable";
+    if (!l.labelBox) return "label box missing";
+    const bad = l.lines.find((ln) => ln.l < l.box.l - 1 || ln.r > l.box.r + 1
+      || ln.t < l.labelBox.t - slack || ln.b > l.labelBox.b + slack);
+    if (bad) return "line rect outside " + JSON.stringify(bad);
+    if (l.labelBox.l < l.box.l - 1 || l.labelBox.r > l.box.r + 1
+      || l.labelBox.t < l.box.t - 1 || l.labelBox.b > l.box.b + 1) {
+      return "label box outside " + JSON.stringify(l.labelBox);
+    }
+    return null;
+  };
+  const pillLabelsFit = (labels) => !!labels && labels.length === 9
+    && labels.every((l) => pillLabelWhy(l) === null);
+  const pillFitFailures = (labels) => !labels ? "labels MISSING"
+    : labels.map((l) => [l.text, pillLabelWhy(l)]).filter((p) => p[1] !== null)
+      .map((p) => p[0] + ": " + p[1]).join("; ") || "none";
 
   // ---- cases ----
   // Closed contextual header geometry (pin @390: height <= 60, target 56).
@@ -410,6 +515,32 @@ async (page) => {
     }, undefined, { timeout: 10000 });
     const ready = await placeMetrics(exp);
     const path = await shot("case-stage-states-390.png");
+    // #313 a11y: ready content must be usable — a decoded image carrying real
+    // alt copy and the stage's action/retry control actually hit-testable
+    // (scrolled into view first, so a control below the fold is not a false
+    // negative).
+    const a11y = await page.evaluate((exp) => {
+      if (window.innerWidth !== exp.w) {
+        throw new Error("m313 GUARD: innerWidth=" + window.innerWidth + " != " + exp.w + " (shared-tab viewport hijack)");
+      }
+      if (!location.href.startsWith(exp.base)) {
+        throw new Error("m313 GUARD: location.href=" + location.href + " left " + exp.base + " (shared-tab navigation hijack)");
+      }
+      const img = document.querySelector(".scene-image-host img");
+      const button = document.querySelector(".place-stage button");
+      if (button) button.scrollIntoView({ block: "center", behavior: "instant" });
+      let hit = null;
+      if (button) {
+        const r = button.getBoundingClientRect();
+        hit = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
+      }
+      return {
+        imgDecoded: !!img && img.complete && img.naturalWidth > 0,
+        imgAlt: img ? (img.getAttribute("alt") || "") : "",
+        buttonPresent: !!button,
+        buttonReachable: !!button && !!hit && (hit === button || button.contains(hit)),
+      };
+    }, exp);
     const results = [
       check("caseStageStates/390/stage-present", fallback.stagePct !== null,
         ".place-stage " + (fallback.stagePct !== null ? "found" : "MISSING")),
@@ -421,11 +552,22 @@ async (page) => {
         "loading " + loading.stagePct + "% of innerHeight (band [32,40])"),
       check("caseStageStates/390/stage-ready-floor", ready.stagePct !== null && ready.stagePct >= 32,
         "ready " + ready.stagePct + "% of innerHeight (floor 32; > 40 allowed — target-not-cap)"),
+      check("caseStageStates/390/stage-ready-accessible",
+        a11y.imgDecoded && a11y.imgAlt.trim().length > 0
+          && a11y.buttonPresent && a11y.buttonReachable,
+        "image decoded=" + a11y.imgDecoded + ", alt=" + JSON.stringify(a11y.imgAlt)
+          + ", action button present=" + a11y.buttonPresent
+          + ", reachable=" + a11y.buttonReachable),
     ];
     return {
       pass: results.every(Boolean),
       stagePct: { fallback: fallback.stagePct, error: err.stagePct,
         loading: loading.stagePct, ready: ready.stagePct },
+      // #313 informational only (never a check): ready content may exceed
+      // the 40% target band — the floor above is the hard guarantee.
+      readyPct: ready.stagePct,
+      readyOverTarget: ready.stagePct !== null && ready.stagePct > 40,
+      readyA11y: a11y,
       screenshot: path,
     };
   }
@@ -468,7 +610,9 @@ async (page) => {
       backdropAlpha: m.backdropAlpha, composerBottom, screenshot: path,
     };
   }
-  // 200% root font: header + composer grow; World nav pill + map unchanged.
+  // 200% root font: header control labels and pill labels DOUBLE and still
+  // fit their own boxes (wrapping at narrow widths, anchors may grow);
+  // composer GROWS; the map card is UNCHANGED (tol 2px).
   async function caseZoom(label, exp) {
     // composer (chat route — caseChat just navigated here)
     await page.waitForFunction(() => !!document.querySelector(".chat-bar"), undefined, { timeout: 8000 });
@@ -486,33 +630,64 @@ async (page) => {
       const img = document.querySelector(".map-base");
       return !!img && img.complete && img.naturalWidth > 0;
     }, undefined, { timeout: 8000 });
+    // Hygiene: a stage-case toast (.toast, auto-hides after 3.5s) can hover
+    // over the fixed nav pill; wait it out so the hit test measures the pill,
+    // not an unrelated transient notification.
+    await page.waitForFunction(
+      () => !document.querySelector(".toast:not(.hidden)"), undefined, { timeout: 5000 }
+    ).catch(() => {});
     const world100 = await worldMetrics(exp);
-    const world200 = await at200(worldMetrics, exp);
-    const path = await shot("case-zoom-" + label + ".png");
+    // The zoom screenshot must SHOW the doubled state — shot inside the hook,
+    // before at200 restores the 100% root font.
+    const world200 = await at200(worldMetrics, exp, async () => ({
+      screenshot: await shot("case-zoom-" + label + ".png"),
+    }));
+    const path = world200.at200.screenshot;
     const h100 = place100.header ? place100.header.h : null;
     const h200 = place200.header ? place200.header.h : null;
     const c100 = chat100.composer ? chat100.composer.h : null;
     const c200 = chat200.composer ? chat200.composer.h : null;
+    const hdr100 = place100.header ? place100.header.labels : null;
+    const hdr200 = place200.header ? place200.header.labels : null;
+    const pill100 = world100.labels;
+    const pill200 = world200.labels;
+    const headerFit = headerLabelsFit(hdr100) && headerLabelsFit(hdr200);
+    const pillFit = pillLabelsFit(pill100) && pillLabelsFit(pill200);
     const same = (a, b, tol) => a !== null && b !== null && Math.abs(a - b) <= tol;
-    const pillSame = world100.pill && world200.pill
-      && same(world100.pill.w, world200.pill.w, 1)
-      && same(world100.pill.h, world200.pill.h, 1);
     const mapSame = same(world100.mapPx, world200.mapPx, 2);
+    const pairs = (a, b) => (a && b)
+      ? a.map((x, i) => x.text + " " + x.fontSize + "->"
+        + (b[i] ? b[i].fontSize : "?") + "px").join(", ")
+      : "labels MISSING";
     const results = [
-      check("caseZoom/" + label + "/header-fixed-no-clip-at-200",
-        h100 !== null && h200 !== null && Math.abs(h200 - h100) <= 1 && place200.header.clip !== true,
-        "header " + h100 + "px -> " + h200 + "px at 200% root font (fixed by design; must not clip)"),
+      check("caseZoom/" + label + "/header-labels-double-and-fit-at-200",
+        labelsDouble(hdr100, hdr200) && headerFit
+          && !!place200.header && place200.header.clip !== true,
+        pairs(hdr100, hdr200) + "; fits=" + headerFit + "; header "
+          + h100 + "px -> " + h200 + "px (no clip = "
+          + (place200.header ? place200.header.clip !== true : "n/a") + ")"),
       check("caseZoom/" + label + "/composer-grows-at-200", c100 !== null && c200 !== null && c200 > c100,
         "composer " + c100 + "px -> " + c200 + "px at 200% root font"),
-      check("caseZoom/" + label + "/world-pill-unchanged-at-200", pillSame,
-        "pill " + JSON.stringify(world100.pill) + " -> " + JSON.stringify(world200.pill) + " (tol 1px)"),
+      check("caseZoom/" + label + "/world-pill-labels-double-and-fit-at-200",
+        labelsDouble(pill100, pill200) && pillFit,
+        "labels " + pairs(pill100, pill200) + "; fits=" + pillFit
+          + "; failing " + pillFitFailures(pill100) + " @100 / "
+          + pillFitFailures(pill200) + " @200"),
       check("caseZoom/" + label + "/world-map-unchanged-at-200", mapSame,
         "map visible " + world100.mapPx + "px -> " + world200.mapPx + "px (tol 2px)"),
     ];
     return {
       pass: results.every(Boolean),
-      header: { at100: h100, at200: h200 }, composer: { at100: c100, at200: c200 },
+      header: { at100: h100, at200: h200 },
+      headerLabels: (hdr100 && hdr200) ? hdr100.map((c, i) => ({
+        text: c.text, at100: c.fontSize, at200: hdr200[i] ? hdr200[i].fontSize : null,
+      })) : null,
+      composer: { at100: c100, at200: c200 },
       pill: { at100: world100.pill, at200: world200.pill },
+      pillLabels: (pill100 && pill200) ? pill100.map((l, i) => ({
+        text: l.text, at100: l.fontSize, at200: pill200[i] ? pill200[i].fontSize : null,
+        width200: pill200[i] ? Math.round(pill200[i].box.r - pill200[i].box.l) : null,
+      })) : null,
       mapPx: { at100: world100.mapPx, at200: world200.mapPx },
       screenshot: path,
     };

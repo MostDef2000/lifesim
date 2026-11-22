@@ -1577,8 +1577,12 @@ body.landing-mode #app {
   box-shadow: var(--w-shadow-panel);
 }
 .world-pill a {
-  width: 52px;
-  height: 52px;
+  /* #313: 100% geometry stays 52x52 (the min-* floors); at 200% root font
+     the doubled label expands the anchor instead of spilling out of it. */
+  min-width: 52px;
+  min-height: 52px;
+  width: max-content;
+  height: auto;
   border-radius: 999px;
   display: flex;
   flex-direction: column;
@@ -1588,7 +1592,9 @@ body.landing-mode #app {
   color: var(--w-dim);
   cursor: pointer;
 }
-.world-pill a span { font-size: 10px; line-height: 1; color: inherit; }
+/* #313: rem label so 200% root font doubles it; a fixed-width mobile grid
+   cell has to swallow the wider label by wrapping, never by spilling over. */
+.world-pill a span { font-size: 0.625rem; line-height: 1; color: inherit; overflow-wrap: anywhere; text-align: center; }
 .world-pill svg { width: 20px; height: 20px; }
 .world-pill a:hover { background: rgba(48, 39, 31, 0.06); color: var(--w-text); }
 .world-pill a.active { background: var(--w-warm); color: var(--w-accent); }
@@ -3638,6 +3644,7 @@ button.danger:hover { background: #93301f; }
 }
 .ctx-topbar {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 8px;
   min-height: 56px;
@@ -3647,7 +3654,11 @@ button.danger:hover { background: #93301f; }
 .ctx-topbar h1 { font-size: 0.875rem; margin: 0; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .ctx-topbar #weather { font-size: 0.875rem; white-space: nowrap; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .ctx-topbar #clock { white-space: nowrap; }
-.ctx-topbar button, .ctx-topbar a, .ctx-topbar summary { min-height: 44px; min-width: 44px; }
+/* #313: rem font on the controls so their labels double at 200% root font
+   (UA button font is absolute px, summary/anchors inherit the px body font).
+   0.8333rem = the UA 13.333px at a 16px root, so the 100% header layout is
+   byte-identical (a 14px control widens the row by 1px @390 and wraps it). */
+.ctx-topbar button, .ctx-topbar a, .ctx-topbar summary { min-height: 44px; min-width: 44px; font-size: 0.8333rem; }
 .ctx-topbar .ctx-sections { position: relative; }
 .ctx-topbar .ctx-sections[open] .tabs {
   position: absolute;
