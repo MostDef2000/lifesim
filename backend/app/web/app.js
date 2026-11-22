@@ -2506,16 +2506,17 @@ function visibleMapLocations(locs, focus) {
   return positioned.filter(l => mapDistance(l, focus) <= radius);
 }
 
-function mapNpcMarkers(visibleLocs) {
+function mapNpcMarkers(visibleLocs, cardW, cardH) {
   const markers = [];
   for (const loc of visibleLocs) {
     const npcs = (loc.occupants || []).filter(o => o.kind === "npc");
     if (!npcs.length) continue;
+    const pos = worldToScreen(locationToWorld(loc), cardW, cardH);
 
     if (S.mapLod !== "local" || S.mapQuality === "low-mobile") {
       markers.push(el("span", {
         class: "map-dynamic-marker npc-cluster",
-        style: `left:${loc.x}%; top:${loc.y}%`,
+        style: `left:${pos.x}%; top:${pos.y}%`,
         "data-location-id": String(loc.id),
         title: `${npcs.length} NPC · ${loc.name}`,
       }, String(npcs.length)));
@@ -2530,7 +2531,7 @@ function mapNpcMarkers(visibleLocs) {
       const dy = Math.round(Math.sin(angle) * radius);
       markers.push(el("span", {
         class: "map-dynamic-marker npc-person",
-        style: `left:${loc.x}%; top:${loc.y}%; --npc-dx:${dx}px; --npc-dy:${dy}px`,
+        style: `left:${pos.x}%; top:${pos.y}%; --npc-dx:${dx}px; --npc-dy:${dy}px`,
         "data-character-id": npc.id,
         "data-location-id": String(loc.id),
         title: `${npc.name} · ${loc.name}`,
@@ -2540,7 +2541,7 @@ function mapNpcMarkers(visibleLocs) {
   return markers;
 }
 
-function mapEventMarkers(visibleLocs) {
+function mapEventMarkers(visibleLocs, cardW, cardH) {
   const visibleIds = new Set(visibleLocs.map(l => l.id));
   const locations = new Map(visibleLocs.map(l => [l.id, l]));
   const maxEvents = S.mapQuality === "low-mobile" ? 6 : (S.mapLod === "local" ? 16 : 10);
@@ -2556,9 +2557,10 @@ function mapEventMarkers(visibleLocs) {
     const last = events[events.length - 1];
     // #289: a critical event at this location tints the marker terracotta.
     const critical = events.some(isCriticalEvent);
+    const pos = worldToScreen(locationToWorld(loc), cardW, cardH);
     return el("span", {
       class: `map-dynamic-marker event-marker${critical ? " critical" : ""}`,
-      style: `left:${loc.x}%; top:${loc.y}%`,
+      style: `left:${pos.x}%; top:${pos.y}%`,
       "data-location-id": String(locationId),
       title: `${last.text || last.event_type || "Событие"} · ${loc.name}`,
     }, events.length > 1 ? String(events.length) : "!");
@@ -2631,9 +2633,13 @@ function mapBirdCorridorStyle(corridor, i) {
 
 // #308: one authoritative map projection. World space = master 1600x900
 // (coords.json image_space). /locations x/y are percentages of the VISIBLE
-// container after object-fit:cover crops the 16:9 master horizontally.
-// Tiles and dynamic actors must share this transform so POIs cannot drift.
+// container after object-fit:cover crops the 16:9 master. The AUTHOR crop is
+// the 742/616 card the coords were authored against: locationToWorld is the
+// authoritative game-data -> master-pixel conversion and always uses it.
+// Tiles, anchors and every dynamic actor must share this transform so POIs
+// cannot drift.
 const MAP_WORLD = { w: 1600, h: 900 };
+const MAP_AUTHOR_CARD = { w: 742, h: 616 };
 const MAP_COVER_CROP_X = (1 - (742 / 616) / (MAP_WORLD.w / MAP_WORLD.h)) / 2;
 function locationToWorld(loc) {
   const px = (Number(loc && loc.x) || 0) / 100;
@@ -2643,15 +2649,57 @@ function locationToWorld(loc) {
     y: py * MAP_WORLD.h,
   };
 }
-function worldToScreen(world) {
+// #308 P2: the World stage stretches .map-card to the FULL viewport, so its
+// aspect ratio is not the author 742/616 — object-fit:cover crops along
+// whichever axis is in surplus (horizontal on narrow cards, vertical on wide
+// ones). worldToScreen therefore derives the crop from the ACTUAL card box.
+// cardW/cardH default to the author card for the pre-measure build (cold
+// mount); recomputeMapPositions() re-applies it once the live card box exists.
+function worldToScreen(world, cardW, cardH) {
+  const cw = cardW || MAP_AUTHOR_CARD.w;
+  const ch = cardH || MAP_AUTHOR_CARD.h;
+  const cardAspect = cw / ch;
+  const imageAspect = MAP_WORLD.w / MAP_WORLD.h;
+  let cropX = 0;
+  let cropY = 0;
+  if (cardAspect < imageAspect) {
+    cropX = (1 - cardAspect / imageAspect) / 2;
+  } else {
+    cropY = (1 - imageAspect / cardAspect) / 2;
+  }
   return {
-    x: ((world.x / MAP_WORLD.w) - MAP_COVER_CROP_X)
-       / (1 - 2 * MAP_COVER_CROP_X) * 100,
-    y: (world.y / MAP_WORLD.h) * 100,
+    x: ((world.x / MAP_WORLD.w) - cropX) / (1 - 2 * cropX) * 100,
+    y: ((world.y / MAP_WORLD.h) - cropY) / (1 - 2 * cropY) * 100,
   };
 }
+// #308 P2: the LIVE card box — the only authoritative crop source. It is
+// unmeasurable before the tree is mounted, hence the author-default build
+// plus this post-mount/re-render/resize pass over every location-derived
+// marker (all of them carry data-loc-id or data-location-id).
+function mapCardBox() {
+  const host = document.getElementById("living-map-host");
+  const card = host && host.querySelector(".map-card");
+  if (!card || !card.clientWidth || !card.clientHeight) return null;
+  return { card, w: card.clientWidth, h: card.clientHeight };
+}
+function recomputeMapPositions() {
+  const box = mapCardBox();
+  if (!box) return;
+  const locById = new Map((S.mapLocations || [])
+    .map(l => [String(l.id), l]));
+  for (const node of box.card.querySelectorAll("[data-loc-id], [data-location-id]")) {
+    const id = node.getAttribute("data-loc-id")
+      || node.getAttribute("data-location-id");
+    const loc = locById.get(String(id));
+    if (!loc || loc.x === null || loc.x === undefined
+      || loc.y === null || loc.y === undefined) continue;
+    const pos = worldToScreen(locationToWorld(loc), box.w, box.h);
+    node.style.left = `${pos.x}%`;
+    node.style.top = `${pos.y}%`;
+  }
+}
 
-function buildLivingMap(locs) {
+function buildLivingMap(locs, cardW, cardH) {
   S.mapLocations = locs;
   const ch = S.character;
   const currentLoc = locs.find(l => l.id === ch.location_id);
@@ -2675,7 +2723,7 @@ function buildLivingMap(locs) {
   const houseSpans = [];
   for (const l of visibleLocs) {
     if (l.type === "house") {
-      const pos = worldToScreen(locationToWorld(l));
+      const pos = worldToScreen(locationToWorld(l), cardW, cardH);
       houseSpans.push(el("span", {
         class: "anchor anchor--house",
         style: `left:${pos.x}%; top:${pos.y}%`,
@@ -2689,7 +2737,7 @@ function buildLivingMap(locs) {
     // rerenderLivingMap rebuild re-derives it from gameUiContext and the
     // selection ring survives the ~5s poll rebuilds automatically.
     const isSelected = l.id === gameUiContext.selectedPoiId;
-    const pos = worldToScreen(locationToWorld(l));
+    const pos = worldToScreen(locationToWorld(l), cardW, cardH);
     locationAnchors.push(el("button", {
       class: `anchor location-anchor ${isHere ? "here" : ""} ${l.y >= 20 ? "above" : ""} ${isSelected ? "anchor--selected" : ""}`,
       style: `left:${pos.x}%; top:${pos.y}%`,
@@ -2703,7 +2751,7 @@ function buildLivingMap(locs) {
     ));
   }
 
-  const dynamicMarkers = [...mapNpcMarkers(visibleLocs), ...mapEventMarkers(visibleLocs)];
+  const dynamicMarkers = [...mapNpcMarkers(visibleLocs, cardW, cardH), ...mapEventMarkers(visibleLocs, cardW, cardH)];
   const markerCount = houseSpans.length + locationAnchors.length + dynamicMarkers.length + (currentLoc ? 1 : 0);
   const nightLightLimit = S.mapQuality === "low-mobile" ? 8 : 24;
   const nightLightLocs = night ? visibleLocs.filter(l =>
@@ -2713,6 +2761,8 @@ function buildLivingMap(locs) {
   const focusStyle = focus && focus.x !== null
     ? `--map-focus-x:${focus.x}%; --map-focus-y:${focus.y}%`
     : "--map-focus-x:50%; --map-focus-y:50%";
+  const playerPos = currentLoc && currentLoc.x !== null
+    ? worldToScreen(locationToWorld(currentLoc), cardW, cardH) : null;
 
   const mapCard = el("div", {
     class: `map-card lod-${S.mapLod} time-${timePhase} ${raining ? "is-rain" : ""} ${foggy ? "is-fog" : ""} ${night ? "is-night" : ""} ${qualityClass} ${reduced}`,
@@ -2725,11 +2775,14 @@ function buildLivingMap(locs) {
       buildMapAmbient({ lod: S.mapLod, quality: S.mapQuality, reduced: !!S.mapReducedMotion }),
       el("div", { class: "map-time-tint", "aria-hidden": "true" }),
       el("div", { class: "map-night-lights", "aria-hidden": "true" },
-        ...nightLightLocs.map(loc => el("span", {
-          class: "map-night-light",
-          style: `left:${loc.x}%; top:${loc.y}%`,
-          "data-location-id": String(loc.id),
-        }))),
+        ...nightLightLocs.map(loc => {
+          const pos = worldToScreen(locationToWorld(loc), cardW, cardH);
+          return el("span", {
+            class: "map-night-light",
+            style: `left:${pos.x}%; top:${pos.y}%`,
+            "data-location-id": String(loc.id),
+          });
+        })),
       el("div", { class: "map-rain", "aria-hidden": "true" }),
       el("div", { class: "map-fog", "aria-hidden": "true" }),
       el("div", { class: "map-anchors", id: "map-anchors" },
@@ -2739,7 +2792,7 @@ function buildLivingMap(locs) {
         currentLoc && currentLoc.x !== null ? el("span", {
           class: "anchor player",
           id: "player-marker",
-          style: `left:${currentLoc.x}%; top:${currentLoc.y}%`,
+          style: `left:${playerPos.x}%; top:${playerPos.y}%`,
           "data-location-id": String(currentLoc.id),
           title: "Вы здесь",
         }, el("span", { class: "dot" })) : null,
@@ -2804,7 +2857,11 @@ function rerenderLivingMap() {
     const capturedMarkerTop = oldMarker && oldMarker.style.top ? oldMarker.style.top : null;
     const capturedBadgeText = oldBadge ? oldBadge.textContent : null;
     const capturedBadgeHidden = oldBadge ? oldBadge.classList.contains("hidden") : null;
-    host.replaceChildren(buildLivingMap(S.mapLocations));
+    const box = mapCardBox();
+    host.replaceChildren(buildLivingMap(S.mapLocations, box && box.w, box && box.h));
+    // #308 P2: the previous card box may have changed (resize/rotation) —
+    // re-apply the projection to the freshly mounted markers.
+    recomputeMapPositions();
     // F2: restore transient state onto the freshly built tree.
     const newMarker = host.querySelector("#player-marker");
     const newBadge = host.querySelector("#map-badge");
@@ -3119,6 +3176,9 @@ function renderWorld(locs, tasksData) {
   // re-render; route() clears it on any hash change).
   bindPoiSelectionKeys();
   updatePoiSelectionCard();
+  // #308 P2: the cold build ran before the card was mounted; re-apply the
+  // projection now that the live stage box exists.
+  recomputeMapPositions();
   // #304: the World HUD's task slot renders from the adapter (the ingest
   // has already landed before renderWorld) — fill the host at mount.
   refreshTaskPresentationHosts();
@@ -5227,8 +5287,11 @@ async function pollEvents() {
           const curX = startLoc.x + (targetLoc.x - startLoc.x) * f;
           const curY = startLoc.y + (targetLoc.y - startLoc.y) * f;
           if (marker) {
-            marker.style.left = `${curX}%`;
-            marker.style.top = `${curY}%`;
+            const box = mapCardBox();
+            const pos = worldToScreen(locationToWorld({ x: curX, y: curY }),
+              box && box.w, box && box.h);
+            marker.style.left = `${pos.x}%`;
+            marker.style.top = `${pos.y}%`;
           }
         }
       } else if (active && active.task_type === "TRAVEL_EXTERNAL") {
@@ -8374,5 +8437,11 @@ function applyChatViewportBudget() {
   const log = document.querySelector(".chatlog");
   if (log) log.style.maxHeight = Math.round(Math.min(320, Math.max(120, vh - 480))) + "px";
 }
-window.addEventListener("resize", applyChatViewportBudget);
+// #308: layout-only resize — re-project markers against the live card box
+// (the object-fit:cover crop changes with the viewport aspect ratio).
+function onViewportResize() {
+  applyChatViewportBudget();
+  recomputeMapPositions();
+}
+window.addEventListener("resize", onViewportResize);
 route();

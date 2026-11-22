@@ -79,8 +79,8 @@ def _projection_block():
 
 
 def _living_map_body():
-    start = APP_JS.find("function buildLivingMap(locs) {")
-    assert start != -1, "app.js must declare function buildLivingMap(locs)"
+    start = APP_JS.find("function buildLivingMap(locs, cardW, cardH) {")
+    assert start != -1, "app.js must declare function buildLivingMap(locs, cardW, cardH)"
     end = APP_JS.find("\nfunction rerenderLivingMap(", start)
     assert end != -1, "buildLivingMap must be followed by rerenderLivingMap"
     return APP_JS[start:end]
@@ -160,11 +160,11 @@ def test_world_to_screen_round_trip(projection):
 # ---- marker sites: both go through the shared transform ----
 def test_marker_sites_use_shared_projection():
     body = _living_map_body()
-    assert body.count("worldToScreen(locationToWorld(l))") == 2, (
+    assert body.count("worldToScreen(locationToWorld(l), cardW, cardH)") == 2, (
         "both marker sites (house span + POI anchor) must use the projection"
     )
-    assert body.count("style: `left:${pos.x}%; top:${pos.y}%`") == 2, (
-        "both marker style strings must read the projected pos"
+    assert body.count("style: `left:${pos.x}%; top:${pos.y}%`") == 3, (
+        "house, POI and night-light marker styles must read the projected pos"
     )
     assert "left:${l.x}%; top:${l.y}%" not in body, (
         "raw /locations percentages must not position markers anymore"
@@ -172,7 +172,7 @@ def test_marker_sites_use_shared_projection():
     for marker in ('class: "anchor anchor--house"', "class: `anchor location-anchor"):
         at = body.index(marker)
         window = body[max(0, at - 200):at + 200]
-        assert "worldToScreen(locationToWorld(l))" in window, (
+        assert "worldToScreen(locationToWorld(l), cardW, cardH)" in window, (
             f"marker site {marker!r} bypasses the shared projection"
         )
         assert "left:${pos.x}%; top:${pos.y}%" in window, (
