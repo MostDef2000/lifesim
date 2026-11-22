@@ -2587,19 +2587,27 @@ function buildMapAmbient(ctx) {
   if (ctx.quality === "low-mobile" || ctx.reduced) return null;
   const ambient = el("div", { class: "map-ambient", "aria-hidden": "true" });
   for (const seg of MAP_AMBIENT.surf) {
-    ambient.append(el("span", { class: "map-ambient-surf", style: mapSurfBandStyle(seg) }));
+    ambient.append(el("span", {
+      class: "map-ambient-surf",
+      style: mapSurfBandStyle(seg),
+      "data-amb-x1": String(seg.x1), "data-amb-y1": String(seg.y1),
+      "data-amb-x2": String(seg.x2), "data-amb-y2": String(seg.y2),
+    }));
   }
   if (ctx.lod !== "island") {
     MAP_AMBIENT.trees.forEach((zone, i) => ambient.append(el("span", {
       class: "map-ambient-tree",
       style: `left:${zone.x}%; top:${zone.y}%; width:${zone.w}%; height:${zone.h}%;`
         + ` animation-duration:${11 + i}s; animation-delay:${-3 * i}s;`,
+      "data-amb-x": String(zone.x), "data-amb-y": String(zone.y),
+      "data-amb-w": String(zone.w), "data-amb-h": String(zone.h),
     })));
     if (MAP_AMBIENT.flags.smoke) {
       MAP_AMBIENT.smoke.forEach((src, i) => ambient.append(el("span", {
         class: "map-ambient-smoke",
         style: `left:${src.x - 1}%; top:${src.y - 1.4}%;`
           + ` animation-duration:${9 + 2 * i}s; animation-delay:${-4 * i - 2}s;`,
+        "data-amb-x": String(src.x - 1), "data-amb-y": String(src.y - 1.4),
       })));
     }
   }
@@ -2607,6 +2615,9 @@ function buildMapAmbient(ctx) {
     MAP_AMBIENT.birds.forEach((corridor, i) => ambient.append(el("span", {
       class: "map-ambient-bird",
       style: mapBirdCorridorStyle(corridor, i),
+      "data-amb-x1": String(corridor.x1), "data-amb-y1": String(corridor.y1),
+      "data-amb-x2": String(corridor.x2), "data-amb-y2": String(corridor.y2),
+      "data-amb-i": String(i),
     })));
   }
   return ambient;
@@ -2682,12 +2693,53 @@ function mapCardBox() {
   if (!card || !card.clientWidth || !card.clientHeight) return null;
   return { card, w: card.clientWidth, h: card.clientHeight };
 }
+// #308 P2: ambient geometry is authored in the same percentages as location
+// coords, so it must ride the same projection (ambient nodes carry no
+// location id, hence the stored data-amb-* author values).
+function projectAmbientNode(node, box) {
+  const ds = node.dataset;
+  if (ds.ambX1 !== undefined && ds.ambX2 !== undefined) {
+    const p1 = worldToScreen(locationToWorld({ x: Number(ds.ambX1), y: Number(ds.ambY1) }), box.w, box.h);
+    const p2 = worldToScreen(locationToWorld({ x: Number(ds.ambX2), y: Number(ds.ambY2) }), box.w, box.h);
+    const seg = { x1: p1.x, y1: p1.y, x2: p2.x, y2: p2.y };
+    // Birds regenerate their inline duration/delay through the helper; surf
+    // has no inline animation (its CSS shorthand rides the class).
+    node.setAttribute("style", node.classList.contains("map-ambient-bird")
+      ? mapBirdCorridorStyle(seg, Number(ds.ambI) || 0)
+      : mapSurfBandStyle(seg));
+    return;
+  }
+  if (ds.ambX !== undefined && ds.ambY !== undefined) {
+    const p = worldToScreen(locationToWorld({ x: Number(ds.ambX), y: Number(ds.ambY) }), box.w, box.h);
+    node.style.left = `${p.x}%`;
+    node.style.top = `${p.y}%`;
+    if (ds.ambW !== undefined && ds.ambH !== undefined) {
+      const p2 = worldToScreen(locationToWorld({
+        x: Number(ds.ambX) + Number(ds.ambW),
+        y: Number(ds.ambY) + Number(ds.ambH),
+      }), box.w, box.h);
+      node.style.width = `${p2.x - p.x}%`;
+      node.style.height = `${p2.y - p.y}%`;
+    }
+  }
+}
+
 function recomputeMapPositions() {
   const box = mapCardBox();
   if (!box) return;
   const locById = new Map((S.mapLocations || [])
     .map(l => [String(l.id), l]));
   for (const node of box.card.querySelectorAll("[data-loc-id], [data-location-id]")) {
+    // #308 P2: an in-flight MOVE marker carries its interpolated AUTHOR point
+    // — project it instead of the (still START) location id.
+    if (node.dataset.moveX !== undefined && node.dataset.moveY !== undefined) {
+      const movePos = worldToScreen(locationToWorld({
+        x: Number(node.dataset.moveX), y: Number(node.dataset.moveY),
+      }), box.w, box.h);
+      node.style.left = `${movePos.x}%`;
+      node.style.top = `${movePos.y}%`;
+      continue;
+    }
     const id = node.getAttribute("data-loc-id")
       || node.getAttribute("data-location-id");
     const loc = locById.get(String(id));
@@ -2696,6 +2748,19 @@ function recomputeMapPositions() {
     const pos = worldToScreen(locationToWorld(loc), box.w, box.h);
     node.style.left = `${pos.x}%`;
     node.style.top = `${pos.y}%`;
+  }
+  // #308 P2: re-project the ambient layer from its stored author geometry.
+  for (const node of box.card.querySelectorAll("[data-amb-x], [data-amb-x1]")) {
+    projectAmbientNode(node, box);
+  }
+  // #308 P2: keep the zoom origin in the projected space on resize.
+  const focusId = box.card.getAttribute("data-focus-loc-id");
+  const focusLoc = focusId ? locById.get(String(focusId)) : null;
+  if (focusLoc && focusLoc.x !== null && focusLoc.x !== undefined
+    && focusLoc.y !== null && focusLoc.y !== undefined) {
+    const fpos = worldToScreen(locationToWorld(focusLoc), box.w, box.h);
+    box.card.style.setProperty("--map-focus-x", `${fpos.x}%`);
+    box.card.style.setProperty("--map-focus-y", `${fpos.y}%`);
   }
 }
 
@@ -2758,8 +2823,13 @@ function buildLivingMap(locs, cardW, cardH) {
     ["settlement", "house", "shop", "workshop", "kitchen"].includes(l.type)
   ).slice(0, nightLightLimit) : [];
 
-  const focusStyle = focus && focus.x !== null
-    ? `--map-focus-x:${focus.x}%; --map-focus-y:${focus.y}%`
+  // #308 P2: the zoom origin must live in the SAME projected space as the
+  // markers — raw author percentages diverge from them on non-author
+  // viewports (390x844 etc.). Recomputed on resize from data-focus-loc-id.
+  const focusProjected = focus && focus.x !== null
+    ? worldToScreen(locationToWorld(focus), cardW, cardH) : null;
+  const focusStyle = focusProjected
+    ? `--map-focus-x:${focusProjected.x}%; --map-focus-y:${focusProjected.y}%`
     : "--map-focus-x:50%; --map-focus-y:50%";
   const playerPos = currentLoc && currentLoc.x !== null
     ? worldToScreen(locationToWorld(currentLoc), cardW, cardH) : null;
@@ -2767,6 +2837,7 @@ function buildLivingMap(locs, cardW, cardH) {
   const mapCard = el("div", {
     class: `map-card lod-${S.mapLod} time-${timePhase} ${raining ? "is-rain" : ""} ${foggy ? "is-fog" : ""} ${night ? "is-night" : ""} ${qualityClass} ${reduced}`,
     style: focusStyle,
+    "data-focus-loc-id": focus && focus.x !== null ? String(focus.id) : "",
     "data-profile-markers": String(markerCount),
     "data-profile-budget": String(MAP_LOW_MARKER_BUDGET),
   },
@@ -5292,9 +5363,20 @@ async function pollEvents() {
               box && box.w, box && box.h);
             marker.style.left = `${pos.x}%`;
             marker.style.top = `${pos.y}%`;
+            // #308 P2: keep the interpolated AUTHOR point so a resize
+            // re-projects the in-flight position instead of snapping back to
+            // the (still START) location id.
+            marker.dataset.moveX = String(curX);
+            marker.dataset.moveY = String(curY);
           }
         }
       } else if (active && active.task_type === "TRAVEL_EXTERNAL") {
+        // #308 P2: no in-flight map interpolation — drop the MOVE override so
+        // normal location-id reprojection resumes.
+        if (marker) {
+          delete marker.dataset.moveX;
+          delete marker.dataset.moveY;
+        }
         if (badge) {
           const remaining = active.ends_at - world.game_timestamp;
           const h = Math.floor(remaining / 60);
@@ -5303,6 +5385,12 @@ async function pollEvents() {
           badge.classList.remove("hidden");
         }
       } else {
+        // #308 P2: MOVE finished (marker back on the authoritative location)
+        // — drop the in-flight override.
+        if (marker) {
+          delete marker.dataset.moveX;
+          delete marker.dataset.moveY;
+        }
         if (badge) badge.classList.add("hidden");
       }
     }
