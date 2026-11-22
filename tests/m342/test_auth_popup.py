@@ -991,6 +991,8 @@ APP_SCENARIOS = [
             "routeCalls: __routeCalls(), "
             "hash: __hash(), "
             "charId: __S.character ? __S.character.id : null, "
+            "charFetches: __net.log.filter(e => e.url === '"
+            + CHAR_BY_USER_1 + "').length, "
             "hasCreator: !!document.querySelector('.creator-shell') };",
         ),
     },
@@ -1283,6 +1285,11 @@ class TestAppJsPopupFlow:
         assert f["routeCalls"] == 1, (
             "the empty-roster enter must dispatch route() exactly once, "
             f"got routeCalls={f['routeCalls']}"
+        )
+        assert f["charFetches"] == 1, (
+            "the loaded-empty roster must NOT be refetched by route() — "
+            "that would consume another rate-limit slot, "
+            f"got {f['charFetches']}"
         )
 
     def test_a5_bad_messages_no_reload(self, app_results):

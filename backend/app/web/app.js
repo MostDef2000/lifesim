@@ -412,7 +412,7 @@ async function route() {
   }
   if (!S.user) return viewAuth();
   document.body.classList.remove("landing-mode");
-  if (!S.character) {
+  if (!S.character && !popupRosterLoaded) {
     try {
       const chars = await api(`/characters/by-user/${S.user.id}`);
       S.character = chars && chars.length ? chars[0] : null;
@@ -484,6 +484,10 @@ function consumeAuthError() {
 }
 const authErrorText = consumeAuthError();
 
+// #342: the popup listener already loaded the roster (possibly empty); route()
+// must not issue a second /characters/by-user request at the rate-limit boundary.
+let popupRosterLoaded = false;
+
 /* #342: the popup login completion. The message is a confirmation trigger —
    the opener verifies the session, pre-fetches the character, resets private
    drafts and enters the game in place (no reload, no duplicate requests). */
@@ -526,6 +530,7 @@ window.addEventListener("message", async (event) => {
           finally { clearTimeout(charTimeout); }
           await new Promise((resolve) => setTimeout(resolve, 200 * (c + 1)));
         }
+        popupRosterLoaded = true;
         // Per-session private state must not survive a different account (Codex P2).
         creatorResetDraft();
         appearanceResetDraft();
