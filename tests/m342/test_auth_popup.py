@@ -589,6 +589,31 @@ const SHIM = `
   const window = {
     close() { __closeCount++; },
   };
+  // #342 race fix: controlled timers — the success path awaits a 150ms
+  // cookie-commit tick before postMessage/close. No wall-clock waits:
+  // callbacks queue with their delay; __drainTimers() runs them in delay
+  // order and drains microtasks so the awaited continuation completes.
+  const __timers = [];
+  let __now = 0;
+  function setTimeout(fn, ms) {
+    __timers.push({ fn, at: __now + (ms || 0) });
+    return __timers.length;
+  }
+  globalThis.setTimeout = setTimeout;
+  globalThis.__drainTimers = async () => {
+    for (;;) {
+      let ran = false;
+      while (__timers.length) {
+        __timers.sort((a, b) => a.at - b.at);
+        const t = __timers.shift();
+        __now = Math.max(__now, t.at);
+        t.fn();
+        ran = true;
+      }
+      for (let i = 0; i < 50; i++) await Promise.resolve();
+      if (!ran) break;
+    }
+  };
   globalThis.document = document;
   globalThis.window = window;
   globalThis.location = location;
@@ -616,9 +641,10 @@ const SHIM = `
 })();
 `;
 
-function runScenario(name, spec) {
+async function runScenario(name, spec) {
   const context = {
     console, JSON, Object, Array, String, Number, Boolean, Error, RegExp, Symbol,
+    Promise,
   };
   vm.createContext(context);
   try {
@@ -631,6 +657,10 @@ function runScenario(name, spec) {
       context,
     );
     vm.runInContext(popupSrc, context, { filename: "auth-popup.js" });
+    // #342 race fix: the success path is async (150ms cookie-commit tick) —
+    // drain the controlled timers + microtasks BEFORE reading facts. Harmless
+    // for the synchronous error branch (no timers queued).
+    await vm.runInContext("__drainTimers()", context);
     const facts = vm.runInContext(
       "({ statusText: __statusText(), posts: __posts, closeCount: __closeCount() })",
       context,
@@ -642,7 +672,7 @@ function runScenario(name, spec) {
 }
 
 const out = [];
-for (const spec of scenarios) out.push(runScenario(spec.name, spec));
+for (const spec of scenarios) out.push(await runScenario(spec.name, spec));
 process.stdout.write(JSON.stringify(out, null, 2));
 """
 
@@ -654,6 +684,9 @@ def _resp(status, body):
 
 
 ANON = {"/auth/me": _resp(401, None)}
+# The session the popup's callback establishes — the opener's /auth/me probe
+# sees this (200) once the cookie is live.
+USER_A = {"id": 1, "username": "u", "email": "e@x", "role": "player"}
 
 APP_SCENARIOS = [
     {
@@ -695,13 +728,57 @@ APP_SCENARIOS = [
         ),
     },
     {
+        # The popup's callback set the session cookie, so the opener's
+        # /auth/me probe now sees 200 — the listener confirms the live
+        # session before reloading (the contract under test).
         "name": "A4_own_origin_success_reloads",
+        "initialHash": "#/login",
+        "responses": dict(ANON),
+        "driver": (
+            "await __settle(); "
+            "__setResponse('/auth/me', { status: 200, body: " + json.dumps(USER_A) + " }); "
+            "__dispatchMessage({ origin: location.origin, "
+            "data: { type: 'lifesim-auth', ok: true } }); "
+            "await __settle(); "
+            "globalThis.__result = { reloads: __reloadCount() };",
+        ),
+    },
+    {
+        # Probes 1-2 see 401 (cookie not live yet), probe 3 sees 200 — the
+        # listener's retry loop must still yield exactly one reload.
+        "name": "A4b_retry_then_success_reloads",
         "initialHash": "#/login",
         "responses": dict(ANON),
         "driver": (
             "await __settle(); "
             "__dispatchMessage({ origin: location.origin, "
             "data: { type: 'lifesim-auth', ok: true } }); "
+            "await __settle(); "
+            "__advance(200); "
+            "await __settle(); "
+            "__setResponse('/auth/me', { status: 200, body: " + json.dumps(USER_A) + " }); "
+            "__advance(400); "
+            "await __settle(); "
+            "globalThis.__result = { reloads: __reloadCount() };",
+        ),
+    },
+    {
+        # All three probes see 401 — the listener must still fail closed with
+        # exactly one reload (the landing shows the honest state).
+        "name": "A4c_all_probes_401_fail_closed_reloads",
+        "initialHash": "#/login",
+        "responses": dict(ANON),
+        "driver": (
+            "await __settle(); "
+            "__dispatchMessage({ origin: location.origin, "
+            "data: { type: 'lifesim-auth', ok: true } }); "
+            "await __settle(); "
+            "__advance(200); "
+            "await __settle(); "
+            "__advance(400); "
+            "await __settle(); "
+            "__advance(600); "
+            "await __settle(); "
             "globalThis.__result = { reloads: __reloadCount() };",
         ),
     },
@@ -846,6 +923,20 @@ class TestAppJsPopupFlow:
         assert f["reloads"] == 1, (
             "an own-origin {type:'lifesim-auth', ok:true} message must reload "
             f"exactly once, got {f['reloads']}"
+        )
+
+    def test_a4b_retry_then_success_reloads(self, app_results):
+        f = _facts(app_results, "A4b_retry_then_success_reloads")
+        assert f["reloads"] == 1, (
+            "probes 1-2 at 401 then probe 3 at 200 must still reload exactly "
+            f"once (the retry loop works), got {f['reloads']}"
+        )
+
+    def test_a4c_all_probes_401_fail_closed_reloads(self, app_results):
+        f = _facts(app_results, "A4c_all_probes_401_fail_closed_reloads")
+        assert f["reloads"] == 1, (
+            "three 401 probes must still fail closed with exactly one reload "
+            f"(the landing shows the honest state), got {f['reloads']}"
         )
 
     def test_a5_bad_messages_no_reload(self, app_results):

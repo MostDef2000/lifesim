@@ -152,9 +152,12 @@ def test_free_request_pending_state_pins():
     assert js.count('location.hash !== "#/desire"') == 3  # refresh + 2 guards
     assert js.count("field.value.trim() !== text") == 1
     assert js.count("!submitBtn.isConnected") == 2
-    # No artificial delays: the pending state lasts exactly as long as the
-    # fetch — no sleep-style await exists anywhere in the client.
-    assert js.count("await new Promise") == 0
+    # No artificial delays in the DESIRE handler: the pending state lasts
+    # exactly as long as the fetch. #342 adds exactly one legitimate delay —
+    # the cookie-commit tick in the popup message listener — and it sits far
+    # before the desire handler, so scoping by position keeps the intent.
+    assert js.count("await new Promise") == 1
+    assert js.index("await new Promise") < js.index("const seq = ++desireInterpSeq;")
 
 
 # ---------- d: how-to-get-it step helper (active goal cards only) ----------

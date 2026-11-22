@@ -486,11 +486,23 @@ const authErrorText = consumeAuthError();
 
 /* #342: the popup login completion. The message is only a reload hint —
    the session cookie is the authority; the reload re-probes /auth/me. */
-window.addEventListener("message", (event) => {
+window.addEventListener("message", async (event) => {
   if (event.origin !== location.origin) return;
   const data = event.data;
   if (!data || typeof data !== "object" || data.type !== "lifesim-auth"
       || data.ok !== true) return;
+  // #342 race fix: the popup's callback response sets the session cookie;
+  // confirm it is live before reloading so the opener's boot probe cannot
+  // race the cookie and fall back to the landing page. A raw fetch is used
+  // deliberately — it has no deauth side effects (api() would).
+  for (let attempt = 0; attempt < 3; attempt++) {
+    try {
+      const r = await fetch("/auth/me", { credentials: "same-origin" });
+      if (r.ok) { location.reload(); return; }
+    } catch (e) { /* transient — retry */ }
+    await new Promise((resolve) => setTimeout(resolve, 200 * (attempt + 1)));
+  }
+  // Fail closed: still reload so the landing shows the honest state.
   location.reload();
 });
 
