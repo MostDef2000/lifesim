@@ -412,7 +412,7 @@ async function route() {
   }
   if (!S.user) return viewAuth();
   document.body.classList.remove("landing-mode");
-  if (!S.character) {
+  if (!S.character && !popupRosterLoaded) {
     try {
       const chars = await api(`/characters/by-user/${S.user.id}`);
       S.character = chars && chars.length ? chars[0] : null;
@@ -484,13 +484,72 @@ function consumeAuthError() {
 }
 const authErrorText = consumeAuthError();
 
-/* #342: the popup login completion. The message is only a reload hint —
-   the session cookie is the authority; the reload re-probes /auth/me. */
-window.addEventListener("message", (event) => {
+// #342: the popup listener already loaded the roster (possibly empty); route()
+// must not issue a second /characters/by-user request at the rate-limit boundary.
+let popupRosterLoaded = false;
+
+/* #342: the popup login completion. The message is a confirmation trigger —
+   the opener verifies the session, pre-fetches the character, resets private
+   drafts and enters the game in place (no reload, no duplicate requests). */
+window.addEventListener("message", async (event) => {
   if (event.origin !== location.origin) return;
   const data = event.data;
   if (!data || typeof data !== "object" || data.type !== "lifesim-auth"
       || data.ok !== true) return;
+  // #342 race fix: the popup's callback response sets the session cookie;
+  // confirm it is live before entering the game so the boot probe cannot
+  // race the cookie. Reuse the confirmed identity — a reload would issue a
+  // SECOND /auth/me and can hit the global rate-limit boundary (Codex P2).
+  for (let attempt = 0; attempt < 3; attempt++) {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 3000);
+    try {
+      const r = await fetch("/auth/me", {
+        credentials: "same-origin", signal: controller.signal,
+      });
+      if (r.ok) {
+        S.user = await r.json();
+        S.authProbed = false;
+        S.world = null;
+        // Pre-fetch the character with the same bounded retry so route()
+        // does not issue another request at the rate-limit boundary (Codex P2).
+        S.character = null;
+        for (let c = 0; c < 3; c++) {
+          const charController = new AbortController();
+          const charTimeout = setTimeout(() => charController.abort(), 3000);
+          try {
+            const cr = await fetch(`/characters/by-user/${S.user.id}`, {
+              credentials: "same-origin", signal: charController.signal,
+            });
+            if (cr.ok) {
+              const chars = await cr.json();
+              S.character = chars && chars.length ? chars[0] : null;
+              break;
+            }
+          } catch (e) { /* transient or aborted — retry */ }
+          finally { clearTimeout(charTimeout); }
+          await new Promise((resolve) => setTimeout(resolve, 200 * (c + 1)));
+        }
+        popupRosterLoaded = true;
+        // Per-session private state must not survive a different account (Codex P2).
+        creatorResetDraft();
+        appearanceResetDraft();
+        desireResetDraft();
+        // route() skips its own reset because the roster was prefetched here —
+        // do the full session-context teardown explicitly on relogin.
+        resetGameUiContext();
+        // Leave the login route before dispatching the game. replaceState
+        // avoids a hashchange (which would dispatch route() a second time and
+        // issue another request at the rate-limit boundary).
+        history.replaceState(null, "", location.pathname + location.search + "#/world");
+        route();
+        return;
+      }
+    } catch (e) { /* transient or aborted — retry */ }
+    finally { clearTimeout(timeout); }
+    await new Promise((resolve) => setTimeout(resolve, 200 * (attempt + 1)));
+  }
+  // Fail closed: reload so the landing shows the honest state.
   location.reload();
 });
 

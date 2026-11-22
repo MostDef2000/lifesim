@@ -349,7 +349,7 @@ def test_ui_travel_bar_pins_without_damaging_existing_pins():
     assert js.count('location.hash = "#/profile";') == 3
     # #309: the login-success authProbed reset site is gone
     # with local auth — the flag is cleared at logout only.
-    assert js.count("S.authProbed = false") == 1
+    assert js.count("S.authProbed = false") == 2  # #342 popup confirm + logout
     assert js.count('"Выйти"') == 1
     assert js.count('"Удалить аккаунт"') == 1
     assert js.count("/auth/account/delete") == 1

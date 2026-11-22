@@ -20,12 +20,18 @@
   }
 
   status.textContent = "Вход выполнен. Вернитесь в игру.";
-  try {
-    const opener = window.opener;
-    if (!opener || opener.closed) return;
-    opener.postMessage({ type: "lifesim-auth", ok: true }, location.origin);
-    window.close();
-  } catch (e) {
-    // The fixed return link remains usable if the opener is unavailable.
-  }
+  (async () => {
+    try {
+      const opener = window.opener;
+      if (!opener || opener.closed) return;
+      // The callback response carries Set-Cookie for the app session. Give
+      // the browser a tick to commit it before telling the opener to reload
+      // — otherwise the opener's boot probe can race the cookie and see 401.
+      await new Promise((resolve) => setTimeout(resolve, 150));
+      opener.postMessage({ type: "lifesim-auth", ok: true }, location.origin);
+      window.close();
+    } catch (e) {
+      // The fixed return link remains usable if the opener is unavailable.
+    }
+  })();
 })();

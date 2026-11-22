@@ -50,7 +50,7 @@ def test_console_quiet_pins():
     # (fail-closed: the reroute's boot probe must not resurrect a dead
     # session from a stale /auth/me 200).
     assert js.count("S.authProbed = true") == 2
-    assert js.count("S.authProbed = false") == 1
+    assert js.count("S.authProbed = false") == 2  # #342 popup confirm + logout
 
     # ---------- change (b): visual-disabled negative cache (503 only) ----------
     # The negative cache gates the canonical-portrait fetch, caches 503 only,

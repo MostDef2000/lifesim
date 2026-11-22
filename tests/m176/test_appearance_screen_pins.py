@@ -268,14 +268,14 @@ def test_appearance_auth_isolation_pins():
     # gone with local auth (OIDC SSO has no in-app login form).
     assert JS.count("function appearanceResetDraft()") == 1
     # Definition + 2 call sites (file-wide count == 3).
-    assert JS.count("appearanceResetDraft();") == 2
-    assert JS.count("appearanceResetDraft()") == 3
+    assert JS.count("appearanceResetDraft();") == 3  # #342 popup in-place login
+    assert JS.count("appearanceResetDraft()") == 4  # #342 popup in-place login
     # Every call site sits IMMEDIATELY after the creatorResetDraft() call of
     # the same transition (line-scan adjacency, not byte coincidence).
     lines = JS.splitlines()
     sites = [i for i, ln in enumerate(lines)
              if "appearanceResetDraft();" in ln]
-    assert len(sites) == 2
+    assert len(sites) == 3  # #342 popup in-place login adds a reset site
     for i in sites:
         assert "creatorResetDraft();" in lines[i - 1], lines[i]
     # The helper resets all four draft fields.

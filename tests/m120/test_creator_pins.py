@@ -425,7 +425,7 @@ def test_creator_draft_reset_pins():
     for field in ("appearance", "appearancePrompt", "bio", "tags"):
         assert f"CREATOR_DRAFT.{field} = " in helper, field
     # exactly three call sites, one per auth/creation transition
-    assert js.count("creatorResetDraft();") == 3
+    assert js.count("creatorResetDraft();") == 4  # #342 popup in-place login
     # each site is in the right neighborhood: creator confirm, logout,
     # account deletion
     assert "consumed draft must not leak" in js
