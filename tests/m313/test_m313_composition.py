@@ -384,3 +384,20 @@ def test_css_census_unchanged():
     assert CSS.count("--w-line:") == 4
     assert CSS.count(".chat-shell {") == 1
     assert CSS.count("@media (prefers-reduced-motion: reduce)") == 3
+
+
+# ---- G. 200% reflow: pill label is rem-sized (RED on the px base) ----
+def test_world_pill_label_rem_sized():
+    # G20: the floating nav label rides the root font size (0.625rem = 10px
+    # at a 16px root, 20px at 200%) so it doubles instead of staying at an
+    # absolute 10px; exactly ONE source site carries the literal.
+    rules = [r for r in _css_leaf_rules(CSS) if r[0].strip() == ".world-pill a span"]
+    assert len(rules) == 1, \
+        f"expected one .world-pill a span rule, found {len(rules)}"
+    body = rules[0][1]
+    assert re.search(r"font-size:\s*0\.625rem\b", body), \
+        ".world-pill a span must declare font-size: 0.625rem"
+    assert re.search(r"line-height:\s*1\b", body), \
+        "the 1-line pill label baseline must stay"
+    assert CSS.count("font-size: 0.625rem") == 1, \
+        "the 0.625rem pill label literal must have exactly one source site"
