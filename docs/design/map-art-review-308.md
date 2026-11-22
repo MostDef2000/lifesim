@@ -1,6 +1,6 @@
 # LifeSim / Reineke — LOD2 + LOD3 арт-проход (#308)
 
-**Статус: REVIEW ONLY / визуальный прототип, НЕ production approved.**
+**Статус: artwork LOD2/LOD3 подтверждён владельцем 2026-11-22 как вход для реализации. География, регистрация и browser QA ещё НЕ приняты.**
 
 Этот пакет показывает два разных слоя детализации поверх известных размеров/координат острова. Файлы `docs/design/map-source/lod2-region.webp` и `lod3-settlement.png` — отдельные растрированные изображения, а не нарезанная `world-island.jpg`. LOD2 создан как концептуальный арт-проход; затем известные POI в сцене приблизительно совмещены с `coords.json` → `image_space` (ручное определение визуальных центров строений и локальная гладкая деформация). LOD3 с теми же world-space bounds создан из LOD2 с **отдельным high-resolution pass**: добавлены микродетали поверхностей и крыш; это НЕ второе независимо созданное изображение по проверенным чертежам.
 
@@ -46,7 +46,7 @@ python -m unittest discover -s scripts -p 'test_*map*.py'
 
 ## Что НЕ сделано
 
-1. Фактическое географическое наложение на master `base.png` не проверено: локальный контейнер не получил master-файл. Рисунок авторски **не утверждён**. Совпадение POI по координатам не доказывает совпадения контуров крыш/дорог.
+1. Фактическое географическое наложение на master `base.png` не проверено: локальный контейнер не получил master-файл. Художественная основа утверждена владельцем, но соответствие крыш/дорог географии ещё не проверено. Совпадение POI по координатам не доказывает совпадения контуров крыш/дорог.
 2. В текущей версии `app.js` всё ещё один JPEG и CSS zoom, WebP loader в игру не встроен.
 3. LOD3 — детализированный производный растр, а не полностью независимо нарисованный/проверенный поселок, что **не удовлетворяет финальному DoD #308**.
 4. Снимки реального браузера на 390×844 / 1440×900, при всех quality presets, FPS/память и сетевые замеры в живой игре ещё не проведены.
@@ -58,3 +58,8 @@ python -m unittest discover -s scripts -p 'test_*map*.py'
 ### Binary package / build receipts
 
 Review-source PNG masters are preserved in the separate ChatGPT ZIP artifact. The GitHub draft PR stores visually equivalent high-quality WebP sources and 20 preview tiles; the preview tile bytes are from PNG before re-encoding sources to WebP and may differ on rebuild. Run tile builder again from approved masters to rebaseline production tiles.
+
+
+## Owner approval and PNG source transport — 2026-11-22
+
+Именно оригинальные `lod2-region.png` (1920×1080, bounds `[320,240,960,540]`) и `lod3-settlement.png` (1920×960, bounds `[480,330,480,240]`) утверждены как исходный арт. Они сохранены без изменения байтов в `docs/design/map-source/source-parts/*.partNN`; восстановление `python scripts/materialize_map_art.py` проверяет полный SHA-256/размеры, а `scripts/build_map_tiles.py` режет их в WebP. Для production обязательно собрать также LOD1 из `base.png` и заменить preview manifest; вопросы image→screen transform, реальной географии и performance остаются открытыми. Детали — `docs/design/map-source/README.md`, Issue #308.

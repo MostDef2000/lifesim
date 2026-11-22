@@ -1,5 +1,5 @@
 {
-  "status": "unapproved_visual_prototype",
+  "status": "owner_approved_artwork_geographic_qa_pending",
   "worldSize": [
     1600,
     900
@@ -75,7 +75,7 @@
     ],
     "workshop": [
       805.76,
-      528.0
+      528
     ],
     "kitchen": [
       890.56,
@@ -91,7 +91,7 @@
     ],
     "shop": [
       1059.52,
-      528.0
+      528
     ],
     "settlement": [
       975.04,
@@ -104,5 +104,10 @@
     "Image registration uses hand-picked approximate roof centres, not validated building footprints.",
     "LOD3 adds independent rendered micro-detail, but it is derived from LOD2 terrain for continuity.",
     "Artwork requires design approval and actual overlay QA with the 1600x900 base raster."
-  ]
+  ],
+  "approval": {
+    "date": "2026-11-22",
+    "issue": 308,
+    "scope": "Owner-approved LOD2/LOD3 artwork for implementation; geo-alignment/renderer QA pending"
+  }
 }

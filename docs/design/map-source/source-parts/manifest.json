@@ -1,0 +1,36 @@
+{
+  "schemaVersion": 1,
+  "sources": [
+    {
+      "output": "docs/design/map-source/lod2-region.png",
+      "width": 1920,
+      "height": 1080,
+      "bytes": 4330157,
+      "sha256": "6041950476364cb23aa75a5f1c50b95df96f82d6e7a301f400a844d1e75ce2ee",
+      "parts": [
+        "docs/design/map-source/source-parts/lod2-region.png.part00",
+        "docs/design/map-source/source-parts/lod2-region.png.part01",
+        "docs/design/map-source/source-parts/lod2-region.png.part02",
+        "docs/design/map-source/source-parts/lod2-region.png.part03",
+        "docs/design/map-source/source-parts/lod2-region.png.part04",
+        "docs/design/map-source/source-parts/lod2-region.png.part05",
+        "docs/design/map-source/source-parts/lod2-region.png.part06"
+      ]
+    },
+    {
+      "output": "docs/design/map-source/lod3-settlement.png",
+      "width": 1920,
+      "height": 960,
+      "bytes": 3720375,
+      "sha256": "cfb38fd58133ffdae41d06d63367d93f2440289944958ebeafcf2e8534a41f7e",
+      "parts": [
+        "docs/design/map-source/source-parts/lod3-settlement.png.part00",
+        "docs/design/map-source/source-parts/lod3-settlement.png.part01",
+        "docs/design/map-source/source-parts/lod3-settlement.png.part02",
+        "docs/design/map-source/source-parts/lod3-settlement.png.part03",
+        "docs/design/map-source/source-parts/lod3-settlement.png.part04",
+        "docs/design/map-source/source-parts/lod3-settlement.png.part05"
+      ]
+    }
+  ]
+}

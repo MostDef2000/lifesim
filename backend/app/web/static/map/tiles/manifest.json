@@ -28,12 +28,12 @@
         960,
         540
       ],
-      "source": "docs/design/map-source/lod2-region.webp",
+      "source": "docs/design/map-source/lod2-region.png",
       "sourcePixels": [
         1920,
         1080
       ],
-      "pixelsPerWorldUnit": 2.0,
+      "pixelsPerWorldUnit": 2,
       "grid": [
         4,
         3
@@ -254,12 +254,12 @@
         480,
         240
       ],
-      "source": "docs/design/map-source/lod3-settlement.webp",
+      "source": "docs/design/map-source/lod3-settlement.png",
       "sourcePixels": [
         1920,
         960
       ],
-      "pixelsPerWorldUnit": 4.0,
+      "pixelsPerWorldUnit": 4,
       "grid": [
         4,
         2
@@ -405,6 +405,6 @@
       "reviewStatus": "pending_authoritative_geometry_review"
     }
   },
-  "reviewStatus": "unapproved_visual_prototype",
+  "reviewStatus": "owner_approved_artwork_geo_alignment_pending",
   "note": "LOD2/3 tiles were encoded from original PNG review masters; checked-in WebP source masters are visually equivalent but re-encoding may change tile bytes."
 }

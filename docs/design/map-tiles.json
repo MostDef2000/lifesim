@@ -20,25 +20,25 @@
     },
     {
       "id": "lod2",
-      "source": "docs/design/map-source/lod2-region.webp",
+      "source": "docs/design/map-source/lod2-region.png",
       "bounds": [
         320,
         240,
         960,
         540
       ],
-      "required": false
+      "required": true
     },
     {
       "id": "lod3",
-      "source": "docs/design/map-source/lod3-settlement.webp",
+      "source": "docs/design/map-source/lod3-settlement.png",
       "bounds": [
         480,
         330,
         480,
         240
       ],
-      "required": false
+      "required": true
     }
   ]
 }
