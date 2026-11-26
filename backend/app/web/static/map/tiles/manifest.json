@@ -10,14 +10,160 @@
   "format": "webp",
   "layers": {
     "lod1": {
-      "available": false,
-      "reason": "Independent source artwork not supplied",
-      "source": "backend/app/web/static/map/base.png",
+      "available": true,
       "bounds": [
         0,
         0,
         1600,
         900
+      ],
+      "source": "backend/app/web/static/map/base.png",
+      "sourcePixels": [
+        1600,
+        900
+      ],
+      "pixelsPerWorldUnit": 1.0,
+      "grid": [
+        4,
+        2
+      ],
+      "tiles": [
+        {
+          "row": 0,
+          "col": 0,
+          "url": "lod1/0-0.webp",
+          "pixelRect": [
+            0,
+            0,
+            512,
+            512
+          ],
+          "bleedLTRB": [
+            0,
+            0,
+            2,
+            2
+          ]
+        },
+        {
+          "row": 0,
+          "col": 1,
+          "url": "lod1/0-1.webp",
+          "pixelRect": [
+            512,
+            0,
+            512,
+            512
+          ],
+          "bleedLTRB": [
+            2,
+            0,
+            2,
+            2
+          ]
+        },
+        {
+          "row": 0,
+          "col": 2,
+          "url": "lod1/0-2.webp",
+          "pixelRect": [
+            1024,
+            0,
+            512,
+            512
+          ],
+          "bleedLTRB": [
+            2,
+            0,
+            2,
+            2
+          ]
+        },
+        {
+          "row": 0,
+          "col": 3,
+          "url": "lod1/0-3.webp",
+          "pixelRect": [
+            1536,
+            0,
+            64,
+            512
+          ],
+          "bleedLTRB": [
+            2,
+            0,
+            0,
+            2
+          ]
+        },
+        {
+          "row": 1,
+          "col": 0,
+          "url": "lod1/1-0.webp",
+          "pixelRect": [
+            0,
+            512,
+            512,
+            388
+          ],
+          "bleedLTRB": [
+            0,
+            2,
+            2,
+            0
+          ]
+        },
+        {
+          "row": 1,
+          "col": 1,
+          "url": "lod1/1-1.webp",
+          "pixelRect": [
+            512,
+            512,
+            512,
+            388
+          ],
+          "bleedLTRB": [
+            2,
+            2,
+            2,
+            0
+          ]
+        },
+        {
+          "row": 1,
+          "col": 2,
+          "url": "lod1/1-2.webp",
+          "pixelRect": [
+            1024,
+            512,
+            512,
+            388
+          ],
+          "bleedLTRB": [
+            2,
+            2,
+            2,
+            0
+          ]
+        },
+        {
+          "row": 1,
+          "col": 3,
+          "url": "lod1/1-3.webp",
+          "pixelRect": [
+            1536,
+            512,
+            64,
+            388
+          ],
+          "bleedLTRB": [
+            2,
+            2,
+            0,
+            0
+          ]
+        }
       ]
     },
     "lod2": {
@@ -33,7 +179,7 @@
         1920,
         1080
       ],
-      "pixelsPerWorldUnit": 2,
+      "pixelsPerWorldUnit": 2.0,
       "grid": [
         4,
         3
@@ -243,8 +389,7 @@
             0
           ]
         }
-      ],
-      "reviewStatus": "pending_authoritative_geometry_review"
+      ]
     },
     "lod3": {
       "available": true,
@@ -259,7 +404,7 @@
         1920,
         960
       ],
-      "pixelsPerWorldUnit": 4,
+      "pixelsPerWorldUnit": 4.0,
       "grid": [
         4,
         2
@@ -401,10 +546,7 @@
             0
           ]
         }
-      ],
-      "reviewStatus": "pending_authoritative_geometry_review"
+      ]
     }
-  },
-  "reviewStatus": "owner_approved_artwork_geo_alignment_pending",
-  "note": "LOD2/3 tiles were encoded from original PNG review masters; checked-in WebP source masters are visually equivalent but re-encoding may change tile bytes."
+  }
 }

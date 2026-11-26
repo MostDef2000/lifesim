@@ -80,7 +80,8 @@ def register_image(original: Image.Image) -> Image.Image:
     xs = np.linspace(0,w-1,65)
     ys = np.linspace(0,h-1,38)
     xx, yy = np.meshgrid(xs,ys)
-    coarse = interpolator(np.stack([xx.ravel(),yy.ravel()],axis=-1)).reshape(len(ys),len(xs),2).astype('float32')
+    coarse = interpolator(np.stack([xx.ravel(),yy.ravel()],axis=-1)).reshape(
+        len(ys),len(xs),2).astype('float32')
     shift_x=cv2.resize(coarse[:,:,0], (w,h),interpolation=cv2.INTER_CUBIC)
     shift_y=cv2.resize(coarse[:,:,1], (w,h),interpolation=cv2.INTER_CUBIC)
     grid_x, grid_y=np.meshgrid(np.arange(w,dtype=np.float32),np.arange(h,dtype=np.float32))
@@ -128,10 +129,13 @@ def local_detail(region:Image.Image, seed:int=308)->Image.Image:
     # New stones, grass clumps, foliage texture. Small enough not to imply
     # roads / buildings / interactable gameplay objects.
     for _ in range(9200):
-        x=py.randrange(55,w-55); y=py.randrange(55,h-55)
-        if alpha[y,x] < 0.15: continue
+        x=py.randrange(55,w-55)
+        y=py.randrange(55,h-55)
+        if alpha[y,x] < 0.15:
+            continue
         rr,gg,bb=arr[y,x]
-        if gg < rr*0.83 or gg < bb*0.95: continue
+        if gg < rr*0.83 or gg < bb*0.95:
+            continue
         r=py.choice([1,1,2,2,3])
         color=py.choice([(174,172,119,80),(112,132,75,92),(209,194,142,68),(68,100,53,90)])
         draw.ellipse((x-r,y-r,x+r,y+r), fill=color)
@@ -153,7 +157,8 @@ def local_detail(region:Image.Image, seed:int=308)->Image.Image:
       (1682,835,204,67,-3),# shop
     ]
     for cx,cy,rw,rh,theta in roofs:
-        rad=math.radians(theta); vx,vy=math.cos(rad),math.sin(rad)
+        rad=math.radians(theta)
+        vx,vy=math.cos(rad),math.sin(rad)
         # Directional planks / slate seams to show new detail only at LOD3.
         for v in np.arange(-rh/2+7,rh/2-2,8):
             start=(cx-rw/2*vx-v*(-vy),cy-rw/2*vy-v*vx)
@@ -163,16 +168,21 @@ def local_detail(region:Image.Image, seed:int=308)->Image.Image:
         for _ in range(max(4,int(rw/19))):
             along=py.uniform(-rw/2+9,rw/2-9)
             cross=py.uniform(-rh/2+6,rh/2-6)
-            x=cx+along*vx-cross*vy; y=cy+along*vy+cross*vx
+            x=cx+along*vx-cross*vy
+            y=cy+along*vy+cross*vx
             draw.line((x,y,x+py.uniform(3,12),y+1),fill=(250,225,164,39),width=1)
     # Distinct high-res local details: sparsely placed tool / wood grain
     # texture inside clearing, avoiding speculative structures and NPC.
     for _ in range(900):
-        x=py.randint(400,w-420);y=py.randint(380,h-145)
-        if alpha[y,x] < 0.7: continue
+        x=py.randint(400,w-420)
+        y=py.randint(380,h-145)
+        if alpha[y,x] < 0.7:
+            continue
         rr,gg,bb=arr[y,x]
-        if abs(int(rr)-int(gg)) > 55: continue
-        r=py.choice([1,2,2,3]);color=py.choice([(60,52,38,60),(200,181,145,65)])
+        if abs(int(rr)-int(gg)) > 55:
+            continue
+        r=py.choice([1,2,2,3])
+        color=py.choice([(60,52,38,60),(200,181,145,65)])
         draw.ellipse((x-r,y-r//2,x+r,y+r),fill=color)
     return image
 
@@ -197,8 +207,10 @@ def make(source:Path,output:Path,registration_report:Path|None=None)->dict:
       'targetCoordinateSet':'image_space in static/map/coords.json',
       'warnings':[
         'Generated concept includes inferred architecture and paths; not geographically verified.',
-        'Image registration uses hand-picked approximate roof centres, not validated building footprints.',
-        'LOD3 adds independent rendered micro-detail, but it is derived from LOD2 terrain for continuity.',
+        'Image registration uses hand-picked approximate roof centres, '
+        'not validated building footprints.',
+        'LOD3 adds independent rendered micro-detail, but it is derived from '
+        'LOD2 terrain for continuity.',
         'Artwork requires design approval and actual overlay QA with the 1600x900 base raster.'
       ]
     }
@@ -215,4 +227,5 @@ def main():
     print('Created independent LOD2 concept and detailed LOD3 derivative in',args.output)
     print('Checkpoints:',len(r['targetAnchors']),'review status:',r['status'])
 
-if __name__=='__main__':main()
+if __name__=='__main__':
+    main()

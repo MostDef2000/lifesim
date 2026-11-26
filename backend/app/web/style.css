@@ -117,6 +117,27 @@ textarea {
   inset: 0;
   pointer-events: none;
 }
+/* #308: raster tile layer inside .map-stage — above .map-base (tree order) but
+   below tint/lights/rain/fog (z-index 1/2/5). No transition/animation: tiles
+   are opaque and must not fade. */
+.map-tiles {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  pointer-events: none;
+  z-index: 0;
+}
+.map-tile {
+  position: absolute;
+  overflow: hidden;
+  pointer-events: none;
+}
+/* left/top/width/height come inline from tileBleedStyle(); never object-fit. */
+.map-tile img {
+  display: block;
+  position: absolute;
+  max-width: none;
+}
 .anchor {
   position: absolute;
   transform: translate(-50%, -50%);
@@ -1242,6 +1263,23 @@ body.landing-mode #app {
   height: 100%;
   overflow: hidden;
 }
+/* #308: OSM attribution — plain text appended to .world-stage (outside the
+   clipped/scaled .map-stage), bottom-left so it clears .world-inspect
+   (bottom-right), the nav pill, and .map-status (desktop bottom-left strip).
+   Absolute, so it adds no height. */
+.map-attribution {
+  position: absolute;
+  left: calc(8px + env(safe-area-inset-left, 0px));
+  bottom: calc(36px + env(safe-area-inset-bottom, 0px));
+  z-index: 6;
+  pointer-events: none;
+  font-size: 10px;
+  line-height: 1.2;
+  color: var(--w-text, #3a3128);
+  background: rgba(255, 255, 255, .72);
+  padding: 2px 6px;
+  border-radius: 4px;
+}
 .world-shell #living-map-host { position: absolute; inset: 0; }
 /* The living-map wrapper dissolves so its absolute children anchor to the
    stage-sized host: map card fills the stage, controls float over it. */
@@ -1765,6 +1803,10 @@ body.landing-mode #app {
      target; the base 52px fixed box would break the track layout). */
   .world-pill a { width: auto; height: auto; min-height: 46px; }
   .world-inspect { right: 12px; bottom: 176px; padding: 7px 12px; }
+  /* #308: on mobile the nav pill is a full-width two-row bottom grid (z-index 9)
+     whose top sits ≈111px up; 120px clears the pill and stays below
+     .world-inspect (bottom: 176px). Still bottom-left, still >=10px. */
+  .map-attribution { bottom: calc(120px + env(safe-area-inset-bottom, 0px)); }
   .world-shell .map-toolbar { top: auto; bottom: 220px; right: 12px; }
   .world-shell .map-toolbar.map-quality { top: auto; bottom: 262px; }
   .world-shell .map-status { display: none; }

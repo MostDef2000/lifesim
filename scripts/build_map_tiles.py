@@ -125,7 +125,9 @@ def main() -> int:
         print(f"Map tile build failed: {error}", file=sys.stderr)
         return 1
     for lod, value in result["layers"].items():
-        print(f"{lod}: {'%d WebP tiles' % len(value['tiles']) if value['available'] else 'MISSING artwork, no fake tiles'}")
+        label = ('%d WebP tiles' % len(value['tiles'])
+                 if value['available'] else 'MISSING artwork, no fake tiles')
+        print(f"{lod}: {label}")
     print(f"Manifest: {args.output / 'manifest.json'}")
     return 0
 

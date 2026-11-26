@@ -4,8 +4,10 @@ import json
 import tempfile
 import unittest
 from pathlib import Path
-from PIL import Image
+
 from build_map_tiles import generate
+from PIL import Image
+
 
 class MapTilingSpikeTests(unittest.TestCase):
  def test_three_layers_from_independent_sources(self):
@@ -20,7 +22,8 @@ class MapTilingSpikeTests(unittest.TestCase):
    (root/'spec.json').write_text(json.dumps(spec))
    m=generate(root/'spec.json',root/'tiles',root)
    self.assertEqual([len(m['layers'][x]['tiles']) for x in ['lod1','lod2','lod3']],[8,12,8])
-   with Image.open(root/'tiles/lod3/1-3.webp') as im:self.assertEqual(im.size,(386,450))
+   with Image.open(root/'tiles/lod3/1-3.webp') as im:
+    self.assertEqual(im.size,(386,450))
  def test_absent_artwork_not_masqueraded(self):
   with tempfile.TemporaryDirectory() as td:
    root=Path(td)
@@ -31,5 +34,7 @@ class MapTilingSpikeTests(unittest.TestCase):
     {'id':'lod3','source':'missing3.png','bounds':[480,330,480,240]}]}
    (root/'spec.json').write_text(json.dumps(spec))
    m=generate(root/'spec.json',root/'out',root)
-   self.assertFalse(m['layers']['lod2']['available']);self.assertFalse(m['layers']['lod3']['available'])
-if __name__=='__main__':unittest.main()
+   self.assertFalse(m['layers']['lod2']['available'])
+   self.assertFalse(m['layers']['lod3']['available'])
+if __name__=='__main__':
+    unittest.main()

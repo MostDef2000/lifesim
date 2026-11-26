@@ -1,13 +1,14 @@
 #!/usr/bin/env python3
 """Reassemble approved map PNG masters byte-for-byte from Git-tracked parts."""
 from __future__ import annotations
+
 import argparse
 import hashlib
 import json
 import os
-from pathlib import Path
 import struct
 import tempfile
+from pathlib import Path
 
 DEFAULT_MANIFEST=Path("docs/design/map-source/source-parts/manifest.json")
 PNG_MAGIC=b"\x89PNG\r\n\x1a\n"
@@ -18,7 +19,8 @@ def _inside_root(root: Path, relative: str) -> Path:
         raise ValueError(f"Artwork path escapes root: {relative}")
     return path
 
-def _verify(path: Path, expected_size: int, expected_sha: str, expected_dims: tuple[int,int]) -> None:
+def _verify(path: Path, expected_size: int, expected_sha: str,
+            expected_dims: tuple[int,int]) -> None:
     digest=hashlib.sha256()
     actual_size=0
     with path.open("rb") as stream:
@@ -57,7 +59,8 @@ def materialize(root: Path, manifest_path: Path=DEFAULT_MANIFEST) -> list[Path]:
         out.parent.mkdir(parents=True,exist_ok=True)
         tmp=None
         try:
-            with tempfile.NamedTemporaryFile(prefix=f".{out.name}.",suffix=".tmp",dir=out.parent,delete=False) as dest:
+            with tempfile.NamedTemporaryFile(
+                prefix=f".{out.name}.", suffix=".tmp", dir=out.parent, delete=False) as dest:
                 tmp=Path(dest.name)
                 for part in parts:
                     with part.open("rb") as src:

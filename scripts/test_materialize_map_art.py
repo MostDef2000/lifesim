@@ -2,14 +2,15 @@
 import hashlib
 import json
 import sys
-from pathlib import Path
 import tempfile
 import unittest
+from pathlib import Path
 
 from PIL import Image
 
 sys.path.insert(0,str(Path(__file__).parent))
 from materialize_map_art import materialize
+
 
 class ApprovedMapArtworkTests(unittest.TestCase):
     def test_restore_is_byte_exact_and_idempotent(self):
