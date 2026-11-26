@@ -2264,6 +2264,10 @@ function welcomeCard() {
 
 async function viewWorld() {
   navEpoch++;  // #302: every load start is a new navigation generation
+  // #308: #app is replaced by a loading UI below; dispose the terrain now so a
+  // failed reload cannot leave the controller mounted on a detached host with
+  // live object URLs / in-flight fetches. Idempotent when nothing is mounted.
+  disposeTerrain();
   // #312: direct re-entries (arrival, gotoWorld) bypass route() — the scene
   // flight does not survive a view load; mounted URLs release (blobs kept).
   cancelSceneFlight();
@@ -3913,6 +3917,23 @@ function terrainReconcilePass() {
     }
     missing.push(plan);
   }
+
+  // 3. Abort obsolete flights BEFORE measuring the budget: at a LOD/resize
+  //    switch stale fetches would otherwise keep occupying concurrency slots
+  //    until they settle (a stalled one forever) and starve the new view.
+  //    `superseded` is set first so the async catch never negative-caches an
+  //    intentionally aborted key; its drain still re-diffs this pass.
+  for (const [key, entry] of Array.from(terrainState.requests)) {
+    if (wantedSet.has(key) || !entry) continue;
+    entry.superseded = true;
+    if (entry.controller && typeof entry.controller.abort === "function") {
+      entry.controller.abort();
+    }
+    terrainState.requests.delete(key);
+    terrainReleaseUrl(entry.url);
+    entry.url = null;
+  }
+
   let room = Math.max(0, terrainState.budget.concurrent - terrainState.requests.size);
   for (const plan of missing) {
     if (room <= 0) break;

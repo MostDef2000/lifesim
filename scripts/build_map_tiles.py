@@ -67,7 +67,10 @@ def generate(spec_path: Path, output_dir: Path, root: Path) -> dict:
             im = opened.convert("RGB")
         pw, ph = im.size
         sx, sy = pw / w, ph / h
-        if abs(sx - sy) / max(sx, sy) > 0.01:
+        # A single pixelsPerWorldUnit describes the layer, so the two axes must
+        # agree exactly: a manifest built from averaged unequal scales fails
+        # validateTileManifest and the app silently falls back to the JPEG.
+        if abs(sx - sy) > 1e-9:
             raise ValueError(f"{name} aspect mismatch: pixel scale x={sx:.4f}, y={sy:.4f}")
         if name == "lod1" and (bounds != [0, 0, *world] or im.size != tuple(world)):
             raise ValueError("LOD1 must match the 1600x900 canonical world exactly")
@@ -100,7 +103,7 @@ def generate(spec_path: Path, output_dir: Path, root: Path) -> dict:
             "bounds": bounds,
             "source": source,
             "sourcePixels": [pw, ph],
-            "pixelsPerWorldUnit": round((sx + sy) / 2, 6),
+            "pixelsPerWorldUnit": round(sx, 6),
             "grid": [cols, rows],
             "tiles": tiles,
         }

@@ -36,5 +36,17 @@ class MapTilingSpikeTests(unittest.TestCase):
    m=generate(root/'spec.json',root/'out',root)
    self.assertFalse(m['layers']['lod2']['available'])
    self.assertFalse(m['layers']['lod3']['available'])
+ def test_unequal_pixel_scales_rejected(self):
+  with tempfile.TemporaryDirectory() as td:
+   root=Path(td)
+   Image.new('RGB',(1600,900)).save(root/'base.png')
+   Image.new('RGB',(1920,1079)).save(root/'skewed.png')
+   spec={'worldSize':[1600,900],'tileSize':512,'bleedPx':2,'layers':[
+    {'id':'lod1','source':'base.png','required':True,'bounds':[0,0,1600,900]},
+    {'id':'lod2','source':'skewed.png','bounds':[320,240,960,540]},
+    {'id':'lod3','source':'missing3.png','bounds':[480,330,480,240]}]}
+   (root/'spec.json').write_text(json.dumps(spec))
+   with self.assertRaisesRegex(ValueError,'aspect mismatch'):
+    generate(root/'spec.json',root/'out',root)
 if __name__=='__main__':
     unittest.main()
