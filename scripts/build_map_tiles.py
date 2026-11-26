@@ -103,7 +103,7 @@ def generate(spec_path: Path, output_dir: Path, root: Path) -> dict:
             "bounds": bounds,
             "source": source,
             "sourcePixels": [pw, ph],
-            "pixelsPerWorldUnit": round(sx, 6),
+            "pixelsPerWorldUnit": sx,
             "grid": [cols, rows],
             "tiles": tiles,
         }

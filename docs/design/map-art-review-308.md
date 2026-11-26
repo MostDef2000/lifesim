@@ -36,6 +36,8 @@ python -m http.server 8000
 
 ```bash
 python -m pip install Pillow numpy opencv-python-headless scipy
+# restore the approved PNG masters from tracked parts and SHA-256-verify them
+python scripts/materialize_map_art.py
 python scripts/build_map_tiles.py --spec docs/design/map-tiles.json --output backend/app/web/static/map/tiles --root .
 python -m unittest discover -s scripts -p 'test_*map*.py'
 ```

@@ -3884,7 +3884,9 @@ function terrainReconcilePass() {
     parts.push(`${key}|${rect.left.toFixed(2)},${rect.top.toFixed(2)},`
       + `${rect.width.toFixed(2)},${rect.height.toFixed(2)}`);
   }
-  const signature = `${S.mapLod}|${box.w}x${box.h}|${stageScale}|${parts.join(";")}`;
+  const signature = `${S.mapLod}|${box.w}x${box.h}|${stageScale}|`
+    + `${terrainState.budget.concurrent}/${terrainState.budget.resident}|`
+    + `${parts.join(";")}`;
   const attached = plans
     .filter((plan) => terrainState.nodes.has(plan.key))
     .map((plan) => plan.key).join(",");
@@ -3905,6 +3907,16 @@ function terrainReconcilePass() {
   const missing = [];
   for (const plan of plans) {
     if (terrainState.nodes.has(plan.key)) {
+      // A resize/orientation change reprojects the cover-crop geometry: the
+      // wrapper must follow the new rect or it stays misregistered against the
+      // reprojected JPEG/markers. Reapply in place — node identity stays stable.
+      const node = terrainState.nodes.get(plan.key);
+      if (node && node.style) {
+        node.style.left = `${plan.rect.left}%`;
+        node.style.top = `${plan.rect.top}%`;
+        node.style.width = `${plan.rect.width}%`;
+        node.style.height = `${plan.rect.height}%`;
+      }
       const cached = terrainState.cache.get(plan.key);
       if (cached) cached.used = ++terrainState.clock;
       continue;
