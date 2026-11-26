@@ -76,6 +76,9 @@ let navEpoch = 0;
    focus, scene). The legacy transient composer/chat fields ride along: the
    live binding S.chatDraft keeps its m175 semantics WITHIN a session. */
 function resetGameUiContext() {
+  // #308: session teardown drops the raster tile layer, every decoded object
+  // URL and every in-flight tile request with the rest of the session state.
+  disposeTerrain();
   gameUiContext = {
     userRef: null, characterId: null, selectedLocationId: null,
     selectedPoiId: null, viewLocationId: null, lastWorldFocusId: null,
@@ -396,6 +399,10 @@ const routes = {
 
 async function route() {
   navEpoch++;  // #302: every dispatch invalidates in-flight view loads
+  // #308: a navigation dispatch leaves the World surface — release the tile
+  // layer, its decoded object URLs and in-flight tile fetches. Idempotent when
+  // nothing is mounted; a later World mount recreates the layer.
+  disposeTerrain();
   // #312: a navigation dispatch cancels the scene flight and releases the
   // mounted URLs (blobs RETAINED — the return recreates them from cache).
   cancelSceneFlight();
@@ -2257,6 +2264,10 @@ function welcomeCard() {
 
 async function viewWorld() {
   navEpoch++;  // #302: every load start is a new navigation generation
+  // #308: #app is replaced by a loading UI below; dispose the terrain now so a
+  // failed reload cannot leave the controller mounted on a detached host with
+  // live object URLs / in-flight fetches. Idempotent when nothing is mounted.
+  disposeTerrain();
   // #312: direct re-entries (arrival, gotoWorld) bypass route() — the scene
   // flight does not survive a view load; mounted URLs release (blobs kept).
   cancelSceneFlight();
@@ -2929,10 +2940,22 @@ function rerenderLivingMap() {
     const capturedBadgeText = oldBadge ? oldBadge.textContent : null;
     const capturedBadgeHidden = oldBadge ? oldBadge.classList.contains("hidden") : null;
     const box = mapCardBox();
-    host.replaceChildren(buildLivingMap(S.mapLocations, box && box.w, box && box.h));
+    // #308: build the replacement tree BEFORE detaching the tile layer — a
+    // throwing build must not leave the map blank until the next poll. The
+    // detached node, decoded images and in-flight requests survive the swap.
+    const rebuiltTree = buildLivingMap(S.mapLocations, box && box.w, box && box.h);
+    detachTerrain();
+    host.replaceChildren(rebuiltTree);
     // #308 P2: the previous card box may have changed (resize/rotation) —
     // re-apply the projection to the freshly mounted markers.
     recomputeMapPositions();
+    // #308: put the surviving tile layer back into the freshly built stage.
+    // No card in the rebuilt tree ⇒ nothing can carry the layer: dispose so
+    // the detached node, decoded URLs and fetches do not leak (the next World
+    // mount builds a fresh layer).
+    const rebuiltCard = host.querySelector(".map-card");
+    if (rebuiltCard) reattachTerrain(rebuiltCard);
+    else disposeTerrain();
     // F2: restore transient state onto the freshly built tree.
     const newMarker = host.querySelector("#player-marker");
     const newBadge = host.querySelector("#map-badge");
@@ -2950,6 +2973,282 @@ function rerenderLivingMap() {
   // after every rebuild, so it stays fresh (variant, existence) and the
   // selected anchor's ring is re-derived inside buildLivingMap.
   updatePoiSelectionCard();
+}
+
+/* ---------- #308 tile loader: pure manifest + geometry helpers ---------- */
+
+// The loader contract is pinned to the shipped build: one schema version, one
+// raster format, one tile size and one bleed. A manifest that disagrees is a
+// build bug, not a runtime variant, so validation fails closed instead of
+// guessing. All helpers below are DOM-free: tests/m308/test_map_tile_loader.py
+// extracts this range into a Node vm and evaluates it against the REAL
+// manifest (the sibling projection block supplies worldToScreen).
+const TILE_LAYER_IDS = ["lod1", "lod2", "lod3"];
+const TILE_LOD_LEVELS = { island: "lod1", region: "lod2", local: "lod3" };
+
+function tileIsNumber(value) {
+  return typeof value === "number" && Number.isFinite(value);
+}
+
+function tileIsInteger(value) {
+  return tileIsNumber(value) && Math.floor(value) === value;
+}
+
+function tileFail(error) {
+  return { ok: false, error };
+}
+
+// A tile url is a manifest-relative path under the tile directory: no scheme,
+// no absolute root, no backslashes, no empty/./.. segments (so it can never
+// escape the tiles dir it was published under).
+function tileUrlConfined(url) {
+  if (typeof url !== "string" || url.length === 0) return false;
+  if (url[0] === "/" || url[0] === "#" || url[0] === "?") return false;
+  if (url.indexOf("\\") !== -1) return false;
+  if (/^[a-zA-Z][a-zA-Z0-9+.-]*:/.test(url)) return false;
+  for (const segment of url.split("/")) {
+    if (segment === "" || segment === "." || segment === "..") return false;
+  }
+  return true;
+}
+
+function tileValidateLayer(id, layer, worldSize, tileSize, bleedPx) {
+  if (!layer || typeof layer !== "object" || Array.isArray(layer)) {
+    return tileFail(`${id}: layer must be an object`);
+  }
+  if (layer.available !== true && layer.available !== false) {
+    return tileFail(`${id}: available must be boolean`);
+  }
+  // A missing LOD is an honest state — no tile fields are required or read.
+  if (layer.available === false) return { ok: true, error: null };
+
+  const bounds = layer.bounds;
+  if (!Array.isArray(bounds) || bounds.length !== 4 || !bounds.every(tileIsNumber)) {
+    return tileFail(`${id}: bounds must be [x,y,w,h]`);
+  }
+  const bx = bounds[0];
+  const by = bounds[1];
+  const bw = bounds[2];
+  const bh = bounds[3];
+  if (bx < 0 || by < 0 || bw <= 0 || bh <= 0
+    || bx + bw > worldSize[0] || by + bh > worldSize[1]) {
+    return tileFail(`${id}: bounds must be positive and inside the world`);
+  }
+
+  const sourcePixels = layer.sourcePixels;
+  if (!Array.isArray(sourcePixels) || sourcePixels.length !== 2
+    || !sourcePixels.every((v) => tileIsInteger(v) && v > 0)) {
+    return tileFail(`${id}: sourcePixels must be [positive int, positive int]`);
+  }
+  const ppwu = layer.pixelsPerWorldUnit;
+  if (!tileIsNumber(ppwu) || ppwu <= 0) {
+    return tileFail(`${id}: pixelsPerWorldUnit must be positive`);
+  }
+  if (Math.abs(sourcePixels[0] - bw * ppwu) > 1e-6
+    || Math.abs(sourcePixels[1] - bh * ppwu) > 1e-6) {
+    return tileFail(`${id}: sourcePixels do not match bounds * pixelsPerWorldUnit`);
+  }
+
+  const grid = layer.grid;
+  if (!Array.isArray(grid) || grid.length !== 2
+    || !grid.every((v) => tileIsInteger(v) && v > 0)) {
+    return tileFail(`${id}: grid must be [positive cols, positive rows]`);
+  }
+  const cols = grid[0];
+  const rows = grid[1];
+  const expectCols = Math.ceil(sourcePixels[0] / tileSize);
+  const expectRows = Math.ceil(sourcePixels[1] / tileSize);
+  if (cols !== expectCols || rows !== expectRows) {
+    return tileFail(`${id}: grid does not cover sourcePixels at tileSize`);
+  }
+
+  const tiles = layer.tiles;
+  if (!Array.isArray(tiles) || tiles.length !== cols * rows) {
+    return tileFail(`${id}: tiles length must equal cols * rows`);
+  }
+  const seen = new Set();
+  for (const tile of tiles) {
+    if (!tile || typeof tile !== "object" || Array.isArray(tile)) {
+      return tileFail(`${id}: tile must be an object`);
+    }
+    const row = tile.row;
+    const col = tile.col;
+    if (!tileIsInteger(row) || !tileIsInteger(col)
+      || row < 0 || row >= rows || col < 0 || col >= cols) {
+      return tileFail(`${id}: tile row/col outside the grid`);
+    }
+    const key = `${row}-${col}`;
+    if (seen.has(key)) return tileFail(`${id}: duplicate tile key ${key}`);
+    seen.add(key);
+
+    if (!tileUrlConfined(tile.url)) {
+      return tileFail(`${id}/${key}: url must stay inside the tile directory`);
+    }
+
+    const rect = tile.pixelRect;
+    if (!Array.isArray(rect) || rect.length !== 4 || !rect.every(tileIsInteger)) {
+      return tileFail(`${id}/${key}: pixelRect must be [x,y,w,h]`);
+    }
+    const px = rect[0];
+    const py = rect[1];
+    const pw = rect[2];
+    const ph = rect[3];
+    if (px < 0 || py < 0 || pw <= 0 || ph <= 0
+      || px + pw > sourcePixels[0] || py + ph > sourcePixels[1]) {
+      return tileFail(`${id}/${key}: pixelRect must be positive and inside sourcePixels`);
+    }
+    if (px !== col * tileSize || py !== row * tileSize
+      || pw !== Math.min(tileSize, sourcePixels[0] - px)
+      || ph !== Math.min(tileSize, sourcePixels[1] - py)) {
+      return tileFail(`${id}/${key}: pixelRect does not match its grid cell`);
+    }
+
+    const bleed = tile.bleedLTRB;
+    if (!Array.isArray(bleed) || bleed.length !== 4
+      || !bleed.every((v) => tileIsInteger(v) && v >= 0)) {
+      return tileFail(`${id}/${key}: bleedLTRB must be 4 non-negative ints`);
+    }
+    const wantBleed = [
+      px > 0 ? bleedPx : 0,
+      py > 0 ? bleedPx : 0,
+      px + pw < sourcePixels[0] ? bleedPx : 0,
+      py + ph < sourcePixels[1] ? bleedPx : 0,
+    ];
+    for (let i = 0; i < 4; i += 1) {
+      if (bleed[i] !== wantBleed[i]) {
+        return tileFail(`${id}/${key}: bleedLTRB does not match source edges`);
+      }
+    }
+    // Decoded tile size = core + bleed on both sides. It must stay inside the
+    // bleed contract while the core stays inside sourcePixels.
+    const decodedW = pw + bleed[0] + bleed[2];
+    const decodedH = ph + bleed[1] + bleed[3];
+    if (decodedW > tileSize + 2 * bleedPx || decodedH > tileSize + 2 * bleedPx) {
+      return tileFail(`${id}/${key}: decoded size exceeds tileSize + 2 * bleedPx`);
+    }
+  }
+  return { ok: true, error: null };
+}
+
+function validateTileManifest(manifest) {
+  if (!manifest || typeof manifest !== "object" || Array.isArray(manifest)) {
+    return tileFail("manifest must be an object");
+  }
+  if (manifest.schemaVersion !== 1) return tileFail("schemaVersion must be 1");
+  if (manifest.format !== "webp") return tileFail('format must be "webp"');
+  const worldSize = manifest.worldSize;
+  if (!Array.isArray(worldSize) || worldSize.length !== 2
+    || !worldSize.every((v) => tileIsInteger(v) && v > 0)) {
+    return tileFail("worldSize must be [positive int width, positive int height]");
+  }
+  if (worldSize[0] !== MAP_WORLD.w || worldSize[1] !== MAP_WORLD.h) {
+    return tileFail("worldSize must match the canonical world");
+  }
+  if (manifest.tileSize !== 512) return tileFail("tileSize must be 512");
+  if (manifest.bleedPx !== 2) return tileFail("bleedPx must be 2");
+  const layers = manifest.layers;
+  if (!layers || typeof layers !== "object" || Array.isArray(layers)) {
+    return tileFail("layers must be an object");
+  }
+  for (const id of TILE_LAYER_IDS) {
+    if (!Object.prototype.hasOwnProperty.call(layers, id)) {
+      return tileFail(`missing layer ${id}`);
+    }
+    const result = tileValidateLayer(
+      id, layers[id], worldSize, manifest.tileSize, manifest.bleedPx,
+    );
+    if (!result.ok) return result;
+  }
+  return { ok: true, error: null };
+}
+
+// Master-world corners of a tile. Tiles already carry world-scaled pixel
+// rects, so this is a plain divide by pixelsPerWorldUnit — locationToWorld
+// must NOT run here (that transform is for author percentages only).
+function tileWorldRect(layer, tile) {
+  const p = Number(layer && layer.pixelsPerWorldUnit);
+  const b = (layer && layer.bounds) || [0, 0, 0, 0];
+  const r = (tile && tile.pixelRect) || [0, 0, 0, 0];
+  return {
+    ax: b[0] + r[0] / p,
+    ay: b[1] + r[1] / p,
+    bx: b[0] + (r[0] + r[2]) / p,
+    by: b[1] + (r[1] + r[3]) / p,
+  };
+}
+
+// Percentages of the UNTRANSFORMED stage (= the live card box after the
+// object-fit cover crop). Fractional edges are preserved — the CSS transform
+// zooms around the focus origin later.
+function tileScreenRect(layer, tile, cardW, cardH) {
+  const r = tileWorldRect(layer, tile);
+  const a = worldToScreen({ x: r.ax, y: r.ay }, cardW, cardH);
+  const b = worldToScreen({ x: r.bx, y: r.by }, cardW, cardH);
+  return { left: a.x, top: a.y, width: b.x - a.x, height: b.y - a.y };
+}
+
+// clipRect is in CARD PIXELS (left/top/right/bottom, normally 0..cardW/H).
+// Each tile's stage rect is scaled by stageScale around the projected focus
+// origin (the same origin the .map-stage CSS transform uses) before the
+// clip intersection. Only positive-area intersections count: a tile merely
+// touching the clip edge is already invisible. Nearest-to-visible-centre
+// first, with a deterministic key tie-break.
+function wantedTiles(manifest, lod, focusWorld, cardW, cardH, stageScale, clipRect) {
+  const layerId = TILE_LOD_LEVELS[lod];
+  if (!layerId) return [];
+  const layers = manifest && manifest.layers;
+  const layer = layers && layers[layerId];
+  if (!layer || layer.available !== true || !Array.isArray(layer.tiles)) return [];
+
+  const w = Number(cardW) || MAP_AUTHOR_CARD.w;
+  const h = Number(cardH) || MAP_AUTHOR_CARD.h;
+  const scale = tileIsNumber(Number(stageScale)) && Number(stageScale) > 0
+    ? Number(stageScale) : 1;
+  const focus = focusWorld || { x: MAP_WORLD.w / 2, y: MAP_WORLD.h / 2 };
+  const focusScreen = worldToScreen(focus, w, h);
+  const fx = focusScreen.x / 100 * w;
+  const fy = focusScreen.y / 100 * h;
+  const clip = clipRect || { left: 0, top: 0, right: w, bottom: h };
+  const clipCx = (clip.left + clip.right) / 2;
+  const clipCy = (clip.top + clip.bottom) / 2;
+
+  const hits = [];
+  for (const tile of layer.tiles) {
+    const rect = tileScreenRect(layer, tile, w, h);
+    const left = fx + (rect.left / 100 * w - fx) * scale;
+    const top = fy + (rect.top / 100 * h - fy) * scale;
+    const right = fx + ((rect.left + rect.width) / 100 * w - fx) * scale;
+    const bottom = fy + ((rect.top + rect.height) / 100 * h - fy) * scale;
+    const ix0 = Math.max(left, clip.left);
+    const iy0 = Math.max(top, clip.top);
+    const ix1 = Math.min(right, clip.right);
+    const iy1 = Math.min(bottom, clip.bottom);
+    const iw = ix1 - ix0;
+    const ih = iy1 - iy0;
+    if (!(iw > 0 && ih > 0)) continue;
+    const dx = (ix0 + ix1) / 2 - clipCx;
+    const dy = (iy0 + iy1) / 2 - clipCy;
+    hits.push({ key: `${layerId}/${tile.row}-${tile.col}`, d2: dx * dx + dy * dy });
+  }
+  hits.sort((a, b) => (a.d2 - b.d2)
+    || (a.key < b.key ? -1 : a.key > b.key ? 1 : 0));
+  return hits.map((hit) => hit.key);
+}
+
+// Inner <img> style for a bleed tile: the wrapper clips the CORE pixelRect,
+// the img is the decoded (core+bleed) raster shifted so its core lands at 0,0
+// and scaled so the core fills the wrapper. No object-fit: the aspect already
+// matches exactly by construction.
+function tileBleedStyle(tile) {
+  const r = (tile && tile.pixelRect) || [0, 0, 0, 0];
+  const b = (tile && tile.bleedLTRB) || [0, 0, 0, 0];
+  const w = r[2] || 1;
+  const h = r[3] || 1;
+  return "position:absolute;"
+    + `left:${-100 * b[0] / w}%;`
+    + `top:${-100 * b[1] / h}%;`
+    + `width:${100 * (w + b[0] + b[2]) / w}%;`
+    + `height:${100 * (h + b[1] + b[3]) / h}%;`;
 }
 
 /* ---------- #310: Living Map POI selection (click = select, never move) ---------- */
@@ -3078,7 +3377,594 @@ function setMapReducedMotion(enabled) {
   setReducedMotionPref(enabled);
 }
 
+/* ---------- #308 terrain: tile controller + mount lifecycle ---------- */
+
+// The pure helpers above own the contract (manifest, geometry, wanted set).
+// This block is the imperative half: the DOM layer, the bounded fetch/decode
+// pipeline, the decoded-tile LRU, and the mount / detach / reattach lifecycle
+// the World screen drives. Every browser capability is feature-detected where
+// it is used, so a harness or a browser without Image / AbortController /
+// object URLs keeps the static JPEG underlay instead of throwing. Nothing in
+// this range runs at module scope — tests/m308 evaluates it in an empty vm.
+const TERRAIN_TILE_DIR = "/static/static/map/tiles";
+const TERRAIN_MANIFEST_URL = `${TERRAIN_TILE_DIR}/manifest.json`;
+const TERRAIN_ATTRIBUTION = "© OpenStreetMap contributors";
+
+const terrainState = {
+  mounted: false,
+  card: null,
+  stage: null,
+  tilesHost: null,
+  attribution: null,
+  manifest: null,
+  manifestError: null,
+  manifestFlight: null,
+  index: null,
+  requests: new Map(),  // key → { controller, token, generation, url }
+  cache: new Map(),  // key → { img, url, used } — decoded tiles, LRU
+  failed: new Set(),  // negative cache for THIS mount
+  nodes: new Map(),  // key → the mounted .map-tile wrapper
+  pinned: new Set(),  // keys the current view wants — never evicted
+  token: 0,  // mount lifetime (bumped by mount / reattach / dispose)
+  generation: 0,  // dispose generation — a late callback never crosses it
+  raf: null,  // coalescing handle (rAF id, or a timeout id)
+  wanted: [],
+  budget: { concurrent: 3, resident: 16 },
+  signature: "",  // wanted keys + geometry of the last applied pass
+  attached: "",  // which of them had a mounted node at that pass
+  clock: 0,  // LRU stamp source
+};
+
+function terrainCapable() {
+  return typeof fetch === "function"
+    && typeof AbortController === "function"
+    && typeof Image === "function"
+    && typeof URL !== "undefined"
+    && typeof URL.createObjectURL === "function"
+    && typeof URL.revokeObjectURL === "function";
+}
+
+const TERRAIN_BUDGETS = {
+  high: { concurrent: 4, resident: 24 },
+  balanced: { concurrent: 3, resident: 16 },
+  "low-mobile": { concurrent: 2, resident: 12 },
+};
+
+function terrainBudget() {
+  return TERRAIN_BUDGETS[S.mapQuality] || TERRAIN_BUDGETS.balanced;
+}
+
+// Same zoom factors the #308 P2 CSS applies to .map-stage; the phone breakpoint
+// tracks the stylesheet's 520px override. Both guarded — no window, no crash.
+function terrainStageScale() {
+  const mq = typeof window !== "undefined" && typeof window.matchMedia === "function"
+    ? window.matchMedia("(max-width: 520px)") : null;
+  const mobile = !!(mq && mq.matches);
+  if (S.mapLod === "region") return mobile ? 1.5 : 1.65;
+  if (S.mapLod === "local") return mobile ? 2.35 : 2.75;
+  return 1;
+}
+
+function terrainFocusWorld() {
+  const locs = S.mapLocations || [];
+  for (const loc of locs) {
+    if (!loc || loc.id !== S.mapFocusLocationId) continue;
+    if (loc.x === null || loc.x === undefined
+      || loc.y === null || loc.y === undefined) return null;
+    return locationToWorld(loc);
+  }
+  return null;
+}
+
+// key ("lodN/row-col") → { layer, tile } for every available layer.
+function terrainTileIndex(manifest) {
+  const index = new Map();
+  const layers = (manifest && manifest.layers) || {};
+  for (const id of TILE_LAYER_IDS) {
+    const layer = layers[id];
+    if (!layer || layer.available !== true || !Array.isArray(layer.tiles)) continue;
+    for (const tile of layer.tiles) {
+      index.set(`${id}/${tile.row}-${tile.col}`, { layer, tile });
+    }
+  }
+  return index;
+}
+
+function terrainReleaseUrl(url) {
+  if (!url) return;
+  if (typeof URL === "undefined" || typeof URL.revokeObjectURL !== "function") return;
+  URL.revokeObjectURL(url);
+}
+
+function terrainDecodeImage(url) {
+  return new Promise((resolve, reject) => {
+    if (typeof Image !== "function") {
+      reject(new Error("no Image"));
+      return;
+    }
+    const img = new Image();
+    let settled = false;
+    const ok = () => {
+      if (settled) return;
+      settled = true;
+      resolve(img);
+    };
+    const fail = () => {
+      if (settled) return;
+      settled = true;
+      reject(new Error("tile decode"));
+    };
+    img.onload = ok;
+    img.onerror = fail;
+    img.src = url;
+    if (typeof img.decode === "function") img.decode().then(ok).catch(fail);
+  });
+}
+
+// Decoded size = core + bleed on both sides — the build contract. A mismatch
+// (or a zero-size bitmap) keeps that core on the JPEG underlay.
+function terrainDimensionMismatch(tile, img) {
+  const rect = tile && tile.pixelRect;
+  const bleed = (tile && tile.bleedLTRB) || [0, 0, 0, 0];
+  if (!Array.isArray(rect)) return true;
+  const width = Number(img && img.naturalWidth);
+  const height = Number(img && img.naturalHeight);
+  if (!width || !height) return false;
+  return width !== rect[2] + bleed[0] + bleed[2]
+    || height !== rect[3] + bleed[1] + bleed[3];
+}
+
+// LRU: the displayed wanted tiles and every still-wanted key are pinned; the
+// least-recently-used unpinned entry goes first and its object URL is revoked.
+function terrainEvictOne() {
+  let victim = null;
+  let victimUsed = Infinity;
+  for (const [key, entry] of terrainState.cache) {
+    if (terrainState.nodes.has(key) || terrainState.pinned.has(key)) continue;
+    if (entry.used < victimUsed) {
+      victimUsed = entry.used;
+      victim = key;
+    }
+  }
+  if (victim === null) return false;
+  const entry = terrainState.cache.get(victim);
+  terrainState.cache.delete(victim);
+  terrainReleaseUrl(entry.url);
+  return true;
+}
+
+function terrainTrimCache() {
+  while (terrainState.cache.size > terrainState.budget.resident) {
+    if (!terrainEvictOne()) break;
+  }
+}
+
+function terrainStoreTile(key, url, img) {
+  // Reserve capacity BEFORE admitting the decode.
+  while (terrainState.cache.size >= terrainState.budget.resident) {
+    if (!terrainEvictOne()) break;
+  }
+  terrainState.cache.set(key, { img, url, used: ++terrainState.clock });
+}
+
+function terrainAttachNode(plan, entry) {
+  if (!terrainState.tilesHost || typeof document === "undefined"
+    || typeof document.createElement !== "function") return;
+  const wrapper = document.createElement("div");
+  wrapper.className = "map-tile";
+  wrapper.setAttribute("data-key", plan.key);
+  // Percentages of the UNTRANSFORMED stage — the stage transform zooms them.
+  wrapper.style.left = `${plan.rect.left}%`;
+  wrapper.style.top = `${plan.rect.top}%`;
+  wrapper.style.width = `${plan.rect.width}%`;
+  wrapper.style.height = `${plan.rect.height}%`;
+  // Bleed geometry only: no object-fit, no fade, no transition.
+  entry.img.setAttribute("style", tileBleedStyle(plan.tile));
+  wrapper.appendChild(entry.img);
+  terrainState.tilesHost.appendChild(wrapper);
+  terrainState.nodes.set(plan.key, wrapper);
+  entry.used = ++terrainState.clock;
+}
+
+function terrainAdmitTile(plan, url, img) {
+  if (!terrainState.mounted || !terrainState.tilesHost) {
+    terrainReleaseUrl(url);
+    return;
+  }
+  // #308: the same existence guard as terrainReconcilePass — a late decode must
+  // not admit into (and retain a blob for) a host the live document dropped
+  // when #app was replaced outside renderWorld/route.
+  if (typeof document !== "undefined" && typeof document.contains === "function"
+    && !document.contains(terrainState.tilesHost)) {
+    terrainReleaseUrl(url);
+    return;
+  }
+  terrainStoreTile(plan.key, url, img);
+  if (!terrainState.nodes.has(plan.key)) {
+    terrainAttachNode(plan, terrainState.cache.get(plan.key));
+  }
+  // DOM membership changed — let the next pass re-diff (it stays a no-op
+  // unless the wanted set or the geometry moved).
+  terrainState.signature = "";
+}
+
+function terrainRequestCurrent(key, entry) {
+  return terrainState.mounted === true
+    && entry.token === terrainState.token
+    && entry.generation === terrainState.generation
+    && terrainState.wanted.indexOf(key) !== -1;
+}
+
+// A tile request released a concurrency slot. Invalidate the unchanged-
+// signature fast path so the coalesced pass can admit the next wanted,
+// non-failed key — without this, obsoleted requests can leave the new layer
+// with zero requests forever, and a wanted set larger than the budget settles
+// one key short.
+function terrainDrain() {
+  if (!terrainState.mounted || !terrainState.tilesHost) return;
+  terrainState.signature = "";
+  reconcileTerrain("drain");
+}
+
+function terrainRequestTile(plan) {
+  if (!tileUrlConfined(plan.tile.url)) {
+    terrainState.failed.add(plan.key);
+    return;
+  }
+  const entry = {
+    controller: new AbortController(),
+    token: terrainState.token,
+    generation: terrainState.generation,
+    url: null,
+    superseded: false,
+  };
+  terrainState.requests.set(plan.key, entry);
+  fetch(`${TERRAIN_TILE_DIR}/${plan.tile.url}`, { signal: entry.controller.signal })
+    .then((response) => {
+      if (!response || response.ok === false || typeof response.blob !== "function") {
+        throw new Error("tile fetch rejected");
+      }
+      return response.blob();
+    })
+    .then((blob) => {
+      if (terrainState.requests.get(plan.key) !== entry) {
+        // A newer flight owns this key: not a real failure — never negative-cache.
+        entry.superseded = true;
+        throw new Error("superseded");
+      }
+      if (typeof URL === "undefined" || typeof URL.createObjectURL !== "function") {
+        throw new Error("no object URLs");
+      }
+      entry.url = URL.createObjectURL(blob);
+      return terrainDecodeImage(entry.url);
+    })
+    .then((img) => {
+      const current = terrainRequestCurrent(plan.key, entry);
+      // Delete only OUR entry: a newer request for the same key survives a
+      // late completion of an older one.
+      if (terrainState.requests.get(plan.key) === entry) terrainState.requests.delete(plan.key);
+      if (!current) {
+        terrainReleaseUrl(entry.url);
+        entry.url = null;
+      } else {
+        if (terrainDimensionMismatch(plan.tile, img)) throw new Error("dimensions");
+        terrainAdmitTile(plan, entry.url, img);
+        entry.url = null;  // ownership moved to the cache entry
+      }
+      if (terrainState.mounted && entry.generation === terrainState.generation) {
+        terrainDrain();
+      }
+    })
+    .catch(() => {
+      if (terrainState.requests.get(plan.key) === entry) terrainState.requests.delete(plan.key);
+      terrainReleaseUrl(entry.url);
+      entry.url = null;
+      if (terrainState.mounted && !entry.superseded
+        && entry.generation === terrainState.generation) {
+        terrainState.failed.add(plan.key);
+        terrainState.signature = "";
+      }
+      if (terrainState.mounted && entry.generation === terrainState.generation) {
+        terrainDrain();
+      }
+    });
+}
+
+// OSM credit lives OUTSIDE the clipped/scaled .map-stage, appended to the
+// .world-stage once (idempotent: a reattach re-derives it from the new tree).
+function terrainEnsureAttribution(card) {
+  if (typeof document === "undefined" || typeof document.createElement !== "function") return null;
+  let worldStage = card && typeof card.closest === "function"
+    ? card.closest(".world-stage") : null;
+  if (!worldStage) worldStage = document.querySelector(".world-stage");
+  if (!worldStage) return null;
+  let node = worldStage.querySelector(".map-attribution");
+  if (!node) {
+    node = document.createElement("div");
+    node.className = "map-attribution";
+    node.textContent = TERRAIN_ATTRIBUTION;
+    worldStage.appendChild(node);
+  }
+  return node;
+}
+
+// The tile host sits immediately after .map-base in tree order (above the
+// base image, below ambient/tint/anchors) and is inert to pointers.
+function terrainEnsureNodes(card) {
+  if (!card || typeof card.querySelector !== "function") return null;
+  const stage = card.querySelector(".map-stage");
+  if (!stage) return null;
+  let host = stage.querySelector(".map-tiles");
+  if (!host) {
+    if (typeof document === "undefined" || typeof document.createElement !== "function") return null;
+    host = document.createElement("div");
+    host.className = "map-tiles";
+    host.setAttribute("aria-hidden", "true");
+    const base = stage.querySelector(".map-base");
+    const anchor = base && base.nextSibling ? base.nextSibling : null;
+    if (typeof stage.insertBefore === "function") stage.insertBefore(host, anchor);
+    else stage.appendChild(host);
+  }
+  return { stage, host };
+}
+
+function terrainLoadManifest() {
+  if (terrainState.manifest || terrainState.manifestError || terrainState.manifestFlight) return;
+  if (typeof fetch !== "function" || typeof AbortController !== "function") return;
+  const controller = new AbortController();
+  terrainState.manifestFlight = controller;
+  fetch(TERRAIN_MANIFEST_URL, { signal: controller.signal })
+    .then((response) => {
+      if (!response || response.ok === false || typeof response.json !== "function") {
+        throw new Error("manifest fetch rejected");
+      }
+      return response.json();
+    })
+    .then((data) => {
+      const check = validateTileManifest(data);
+      if (!check.ok) throw new Error(check.error || "manifest");
+      if (terrainState.manifestFlight !== controller) return;  // disposed mid-flight
+      terrainState.manifestFlight = null;
+      terrainState.manifest = data;
+      terrainState.index = terrainTileIndex(data);
+      terrainState.manifestError = null;
+      reconcileTerrain("manifest");
+    })
+    .catch(() => {
+      if (terrainState.manifestFlight !== controller) return;  // aborted = disposed
+      terrainState.manifestFlight = null;
+      // One shot per mount: no retry loop, the JPEG underlay stays.
+      terrainState.manifestError = "manifest";
+    });
+}
+
+function mountTerrain(card) {
+  if (!terrainCapable()) return;
+  if (!card || typeof card.querySelector !== "function") return;
+  terrainState.token += 1;
+  const nodes = terrainEnsureNodes(card);
+  if (!nodes) return;
+  terrainState.card = card;
+  terrainState.stage = nodes.stage;
+  terrainState.tilesHost = nodes.host;
+  terrainState.attribution = terrainEnsureAttribution(card);
+  terrainState.mounted = true;
+  terrainState.budget = terrainBudget();
+  terrainState.pinned = new Set();
+  terrainLoadManifest();
+  reconcileTerrain("mount");
+}
+
+// The poll rebuild replaces the whole host tree. Detach ONLY the node: the
+// decoded images and in-flight requests belong to the mount, not the card.
+function detachTerrain() {
+  const host = terrainState.tilesHost;
+  if (host && typeof host.remove === "function") host.remove();
+  terrainState.card = null;
+  terrainState.stage = null;
+  terrainState.mounted = false;
+}
+
+function reattachTerrain(card) {
+  if (!card || typeof card.querySelector !== "function") return;
+  const host = terrainState.tilesHost;
+  if (!host) {
+    mountTerrain(card);
+    return;
+  }
+  const stage = card.querySelector(".map-stage");
+  if (!stage) return;
+  const base = stage.querySelector(".map-base");
+  const anchor = base && base.nextSibling ? base.nextSibling : null;
+  if (typeof stage.insertBefore === "function") stage.insertBefore(host, anchor);
+  else stage.appendChild(host);
+  terrainState.card = card;
+  terrainState.stage = stage;
+  terrainState.attribution = terrainEnsureAttribution(card);
+  terrainState.mounted = true;
+  terrainState.token += 1;
+  // A poll reclaim is the SAME mount: the token moves forward so stale
+  // callbacks die, but in-flight decodes must survive — detach kept them, and
+  // with an unchanged geometry signature they would never be re-requested.
+  // Rebase their token so the completion check still admits them.
+  for (const entry of terrainState.requests.values()) entry.token = terrainState.token;
+  reconcileTerrain("poll");
+}
+
+function disposeTerrain() {
+  if (terrainState.manifestFlight && typeof terrainState.manifestFlight.abort === "function") {
+    terrainState.manifestFlight.abort();
+  }
+  terrainState.manifestFlight = null;
+  for (const entry of terrainState.requests.values()) {
+    if (entry && entry.controller && typeof entry.controller.abort === "function") {
+      entry.controller.abort();
+    }
+    terrainReleaseUrl(entry && entry.url);
+  }
+  terrainState.requests.clear();
+  for (const entry of terrainState.cache.values()) terrainReleaseUrl(entry && entry.url);
+  terrainState.cache.clear();
+  terrainState.failed.clear();
+  terrainState.nodes.clear();
+  terrainState.pinned.clear();
+  const host = terrainState.tilesHost;
+  if (host && typeof host.remove === "function") host.remove();
+  const attribution = terrainState.attribution;
+  if (attribution && typeof attribution.remove === "function") attribution.remove();
+  if (terrainState.raf !== null) {
+    if (typeof cancelAnimationFrame === "function") cancelAnimationFrame(terrainState.raf);
+    else if (typeof clearTimeout === "function") clearTimeout(terrainState.raf);
+    terrainState.raf = null;
+  }
+  terrainState.token += 1;
+  terrainState.generation += 1;
+  terrainState.mounted = false;
+  terrainState.card = null;
+  terrainState.stage = null;
+  terrainState.tilesHost = null;
+  terrainState.attribution = null;
+  terrainState.manifest = null;
+  terrainState.manifestError = null;
+  terrainState.index = null;
+  terrainState.wanted = [];
+  terrainState.signature = "";
+  terrainState.attached = "";
+  terrainState.budget = { concurrent: 3, resident: 16 };
+}
+
+// Coalesce every caller into one pass per frame. reason is "mount" | "poll" |
+// "manifest" | "resize" — ordering/diagnostics only, the pass re-derives all.
+function reconcileTerrain(reason) {
+  if (!terrainState.mounted || !terrainState.card || !terrainState.manifest) return;
+  if (!terrainState.tilesHost) return;
+  if (terrainState.raf !== null) return;
+  const run = () => {
+    terrainState.raf = null;
+    terrainReconcilePass();
+  };
+  if (typeof requestAnimationFrame === "function") {
+    terrainState.raf = requestAnimationFrame(run);
+  } else if (typeof setTimeout === "function") {
+    terrainState.raf = setTimeout(run, 0);
+  } else {
+    run();
+  }
+}
+
+function terrainReconcilePass() {
+  if (!terrainState.mounted || !terrainState.card || !terrainState.manifest) return;
+  if (!terrainState.tilesHost) return;
+  // #308 defense in depth: never resurrect a host the live document no longer
+  // contains (a navigation can outlive a coalesced frame). No requests, no DOM.
+  if (typeof document !== "undefined" && typeof document.contains === "function"
+    && !document.contains(terrainState.tilesHost)) return;
+  const box = mapCardBox();
+  if (!box || box.card !== terrainState.card) return;
+
+  const stageScale = terrainStageScale();
+  const wanted = wantedTiles(
+    terrainState.manifest, S.mapLod, terrainFocusWorld(), box.w, box.h, stageScale,
+    { left: 0, top: 0, right: box.w, bottom: box.h },
+  );
+  const wantedSet = new Set(wanted);
+  terrainState.wanted = wanted;
+  terrainState.pinned = wantedSet;
+  terrainState.budget = terrainBudget();
+  if (!terrainState.index) terrainState.index = terrainTileIndex(terrainState.manifest);
+  const index = terrainState.index;
+
+  const plans = [];
+  const parts = [];
+  for (const key of wanted) {
+    const found = index.get(key);
+    if (!found) continue;
+    const rect = tileScreenRect(found.layer, found.tile, box.w, box.h);
+    plans.push({ key, tile: found.tile, rect });
+    parts.push(`${key}|${rect.left.toFixed(2)},${rect.top.toFixed(2)},`
+      + `${rect.width.toFixed(2)},${rect.height.toFixed(2)}`);
+  }
+  const signature = `${S.mapLod}|${box.w}x${box.h}|${stageScale}|`
+    + `${terrainState.budget.concurrent}/${terrainState.budget.resident}|`
+    + `${parts.join(";")}`;
+  const attached = plans
+    .filter((plan) => terrainState.nodes.has(plan.key))
+    .map((plan) => plan.key).join(",");
+  // Fast path: unchanged wanted set + geometry + mounted membership ⇒ zero
+  // requests and zero child mutations. Nothing below runs.
+  if (signature === terrainState.signature && attached === terrainState.attached) return;
+
+  // 1. Cores the current view no longer wants leave the DOM; their decoded
+  //    image stays in the LRU until the resident budget pushes it out.
+  for (const [key, node] of Array.from(terrainState.nodes)) {
+    if (wantedSet.has(key)) continue;
+    if (node && typeof node.remove === "function") node.remove();
+    terrainState.nodes.delete(key);
+  }
+
+  // 2. Cached cores attach immediately; the rest are queued within the
+  //    concurrency budget (failed keys are negative-cached for this mount).
+  const missing = [];
+  for (const plan of plans) {
+    if (terrainState.nodes.has(plan.key)) {
+      // A resize/orientation change reprojects the cover-crop geometry: the
+      // wrapper must follow the new rect or it stays misregistered against the
+      // reprojected JPEG/markers. Reapply in place — node identity stays stable.
+      const node = terrainState.nodes.get(plan.key);
+      if (node && node.style) {
+        node.style.left = `${plan.rect.left}%`;
+        node.style.top = `${plan.rect.top}%`;
+        node.style.width = `${plan.rect.width}%`;
+        node.style.height = `${plan.rect.height}%`;
+      }
+      const cached = terrainState.cache.get(plan.key);
+      if (cached) cached.used = ++terrainState.clock;
+      continue;
+    }
+    if (terrainState.failed.has(plan.key) || terrainState.requests.has(plan.key)) continue;
+    const cached = terrainState.cache.get(plan.key);
+    if (cached) {
+      terrainAttachNode(plan, cached);
+      continue;
+    }
+    missing.push(plan);
+  }
+
+  // 3. Abort obsolete flights BEFORE measuring the budget: at a LOD/resize
+  //    switch stale fetches would otherwise keep occupying concurrency slots
+  //    until they settle (a stalled one forever) and starve the new view.
+  //    `superseded` is set first so the async catch never negative-caches an
+  //    intentionally aborted key; its drain still re-diffs this pass.
+  for (const [key, entry] of Array.from(terrainState.requests)) {
+    if (wantedSet.has(key) || !entry) continue;
+    entry.superseded = true;
+    if (entry.controller && typeof entry.controller.abort === "function") {
+      entry.controller.abort();
+    }
+    terrainState.requests.delete(key);
+    terrainReleaseUrl(entry.url);
+    entry.url = null;
+  }
+
+  let room = Math.max(0, terrainState.budget.concurrent - terrainState.requests.size);
+  for (const plan of missing) {
+    if (room <= 0) break;
+    terrainRequestTile(plan);
+    room -= 1;
+  }
+
+  terrainTrimCache();
+  terrainState.signature = signature;
+  terrainState.attached = plans
+    .filter((plan) => terrainState.nodes.has(plan.key))
+    .map((plan) => plan.key).join(",");
+}
+
 function renderWorld(locs, tasksData) {
+  // #308: a cold World mount rebuilds #app from scratch — the tile layer and
+  // every decoded object URL belong to the previous tree, so drop them before
+  // any DOM work instead of leaking them into the new mount.
+  if (terrainState.mounted || terrainState.tilesHost) disposeTerrain();
   const ch = S.character;
   const needs = ch.needs || {};
 
@@ -3250,6 +4136,11 @@ function renderWorld(locs, tasksData) {
   // #308 P2: the cold build ran before the card was mounted; re-apply the
   // projection now that the live stage box exists.
   recomputeMapPositions();
+  // #308: now that the card is measurable, mount the raster tile layer (a
+  // silent no-op where fetch / Image / object URLs are unavailable).
+  const terrainHost = document.getElementById("living-map-host");
+  const terrainCard = terrainHost ? terrainHost.querySelector(".map-card") : null;
+  if (terrainCard) mountTerrain(terrainCard);
   // #304: the World HUD's task slot renders from the adapter (the ingest
   // has already landed before renderWorld) — fill the host at mount.
   refreshTaskPresentationHosts();
@@ -8530,6 +9421,7 @@ function applyChatViewportBudget() {
 function onViewportResize() {
   applyChatViewportBudget();
   recomputeMapPositions();
+  reconcileTerrain("resize");
 }
 window.addEventListener("resize", onViewportResize);
 route();

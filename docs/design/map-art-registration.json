@@ -1,0 +1,113 @@
+{
+  "status": "owner_approved_artwork_geographic_qa_pending",
+  "worldSize": [
+    1600,
+    900
+  ],
+  "lod2": {
+    "source": "lod2-region.png",
+    "bounds": [
+      320,
+      240,
+      960,
+      540
+    ],
+    "size": [
+      1920,
+      1080
+    ]
+  },
+  "lod3": {
+    "source": "lod3-settlement.png",
+    "bounds": [
+      480,
+      330,
+      480,
+      240
+    ],
+    "size": [
+      1920,
+      960
+    ]
+  },
+  "sourceAnchors": {
+    "houses.origin": [
+      610,
+      244
+    ],
+    "home": [
+      711,
+      466
+    ],
+    "workshop": [
+      815,
+      584
+    ],
+    "kitchen": [
+      854,
+      464
+    ],
+    "well": [
+      976,
+      509
+    ],
+    "storage": [
+      1072,
+      470
+    ],
+    "shop": [
+      1080,
+      593
+    ],
+    "settlement": [
+      969,
+      356
+    ]
+  },
+  "targetAnchors": {
+    "houses.origin": [
+      636.8,
+      279.6
+    ],
+    "home": [
+      721.28,
+      445.2
+    ],
+    "workshop": [
+      805.76,
+      528
+    ],
+    "kitchen": [
+      890.56,
+      445.2
+    ],
+    "well": [
+      975.04,
+      445.2
+    ],
+    "storage": [
+      1059.52,
+      445.2
+    ],
+    "shop": [
+      1059.52,
+      528
+    ],
+    "settlement": [
+      975.04,
+      362.4
+    ]
+  },
+  "targetCoordinateSet": "image_space in static/map/coords.json",
+  "warnings": [
+    "Generated concept includes inferred architecture and paths; not geographically verified.",
+    "Image registration uses hand-picked approximate roof centres, not validated building footprints.",
+    "LOD3 adds independent rendered micro-detail, but it is derived from LOD2 terrain for continuity.",
+    "Artwork requires design approval and actual overlay QA with the 1600x900 base raster."
+  ],
+  "approval": {
+    "date": "2026-11-22",
+    "issue": 308,
+    "scope": "Owner-approved LOD2/LOD3 artwork for implementation; geo-alignment/renderer QA pending"
+  }
+}

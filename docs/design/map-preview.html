@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>LifeSim Reineke — LOD artwork QA viewer</title>
+<style>
+:root{color-scheme:dark}body{margin:0;background:#162921;color:#e9e5d6;font:14px system-ui,-apple-system,Segoe UI,sans-serif}
+#app{height:100dvh;display:flex;flex-direction:column}header{display:flex;gap:14px;flex-wrap:wrap;padding:10px 16px;align-items:center;background:#17241d;border-bottom:1px solid #52634a}
+header p{margin:0;min-width:200px}button{border:1px solid #8c9578;background:#273d2b;color:#f6f4eb;padding:7px 12px;border-radius:8px;cursor:pointer}
+button[aria-pressed=true]{background:#c9a46a;color:#231b14;border-color:#e9cd9a}#frame{position:relative;flex:1;min-height:0;touch-action:none;overflow:hidden}
+canvas{display:block;width:100%;height:100%;background:#223b35}#credits{position:absolute;bottom:8px;right:9px;background:#17241dda;padding:4px 7px;border-radius:4px;font-size:11px;pointer-events:none}
+#status{color:#cdc3a6}#warning{font-size:12px;color:#e7d2a6;flex-basis:100%}
+</style></head><body><div id="app"><header><p><strong>Рейнеке — LOD-прототип</strong><span style="display:block;font-size:12px;color:#b4bfaa">Проверка подгрузки только видимых тайлов; не игровой клиент</span></p>
+<div><button data-lod="lod2" aria-pressed="true">LOD2 · район</button> <button data-lod="lod3" aria-pressed="false">LOD3 · поселение</button></div>
+<span id="status" aria-live="polite">Манифест загружается…</span><span id="warning">Дороги и здания не являются утверждённой геометрией; рисунок требует дизайн-приёмки.</span>
+</header><div id="frame"><canvas id="map"></canvas><span id="credits">© OpenStreetMap contributors · исходная географическая подоснова</span></div></div>
+<script>
+'use strict';
+const canvas=document.querySelector('canvas'), frame=document.querySelector('#frame'),ctx=canvas.getContext('2d');
+const status=document.querySelector('#status');
+const POIS={"houses.origin":[39.9,42.2],"home":[42.54,51.4],"workshop":[45.18,56.0],"kitchen":[47.83,51.4],"well":[50.47,51.4],"storage":[53.11,51.4],"shop":[53.11,56.0],"settlement":[50.47,46.8]};
+let manifest=null,lod='lod2',camera={x:800,y:460,scale:1.9},cache=new Map(),requestGeneration=0,queued=false;
+const tileSource='../../backend/app/web/static/map/tiles/'; // Preview file path: docs/design/map-preview.html -> backend/app/web/static/map/tiles
+function baseUrl(){return new URL(tileSource,document.location.href);}
+function resize(){let dpr=Math.min(devicePixelRatio||1,2),r=frame.getBoundingClientRect();canvas.width=Math.round(r.width*dpr);canvas.height=Math.round(r.height*dpr);ctx.setTransform(dpr,0,0,dpr,0,0);requestDraw();}
+function centerForLayer(key){const b=manifest.layers[key].bounds;camera.x=b[0]+b[2]/2;camera.y=b[1]+b[3]/2;camera.scale=Math.min(frame.clientWidth/b[2],frame.clientHeight/b[3])*.9;}
+function viewport(){const w=frame.clientWidth,h=frame.clientHeight;return [camera.x-w/(2*camera.scale),camera.y-h/(2*camera.scale),w/camera.scale,h/camera.scale]}
+function intersects(a,b){return a[0]<b[0]+b[2]&&a[0]+a[2]>b[0]&&a[1]<b[1]+b[3]&&a[1]+a[3]>b[1];}
+function worldToScreen(x,y){return [(x-camera.x)*camera.scale+frame.clientWidth/2,(y-camera.y)*camera.scale+frame.clientHeight/2]}
+function requestDraw(){if(!queued){queued=true;requestAnimationFrame(draw)}}
+function requestTile(url){let entry=cache.get(url);if(entry){entry.last=performance.now();return entry;}
+ entry={state:'pending',last:performance.now(),image:null}; cache.set(url,entry);const img=new Image();img.decoding='async';
+ img.onload=()=>{entry.state='loaded';entry.image=img;requestDraw();};img.onerror=()=>{entry.state='error';requestDraw();};img.src=new URL(url,baseUrl()).toString();
+ // Limit retained offscreen images, no bulk downloading on switch.
+ if(cache.size>40){for(const [key,v] of cache){if(v.state!=='pending'&&key!==url){cache.delete(key);if(cache.size<=32)break;}}}
+ return entry;}
+function draw(){queued=false;if(!manifest)return;let dpr=Math.min(devicePixelRatio||1,2),w=frame.clientWidth,h=frame.clientHeight;
+ ctx.clearRect(0,0,w,h);ctx.fillStyle='#284238';ctx.fillRect(0,0,w,h);
+ let layer=manifest.layers[lod];if(!layer.available){status.textContent='Тайлы для этого LOD отсутствуют';return;}
+ let [bx,by,bw,bh]=layer.bounds,view=viewport(); let wanted=0,loaded=0,pending=0;
+ const sx=bw/layer.sourcePixels[0],sy=bh/layer.sourcePixels[1];
+ // Preserve bleed: destination is un-bleeded core only, sample core only.
+ for(const t of layer.tiles){const [px,py,pw,ph]=t.pixelRect, box=[bx+px*sx,by+py*sy,pw*sx,ph*sy];
+ if(!intersects(box,view))continue; wanted++;let item=requestTile(t.url);if(item.state!=='loaded'){pending++;continue}loaded++;
+ const [dx,dy]=worldToScreen(box[0],box[1]),sw=box[2]*camera.scale,sh=box[3]*camera.scale;
+ let [bl,bt]=t.bleedLTRB; ctx.drawImage(item.image,bl,bt,pw,ph,dx,dy,sw,sh);
+ }
+ for(const [name,p] of Object.entries(POIS)){const xy=[p[0]*16,p[1]*9];if(!intersects([xy[0],xy[1],1,1],view))continue;
+ let [x,y]=worldToScreen(...xy);ctx.fillStyle='#efc67b';ctx.strokeStyle='#30271f';ctx.lineWidth=2;ctx.beginPath();ctx.arc(x,y,4,0,Math.PI*2);ctx.fill();ctx.stroke();}
+ status.textContent=`${lod.toUpperCase()} · тайлов в кадре ${wanted}, загружено ${loaded}, ожидание ${pending}, запросов ${cache.size}`;
+}
+let dragging=false,last=null;frame.addEventListener('pointerdown',e=>{dragging=true;last=[e.clientX,e.clientY];frame.setPointerCapture(e.pointerId)});
+frame.addEventListener('pointerup',()=>{dragging=false});frame.addEventListener('pointercancel',()=>{dragging=false});
+frame.addEventListener('pointermove',e=>{if(!dragging)return;camera.x-=(e.clientX-last[0])/camera.scale;camera.y-=(e.clientY-last[1])/camera.scale;last=[e.clientX,e.clientY];requestDraw()});
+frame.addEventListener('wheel',e=>{e.preventDefault();const change=Math.exp(-e.deltaY*.0007);camera.scale=Math.max(.4,Math.min(7,camera.scale*change));requestDraw()},{passive:false});
+for(const b of document.querySelectorAll('[data-lod]'))b.onclick=()=>{lod=b.dataset.lod;document.querySelectorAll('[data-lod]').forEach(el=>el.setAttribute('aria-pressed',String(el===b)));centerForLayer(lod);requestDraw()};
+fetch(new URL('../../backend/app/web/static/map/tiles/manifest.json',location.href)).then(r=>{if(!r.ok)throw Error('HTTP '+r.status);return r.json()}).then(m=>{manifest=m;lod=m.layers.lod2.available?'lod2':'lod3';centerForLayer(lod);resize();}).catch(e=>status.textContent='Не удалось прочитать manifest: '+e.message+'. Используйте python -m http.server');
+new ResizeObserver(resize).observe(frame);
+</script></body></html>

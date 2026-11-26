@@ -1,0 +1,552 @@
+{
+  "schemaVersion": 1,
+  "worldSize": [
+    1600,
+    900
+  ],
+  "coordinateSystem": "top-left/world-pixels; anchors follow coords.json",
+  "tileSize": 512,
+  "bleedPx": 2,
+  "format": "webp",
+  "layers": {
+    "lod1": {
+      "available": true,
+      "bounds": [
+        0,
+        0,
+        1600,
+        900
+      ],
+      "source": "backend/app/web/static/map/base.png",
+      "sourcePixels": [
+        1600,
+        900
+      ],
+      "pixelsPerWorldUnit": 1.0,
+      "grid": [
+        4,
+        2
+      ],
+      "tiles": [
+        {
+          "row": 0,
+          "col": 0,
+          "url": "lod1/0-0.webp",
+          "pixelRect": [
+            0,
+            0,
+            512,
+            512
+          ],
+          "bleedLTRB": [
+            0,
+            0,
+            2,
+            2
+          ]
+        },
+        {
+          "row": 0,
+          "col": 1,
+          "url": "lod1/0-1.webp",
+          "pixelRect": [
+            512,
+            0,
+            512,
+            512
+          ],
+          "bleedLTRB": [
+            2,
+            0,
+            2,
+            2
+          ]
+        },
+        {
+          "row": 0,
+          "col": 2,
+          "url": "lod1/0-2.webp",
+          "pixelRect": [
+            1024,
+            0,
+            512,
+            512
+          ],
+          "bleedLTRB": [
+            2,
+            0,
+            2,
+            2
+          ]
+        },
+        {
+          "row": 0,
+          "col": 3,
+          "url": "lod1/0-3.webp",
+          "pixelRect": [
+            1536,
+            0,
+            64,
+            512
+          ],
+          "bleedLTRB": [
+            2,
+            0,
+            0,
+            2
+          ]
+        },
+        {
+          "row": 1,
+          "col": 0,
+          "url": "lod1/1-0.webp",
+          "pixelRect": [
+            0,
+            512,
+            512,
+            388
+          ],
+          "bleedLTRB": [
+            0,
+            2,
+            2,
+            0
+          ]
+        },
+        {
+          "row": 1,
+          "col": 1,
+          "url": "lod1/1-1.webp",
+          "pixelRect": [
+            512,
+            512,
+            512,
+            388
+          ],
+          "bleedLTRB": [
+            2,
+            2,
+            2,
+            0
+          ]
+        },
+        {
+          "row": 1,
+          "col": 2,
+          "url": "lod1/1-2.webp",
+          "pixelRect": [
+            1024,
+            512,
+            512,
+            388
+          ],
+          "bleedLTRB": [
+            2,
+            2,
+            2,
+            0
+          ]
+        },
+        {
+          "row": 1,
+          "col": 3,
+          "url": "lod1/1-3.webp",
+          "pixelRect": [
+            1536,
+            512,
+            64,
+            388
+          ],
+          "bleedLTRB": [
+            2,
+            2,
+            0,
+            0
+          ]
+        }
+      ]
+    },
+    "lod2": {
+      "available": true,
+      "bounds": [
+        320,
+        240,
+        960,
+        540
+      ],
+      "source": "docs/design/map-source/lod2-region.png",
+      "sourcePixels": [
+        1920,
+        1080
+      ],
+      "pixelsPerWorldUnit": 2.0,
+      "grid": [
+        4,
+        3
+      ],
+      "tiles": [
+        {
+          "row": 0,
+          "col": 0,
+          "url": "lod2/0-0.webp",
+          "pixelRect": [
+            0,
+            0,
+            512,
+            512
+          ],
+          "bleedLTRB": [
+            0,
+            0,
+            2,
+            2
+          ]
+        },
+        {
+          "row": 0,
+          "col": 1,
+          "url": "lod2/0-1.webp",
+          "pixelRect": [
+            512,
+            0,
+            512,
+            512
+          ],
+          "bleedLTRB": [
+            2,
+            0,
+            2,
+            2
+          ]
+        },
+        {
+          "row": 0,
+          "col": 2,
+          "url": "lod2/0-2.webp",
+          "pixelRect": [
+            1024,
+            0,
+            512,
+            512
+          ],
+          "bleedLTRB": [
+            2,
+            0,
+            2,
+            2
+          ]
+        },
+        {
+          "row": 0,
+          "col": 3,
+          "url": "lod2/0-3.webp",
+          "pixelRect": [
+            1536,
+            0,
+            384,
+            512
+          ],
+          "bleedLTRB": [
+            2,
+            0,
+            0,
+            2
+          ]
+        },
+        {
+          "row": 1,
+          "col": 0,
+          "url": "lod2/1-0.webp",
+          "pixelRect": [
+            0,
+            512,
+            512,
+            512
+          ],
+          "bleedLTRB": [
+            0,
+            2,
+            2,
+            2
+          ]
+        },
+        {
+          "row": 1,
+          "col": 1,
+          "url": "lod2/1-1.webp",
+          "pixelRect": [
+            512,
+            512,
+            512,
+            512
+          ],
+          "bleedLTRB": [
+            2,
+            2,
+            2,
+            2
+          ]
+        },
+        {
+          "row": 1,
+          "col": 2,
+          "url": "lod2/1-2.webp",
+          "pixelRect": [
+            1024,
+            512,
+            512,
+            512
+          ],
+          "bleedLTRB": [
+            2,
+            2,
+            2,
+            2
+          ]
+        },
+        {
+          "row": 1,
+          "col": 3,
+          "url": "lod2/1-3.webp",
+          "pixelRect": [
+            1536,
+            512,
+            384,
+            512
+          ],
+          "bleedLTRB": [
+            2,
+            2,
+            0,
+            2
+          ]
+        },
+        {
+          "row": 2,
+          "col": 0,
+          "url": "lod2/2-0.webp",
+          "pixelRect": [
+            0,
+            1024,
+            512,
+            56
+          ],
+          "bleedLTRB": [
+            0,
+            2,
+            2,
+            0
+          ]
+        },
+        {
+          "row": 2,
+          "col": 1,
+          "url": "lod2/2-1.webp",
+          "pixelRect": [
+            512,
+            1024,
+            512,
+            56
+          ],
+          "bleedLTRB": [
+            2,
+            2,
+            2,
+            0
+          ]
+        },
+        {
+          "row": 2,
+          "col": 2,
+          "url": "lod2/2-2.webp",
+          "pixelRect": [
+            1024,
+            1024,
+            512,
+            56
+          ],
+          "bleedLTRB": [
+            2,
+            2,
+            2,
+            0
+          ]
+        },
+        {
+          "row": 2,
+          "col": 3,
+          "url": "lod2/2-3.webp",
+          "pixelRect": [
+            1536,
+            1024,
+            384,
+            56
+          ],
+          "bleedLTRB": [
+            2,
+            2,
+            0,
+            0
+          ]
+        }
+      ]
+    },
+    "lod3": {
+      "available": true,
+      "bounds": [
+        480,
+        330,
+        480,
+        240
+      ],
+      "source": "docs/design/map-source/lod3-settlement.png",
+      "sourcePixels": [
+        1920,
+        960
+      ],
+      "pixelsPerWorldUnit": 4.0,
+      "grid": [
+        4,
+        2
+      ],
+      "tiles": [
+        {
+          "row": 0,
+          "col": 0,
+          "url": "lod3/0-0.webp",
+          "pixelRect": [
+            0,
+            0,
+            512,
+            512
+          ],
+          "bleedLTRB": [
+            0,
+            0,
+            2,
+            2
+          ]
+        },
+        {
+          "row": 0,
+          "col": 1,
+          "url": "lod3/0-1.webp",
+          "pixelRect": [
+            512,
+            0,
+            512,
+            512
+          ],
+          "bleedLTRB": [
+            2,
+            0,
+            2,
+            2
+          ]
+        },
+        {
+          "row": 0,
+          "col": 2,
+          "url": "lod3/0-2.webp",
+          "pixelRect": [
+            1024,
+            0,
+            512,
+            512
+          ],
+          "bleedLTRB": [
+            2,
+            0,
+            2,
+            2
+          ]
+        },
+        {
+          "row": 0,
+          "col": 3,
+          "url": "lod3/0-3.webp",
+          "pixelRect": [
+            1536,
+            0,
+            384,
+            512
+          ],
+          "bleedLTRB": [
+            2,
+            0,
+            0,
+            2
+          ]
+        },
+        {
+          "row": 1,
+          "col": 0,
+          "url": "lod3/1-0.webp",
+          "pixelRect": [
+            0,
+            512,
+            512,
+            448
+          ],
+          "bleedLTRB": [
+            0,
+            2,
+            2,
+            0
+          ]
+        },
+        {
+          "row": 1,
+          "col": 1,
+          "url": "lod3/1-1.webp",
+          "pixelRect": [
+            512,
+            512,
+            512,
+            448
+          ],
+          "bleedLTRB": [
+            2,
+            2,
+            2,
+            0
+          ]
+        },
+        {
+          "row": 1,
+          "col": 2,
+          "url": "lod3/1-2.webp",
+          "pixelRect": [
+            1024,
+            512,
+            512,
+            448
+          ],
+          "bleedLTRB": [
+            2,
+            2,
+            2,
+            0
+          ]
+        },
+        {
+          "row": 1,
+          "col": 3,
+          "url": "lod3/1-3.webp",
+          "pixelRect": [
+            1536,
+            512,
+            384,
+            448
+          ],
+          "bleedLTRB": [
+            2,
+            2,
+            0,
+            0
+          ]
+        }
+      ]
+    }
+  }
+}
