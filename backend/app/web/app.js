@@ -7341,11 +7341,12 @@ async function viewInventory() {
   if (!user || charId == null) return;
   const current = () => epoch === navEpoch && S.user === user && S.character
     && S.character.id === charId && "#/inventory" === location.hash;
-  const loading = el("div", { class: "game-state game-state-loading", role: "status" },
-    "Загрузка…");
+  const loading = el("div", { class: "muted" }, "Загрузка…");
+  loading.className = "muted game-state game-state-loading";
+  loading.setAttribute("role", "status");
   app.replaceChildren(inventoryGameShell(loading));
   try {
-    const inv = await api(`/characters/${charId}/inventory`);
+    const inv = await api(`/characters/${S.character.id}/inventory`);
     if (!current()) return;
     const items = Array.isArray(inv) ? inv : (inv.items || []);
     // Real market state: which owned objects already have an active offer —
