@@ -3715,6 +3715,75 @@ button.danger:hover { background: #93301f; }
   .ctx-topbar h1, .ctx-topbar #weather { display: none; }
 }
 
+/* #367: Inventory adopts the shared world dock and #306 game tokens.
+   Two rows reserve dock space; World geometry and root tokens are unchanged. */
+.inventory-game-shell {
+  --w-panel: var(--game-panel);
+  --w-dim: var(--game-dim);
+  --w-text: var(--game-ink);
+  --w-warm: var(--game-warm);
+  --w-accent: var(--game-accent);
+  --w-shadow-panel: 0 12px 32px rgba(48, 39, 31, 0.16), 0 2px 8px rgba(48, 39, 31, 0.10);
+  position: fixed;
+  inset: 0;
+  display: grid;
+  grid-template-rows: minmax(0, 1fr) auto;
+}
+.inventory-shell-scroll {
+  min-width: 0;
+  min-height: 0;
+  width: 100%;
+  max-width: 1100px;
+  margin: 0 auto;
+  padding: 16px;
+  overflow-y: auto;
+  overflow-wrap: anywhere;
+}
+.inventory-shell-header { margin-bottom: 12px; }
+.inventory-shell-header h1 { margin: 0; font-size: 22px; }
+.inventory-shell-header .game-header-meta { margin: 4px 0; }
+.inventory-shell-meta, .inventory-shell-now {
+  margin: 4px 0;
+  color: var(--game-dim);
+  font-size: 14px;
+}
+.inventory-shell-admin { color: var(--game-accent); }
+.inventory-game-shell .inv-shell {
+  --w-panel: var(--game-panel);
+  --w-panel-deep: var(--game-bg);
+  --w-text: var(--game-ink);
+  --w-dim: var(--game-dim);
+  --w-accent: var(--game-accent);
+}
+.inventory-game-shell .inv-shell h2 { font-size: 22px; }
+.inventory-game-shell .game-state button {
+  margin: 8px;
+  min-height: 44px;
+  color: var(--game-ink);
+  background: var(--game-panel);
+  border-color: var(--game-border);
+}
+.inventory-game-shell .game-state button:focus-visible,
+.inventory-game-shell .inventory-shell-admin:focus-visible {
+  outline: 2px solid var(--game-accent);
+  outline-offset: 2px;
+}
+.inventory-game-shell .world-pill {
+  position: static;
+  left: auto;
+  bottom: auto;
+  transform: none;
+  min-width: 0;
+  max-width: calc(100% - 16px);
+  margin: 8px auto max(8px, env(safe-area-inset-bottom, 0px));
+}
+@media (max-width: 720px) {
+  .inventory-shell-scroll { padding: 8px; }
+  .inventory-shell-header { padding: 12px; }
+  .inventory-game-shell .world-pill { width: calc(100% - 16px); margin-bottom: 8px; }
+  .inventory-game-shell .world-pill a { min-width: 0; }
+}
+
 /* #175: connection banner — persistent offline signal driven by consecutive
    pollEvents failures (WS close is routine on navigation, never drives it).
    Warm-warn family on the dark panel bg; fixed top-center, below nothing —
