@@ -1,0 +1,653 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>#354 · Контракт кадра — предварительный концепт</title>
+<style>
+  :root {
+    --bg: #F3ECDF;
+    --panel: #FFF9EF;
+    --ink: #30271F;
+    --dim: #69594C;
+    --accent: #86551E;
+    --accent-hover: #6E4519;
+    --success: #42613E;
+    --warning: #805316;
+    --critical: #A13D32;
+    --border: rgba(48, 39, 31, 0.14);
+    --line: rgba(48, 39, 31, 0.12);
+    --focus: rgba(134, 85, 30, 0.45);
+    --warm: rgba(134, 85, 30, 0.12);
+    --shadow: 0 12px 32px rgba(48, 39, 31, 0.16), 0 2px 8px rgba(48, 39, 31, 0.10);
+    --shadow-soft: 0 2px 8px rgba(48, 39, 31, 0.14);
+    --font-body: system-ui, -apple-system, "Segoe UI", sans-serif;
+    --font-head: Georgia, "Times New Roman", serif;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--ink); font: 16px/1.55 var(--font-body); }
+  h1, h2, h3, h4 { margin: 0; font-family: var(--font-head); font-weight: 400; line-height: 1.16; }
+  h1 { font-size: clamp(30px, 4vw, 46px); }
+  h2 { font-size: 30px; }
+  h3 { font-size: 22px; }
+  h4 { font-size: 17px; }
+  p { margin: 0; }
+  a { color: var(--accent); }
+  button {
+    min-height: 44px;
+    padding: 9px 16px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: var(--panel);
+    color: var(--ink);
+    font: inherit;
+    cursor: pointer;
+  }
+  button:hover { border-color: var(--accent); background: var(--warm); }
+  button:focus-visible, [tabindex]:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+  button:disabled { opacity: 0.55; cursor: default; }
+  [hidden] { display: none !important; }
+
+  .concept-flag {
+    position: sticky;
+    top: 0;
+    z-index: 20;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px 14px;
+    align-items: center;
+    justify-content: center;
+    padding: 8px 16px;
+    border-bottom: 1px solid rgba(161, 61, 50, 0.32);
+    background: #F8E8DC;
+    color: #6B2A22;
+    font-size: 13px;
+    text-align: center;
+  }
+  .page { width: min(1240px, calc(100% - 32px)); margin: 0 auto; padding: 28px 0 72px; }
+  .header { display: grid; gap: 16px; padding: 26px 0 22px; border-bottom: 1px solid var(--line); }
+  .eyebrow { color: var(--accent); font-size: 13px; font-weight: 700; letter-spacing: 0.14em; text-transform: uppercase; }
+  .lede { max-width: 88ch; color: var(--dim); font-size: 18px; }
+  .meta { display: flex; flex-wrap: wrap; gap: 8px; }
+  .pill { display: inline-flex; align-items: center; min-height: 32px; padding: 4px 10px; border: 1px solid var(--border); border-radius: 999px; background: var(--panel); color: var(--dim); font-size: 13px; }
+  .pill strong { color: var(--ink); margin-right: 4px; }
+  .section { display: grid; gap: 14px; margin-top: 42px; padding-top: 10px; border-top: 1px solid var(--line); }
+  .section-head { display: grid; gap: 8px; max-width: 90ch; }
+  .section-head p { color: var(--dim); }
+  .note { padding: 10px 14px; border-left: 3px solid var(--accent); background: var(--warm); color: var(--dim); font-size: 14px; }
+  .note strong { color: var(--ink); }
+  .note-critical { border-left-color: var(--critical); background: rgba(161, 61, 50, 0.08); }
+  .note-warning { border-left-color: var(--warning); background: rgba(128, 83, 22, 0.08); }
+  .note-success { border-left-color: var(--success); background: rgba(66, 97, 62, 0.08); }
+
+  .demo {
+    display: grid;
+    grid-template-columns: minmax(0, 1.5fr) minmax(300px, 0.9fr);
+    gap: 14px;
+    align-items: start;
+  }
+  .state-bar { display: flex; flex-wrap: wrap; gap: 6px; }
+  .state-bar button[aria-pressed="true"] { background: var(--accent); border-color: var(--accent); color: var(--panel); }
+  .state-bar button[aria-pressed="true"]:hover { background: var(--accent-hover); border-color: var(--accent-hover); }
+
+  .frame-card {
+    display: grid;
+    gap: 10px;
+    padding: 12px;
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    background: var(--panel);
+    box-shadow: var(--shadow);
+  }
+  .frame-head { display: flex; flex-wrap: wrap; gap: 8px; align-items: flex-start; justify-content: space-between; }
+  .place { display: grid; gap: 2px; }
+  .place-title { font-family: var(--font-head); font-size: 24px; line-height: 1.1; }
+  .place-sub { color: var(--dim); font-size: 12px; }
+  .badge { padding: 3px 9px; border: 1px solid var(--border); border-radius: 999px; color: var(--dim); font-size: 11px; letter-spacing: 0.05em; text-transform: uppercase; white-space: nowrap; }
+  .badge-current { border-color: rgba(66, 97, 62, 0.5); color: var(--success); }
+  .badge-past { border-color: rgba(128, 83, 22, 0.55); color: var(--warning); }
+  .badge-generating { border-color: rgba(134, 85, 30, 0.5); color: var(--accent); }
+  .badge-unavailable { border-color: rgba(161, 61, 50, 0.5); color: var(--critical); }
+  .badge-unknown { border-style: dashed; color: var(--dim); }
+
+  .visual { position: relative; overflow: hidden; border: 1px solid var(--border); border-radius: 8px; background: #D6DDD8; }
+  .visual svg { display: block; width: 100%; height: auto; }
+  .visual-label {
+    position: absolute;
+    left: 10px;
+    top: 10px;
+    padding: 4px 9px;
+    border: 1px solid rgba(48, 39, 31, 0.2);
+    border-radius: 6px;
+    background: rgba(255, 249, 239, 0.94);
+    color: var(--ink);
+    font-size: 11px;
+  }
+  .visual-time {
+    position: absolute;
+    right: 10px;
+    top: 10px;
+    padding: 4px 9px;
+    border-radius: 6px;
+    background: rgba(255, 249, 239, 0.94);
+    color: var(--ink);
+    font-size: 11px;
+  }
+  .visual-past .visual-label { border-color: rgba(128, 83, 22, 0.55); color: var(--warning); }
+  .visual-generating { display: grid; place-items: center; min-height: 260px; background: #EDE4D5; }
+  .visual-generating .skeleton-box { display: grid; gap: 8px; width: min(360px, 80%); }
+  .skeleton { height: 12px; border-radius: 999px; background: linear-gradient(90deg, rgba(48,39,31,.10), rgba(48,39,31,.18), rgba(48,39,31,.10)); background-size: 200% 100%; animation: shimmer 1.6s linear infinite; }
+  .skeleton:first-child { height: 150px; border-radius: 8px; }
+  @keyframes shimmer { to { background-position: -200% 0; } }
+  .visual-unavailable, .visual-unknown { display: grid; place-items: center; min-height: 260px; padding: 20px; text-align: center; }
+  .visual-unavailable { background: #E7DFD1; }
+  .visual-unknown { background: repeating-linear-gradient(135deg, #EDE4D5 0 10px, #E4DAC8 10px 20px); }
+  .fallback-title { font-family: var(--font-head); font-size: 22px; }
+  .fallback-copy { max-width: 46ch; color: var(--dim); font-size: 13px; }
+  .spinner { display: inline-block; width: 18px; height: 18px; border: 2px solid var(--accent); border-right-color: transparent; border-radius: 50%; animation: spin .9s linear infinite; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  .observation {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px 12px;
+    justify-content: space-between;
+    padding: 8px 10px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: var(--bg);
+    color: var(--dim);
+    font-size: 12px;
+  }
+  .observation strong { color: var(--ink); }
+  .data-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 8px; }
+  .data-cell { display: grid; gap: 1px; padding: 8px 10px; border: 1px solid var(--border); border-radius: 8px; background: var(--panel); }
+  .data-cell .k { color: var(--dim); font-size: 10px; letter-spacing: 0.06em; text-transform: uppercase; }
+  .data-cell .v { font-size: 13px; }
+  .data-cell.unknown .v { color: var(--dim); font-style: italic; }
+  .actions { display: flex; flex-wrap: wrap; gap: 6px; }
+  .actions button { flex: 1 1 auto; font-size: 13px; }
+  .btn-primary { background: var(--accent); border-color: var(--accent); color: var(--panel); }
+  .btn-primary:hover { background: var(--accent-hover); border-color: var(--accent-hover); }
+  .status-line { padding: 8px 10px; border: 1px solid var(--border); border-radius: 8px; background: var(--bg); color: var(--dim); font-size: 12px; min-height: 36px; }
+  .status-line strong { color: var(--ink); }
+  .status-line.ok { border-color: rgba(66, 97, 62, 0.4); color: var(--success); }
+  .status-line.warn { border-color: rgba(128, 83, 22, 0.4); color: var(--warning); }
+  .status-line.err { border-color: rgba(161, 61, 50, 0.4); color: var(--critical); }
+
+  .side { display: grid; gap: 10px; }
+  .side-card { display: grid; gap: 6px; padding: 12px; border: 1px solid var(--border); border-radius: 12px; background: var(--panel); }
+  .side-card p, .side-card li { color: var(--dim); font-size: 13px; }
+  .side-card ul { margin: 0; padding-left: 1.1em; }
+  .side-card li { margin: 3px 0; }
+  .side-card strong { color: var(--ink); }
+  .checklist { list-style: none; padding: 0; }
+  .checklist li { display: grid; grid-template-columns: 20px minmax(0, 1fr); gap: 6px; }
+  .checklist li::before { content: "✓"; color: var(--success); font-weight: 700; }
+
+  .flow { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 8px; }
+  .flow-node { display: grid; gap: 2px; padding: 10px; border: 1px solid var(--border); border-radius: 8px; background: var(--panel); }
+  .flow-node b { font-size: 13px; }
+  .flow-node span { color: var(--dim); font-size: 11px; }
+  .flow-node.current { border-color: rgba(66, 97, 62, 0.5); }
+  .flow-node.generating { border-color: rgba(134, 85, 30, 0.5); }
+  .flow-node.past { border-color: rgba(128, 83, 22, 0.5); }
+  .flow-node.unavailable { border-color: rgba(161, 61, 50, 0.5); }
+  .flow-node.unknown { border-style: dashed; }
+  .transitions { width: 100%; table-layout: fixed; border-collapse: collapse; font-size: 13px; }
+  .transitions th, .transitions td { padding: 7px 9px; border: 1px solid var(--border); text-align: left; vertical-align: top; overflow-wrap: break-word; }
+  .transitions th { background: var(--warm); font-weight: 600; }
+  .transitions td { color: var(--dim); }
+  .transitions td strong { color: var(--ink); }
+  .refs { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 10px; }
+  .ref-card { display: grid; gap: 4px; padding: 12px; border: 1px solid var(--border); border-radius: 10px; background: var(--panel); }
+  .ref-card h4 { font-size: 16px; }
+  .ref-card p { color: var(--dim); font-size: 13px; }
+  .footer { display: grid; gap: 6px; margin-top: 44px; padding-top: 18px; border-top: 1px solid var(--line); color: var(--dim); font-size: 13px; }
+  .footer strong { color: var(--ink); }
+  @media (max-width: 860px) { .demo { grid-template-columns: 1fr; } }
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after { animation-duration: .001ms !important; animation-iteration-count: 1 !important; transition-duration: .001ms !important; }
+  }
+</style>
+</head>
+<body>
+<div class="concept-flag" role="note">
+  <strong>ПРЕДВАРИТЕЛЬНЫЙ КОНЦЕПТ, НЕ УТВЕРЖДЁННЫЙ PRODUCTION-АССЕТ</strong>
+  <span>Issue #354 · design-visual · направление §27.1 «Северный остров — Тёплый вечер» · не Flux-рендер и не игровой факт</span>
+</div>
+
+<main class="page">
+  <header class="header">
+    <div class="eyebrow">ВЛ1: Рейнеке · design-visual · волна 1</div>
+    <h1>Кадр не подтверждает действие</h1>
+    <p class="lede">
+      Контракт трёх различимых состояний кадра: актуальный, исторический снимок и Flux недоступен.
+      Время наблюдения видно на каждом кадре; действия остаются доступны без изображения; неизвестные
+      данные не дополняются догадками.
+    </p>
+    <div class="meta">
+      <span class="pill"><strong>Канон:</strong> Visual Bible §27.1, §36–§41</span>
+      <span class="pill"><strong>Связанные:</strong> #356, #387, #359</span>
+      <span class="pill"><strong>Правило:</strong> изображение ≠ игровой результат</span>
+    </div>
+    <div class="note note-critical">
+      <strong>Главное правило.</strong> Изображение никогда не подтверждает игровое действие.
+      Покупка, перемещение, встреча или изменение состояния подтверждаются только данными мира и
+      явным статусом. Кадр показывает атмосферу и состояние, но не является результатом действия.
+    </div>
+  </header>
+
+  <section class="section" id="demo">
+    <div class="section-head">
+      <h2>Живой контракт состояний</h2>
+      <p>
+        Переключайте состояния и действия. Это локальная демонстрация без сервера: она показывает
+        визуальную грамматику, а не реальную механику. Время наблюдения остаётся на экране во всех
+        состояниях.
+      </p>
+    </div>
+    <div class="state-bar" role="toolbar" aria-label="Состояния кадра">
+      <button type="button" data-state="current" aria-pressed="true">Актуальный</button>
+      <button type="button" data-state="generating" aria-pressed="false">Генерация</button>
+      <button type="button" data-state="past" aria-pressed="false">Прошлый снимок</button>
+      <button type="button" data-state="unavailable" aria-pressed="false">Flux недоступен</button>
+      <button type="button" data-state="unknown" aria-pressed="false">Неизвестные данные</button>
+    </div>
+
+    <div class="demo">
+      <article class="frame-card" aria-label="Демонстрационный кадр">
+        <div class="frame-head">
+          <div class="place">
+            <div class="place-title">Магазин</div>
+            <div class="place-sub">Core Village · удалённый осмотр · герой не перемещён</div>
+          </div>
+          <span class="badge js-badge badge-current">Актуально</span>
+        </div>
+
+        <div class="visual js-visual" data-visual="current">
+          <div class="js-visual-current">
+            <svg viewBox="0 0 760 360" role="img" aria-label="Условный актуальный кадр магазина">
+              <defs>
+                <linearGradient id="sky-current" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="0" stop-color="#D6DDD8"/><stop offset="1" stop-color="#E7DFD1"/>
+                </linearGradient>
+              </defs>
+              <rect width="760" height="360" fill="url(#sky-current)"/>
+              <path d="M0 214 Q130 186 260 204 Q390 220 520 196 Q640 176 760 198 V360 H0Z" fill="#8D9E8C"/>
+              <rect x="0" y="316" width="760" height="44" fill="#B7AC91"/>
+              <rect x="210" y="120" width="340" height="164" fill="#B07A61" stroke="#514D42" stroke-width="2"/>
+              <path d="M184 122 L380 30 L576 122Z" fill="#4C626B" stroke="#3E4B50" stroke-width="3"/>
+              <path d="M210 122 L380 44 L550 122" fill="none" stroke="#EFE1C9" stroke-width="5"/>
+              <rect x="240" y="150" width="56" height="46" fill="#E7E3D6" stroke="#665B50" stroke-width="2"/>
+              <rect x="464" y="150" width="56" height="46" fill="#E7E3D6" stroke="#665B50" stroke-width="2"/>
+              <rect x="352" y="166" width="56" height="118" fill="#53483B" stroke="#3E352B" stroke-width="2"/>
+              <path d="M210 300 H550" stroke="#786B58" stroke-width="5"/>
+              <path d="M300 300 H344 L358 326 H286Z" fill="#AC9B83" stroke="#736B5D" stroke-width="2"/>
+              <rect x="280" y="108" width="100" height="18" fill="#DFD1B5" stroke="#665B50" stroke-width="2"/>
+              <text x="330" y="121" text-anchor="middle" font-family="Arial, sans-serif" font-size="9" fill="#55453A" font-weight="700">МАГАЗИН</text>
+              <text x="28" y="42" font-family="Georgia, serif" font-size="22" fill="#3E4A46">Актуальный кадр</text>
+              <text x="28" y="64" font-family="system-ui, sans-serif" font-size="11" fill="#5C6A66">СОСТОЯНИЕ МИРА · НЕ ПОДТВЕРЖДЕНИЕ ДЕЙСТВИЯ</text>
+            </svg>
+            <span class="visual-label">Актуально · наблюдение 18:40</span>
+            <span class="visual-time">18:40</span>
+          </div>
+          <div class="js-visual-past" hidden>
+            <svg viewBox="0 0 760 360" role="img" aria-label="Условный исторический снимок магазина">
+              <rect width="760" height="360" fill="#D2D0C2"/>
+              <path d="M0 214 Q130 186 260 204 Q390 220 520 196 Q640 176 760 198 V360 H0Z" fill="#8A9684"/>
+              <rect x="0" y="316" width="760" height="44" fill="#B1A68C"/>
+              <rect x="210" y="120" width="340" height="164" fill="#A9755F" stroke="#514D42" stroke-width="2"/>
+              <path d="M184 122 L380 30 L576 122Z" fill="#4A5F67" stroke="#3E4B50" stroke-width="3"/>
+              <path d="M210 122 L380 44 L550 122" fill="none" stroke="#E6D8BF" stroke-width="5"/>
+              <rect x="240" y="150" width="56" height="46" fill="#E3DECF" stroke="#665B50" stroke-width="2"/>
+              <rect x="464" y="150" width="56" height="46" fill="#E3DECF" stroke="#665B50" stroke-width="2"/>
+              <rect x="352" y="166" width="56" height="118" fill="#4F4539" stroke="#3E352B" stroke-width="2"/>
+              <path d="M210 300 H550" stroke="#786B58" stroke-width="5"/>
+              <path d="M300 300 H344 L358 326 H286Z" fill="#AC9B83" stroke="#736B5D" stroke-width="2"/>
+              <rect x="280" y="108" width="100" height="18" fill="#D8C9AF" stroke="#665B50" stroke-width="2"/>
+              <text x="330" y="121" text-anchor="middle" font-family="Arial, sans-serif" font-size="9" fill="#55453A" font-weight="700">МАГАЗИН</text>
+              <text x="28" y="42" font-family="Georgia, serif" font-size="22" fill="#3E4A46">Исторический снимок</text>
+              <text x="28" y="64" font-family="system-ui, sans-serif" font-size="11" fill="#5C6A66">ТА ЖЕ ГЕОМЕТРИЯ · ДРУГОЕ ВРЕМЯ</text>
+            </svg>
+            <span class="visual-label">Снимок · 12:30</span>
+            <span class="visual-time">12:30</span>
+          </div>
+          <div class="js-visual-generating visual-generating" hidden>
+            <div class="skeleton-box" aria-hidden="true"><span class="skeleton"></span><span class="skeleton" style="width:70%"></span><span class="skeleton" style="width:45%"></span></div>
+            <span class="visual-label"><span class="spinner" aria-hidden="true"></span> Готовим кадр по подтверждённому состоянию</span>
+            <span class="visual-time">18:41</span>
+          </div>
+          <div class="js-visual-unavailable visual-unavailable" hidden>
+            <div class="fallback-title">Иллюстрация недоступна</div>
+            <p class="fallback-copy">Flux не ответил. Данные мира и действия сохранены; кадр можно запросить позже.</p>
+            <span class="visual-label">Flux недоступен</span>
+            <span class="visual-time">18:40</span>
+          </div>
+          <div class="js-visual-unknown visual-unknown" hidden>
+            <div class="fallback-title">Данные не подтверждены</div>
+            <p class="fallback-copy">Нет подтверждённого времени, погоды и присутствия. Кадр не генерируется, пока состояние не подтверждено.</p>
+            <span class="visual-label">Неизвестное состояние</span>
+            <span class="visual-time">время не подтверждено</span>
+          </div>
+        </div>
+
+        <div class="observation">
+          <span><strong>Наблюдение:</strong> <span class="js-observation">18:40</span></span>
+          <span>Место: <strong>Магазин</strong> · источник: <span class="js-source">мир</span></span>
+        </div>
+
+        <div class="data-grid">
+          <div class="data-cell"><span class="k">Погода</span><span class="v js-weather">+12°C · дождь</span></div>
+          <div class="data-cell"><span class="k">Подтверждённые люди</span><span class="v js-people">продавец · 1 посетитель</span></div>
+          <div class="data-cell"><span class="k">Действие</span><span class="v js-action">осмотр · без перемещения</span></div>
+          <div class="data-cell"><span class="k">Достоверность</span><span class="v js-truth">подтверждено миром</span></div>
+        </div>
+
+        <div class="actions" role="group" aria-label="Доступные действия">
+          <button type="button" class="btn-primary js-action-btn" data-action="inspect">Осмотреть</button>
+          <button type="button" class="js-action-btn" data-action="move">Пойти сюда</button>
+          <button type="button" class="js-action-btn" data-action="refresh">Обновить кадр</button>
+          <button type="button" class="js-action-btn" data-action="continue">Продолжить без кадра</button>
+          <button type="button" class="js-action-btn" data-action="confirm" hidden>Запросить подтверждение</button>
+        </div>
+        <div class="status-line js-status" aria-live="polite"><strong>Статус:</strong> <span>Показано актуальное состояние. Действия подтверждает мир.</span></div>
+      </article>
+
+      <aside class="side">
+        <section class="side-card">
+          <h4>Что видно всегда</h4>
+          <ul class="checklist">
+            <li>название места и время наблюдения;</li>
+            <li>погода и подтверждённые люди;</li>
+            <li>текущее или прошлое состояние — явной меткой;</li>
+            <li>доступные действия без Flux;</li>
+            <li>источник данных и достоверность.</li>
+          </ul>
+        </section>
+        <section class="side-card">
+          <h4>Три различимых состояния</h4>
+          <p><strong>Актуальный</strong> — наблюдение сейчас, метка «Актуально», время 18:40.</p>
+          <p><strong>Исторический снимок</strong> — метка «Снимок · 12:30», рядом текущее время 18:40; действие «Показать актуальную сцену».</p>
+          <p><strong>Flux недоступен</strong> — честный fallback, данные и действия остаются; «Повторить кадр» и «Продолжить без кадра».</p>
+        </section>
+        <section class="side-card">
+          <h4>Правила</h4>
+          <ul>
+            <li>Изображение не подтверждает покупку, перемещение или встречу.</li>
+            <li>Генерация не запускается на каждом тике; только по запросу или после подтверждённого изменения.</li>
+            <li>Неизвестные данные не заполняются догадками.</li>
+            <li>UI вне кадра; кадр не содержит кнопок и HUD.</li>
+          </ul>
+        </section>
+      </aside>
+    </div>
+  </section>
+  <section class="section" id="states">
+    <div class="section-head">
+      <h2>Набор состояний и переходы</h2>
+      <p>
+        Пять состояний покрывают кадр и данные. Переход всегда объясним: время, запрос, ошибка Flux
+        или отсутствие подтверждения. «Неизвестные данные» и «Flux недоступен» — разные состояния:
+        первое про отсутствие фактов, второе про отсутствие изображения при подтверждённых фактах.
+      </p>
+    </div>
+    <div class="flow" aria-label="Схема состояний">
+      <div class="flow-node current"><b>Актуальный</b><span>наблюдение сейчас · 18:40</span></div>
+      <div class="flow-node past"><b>Исторический снимок</b><span>12:30 · сейчас 18:40</span></div>
+      <div class="flow-node generating"><b>Генерация</b><span>запрос принят · данные подтверждены</span></div>
+      <div class="flow-node unavailable"><b>Flux недоступен</b><span>изображения нет · действия есть</span></div>
+      <div class="flow-node unknown"><b>Неизвестные данные</b><span>факты не подтверждены</span></div>
+    </div>
+    <table class="transitions">
+      <thead><tr><th>Из</th><th>В</th><th>Триггер</th><th>Что видит игрок</th></tr></thead>
+      <tbody>
+        <tr><td><strong>Актуальный</strong></td><td>Исторический снимок</td><td>время прошло / открыт прошлый кадр</td><td>метка «Снимок · 12:30», текущее время 18:40, действие обновления</td></tr>
+        <tr><td><strong>Исторический снимок</strong></td><td>Генерация</td><td>«Показать актуальную сцену» / «Обновить кадр»</td><td>время наблюдения, скелетон, данные подтверждены, действия доступны</td></tr>
+        <tr><td><strong>Генерация</strong></td><td>Актуальный</td><td>кадр готов</td><td>актуальная метка и время; статус не подтверждает игровое действие</td></tr>
+        <tr><td><strong>Генерация</strong></td><td>Flux недоступен</td><td>ошибка/таймаут</td><td>честный fallback, данные и действия сохранены, «Повторить кадр»</td></tr>
+        <tr><td><strong>Актуальный</strong></td><td>Flux недоступен</td><td>Flux выключен/недоступен</td><td>нет изображения, но есть время, погода, люди и действия</td></tr>
+        <tr><td><strong>Flux недоступен</strong></td><td>Генерация</td><td>«Повторить кадр»</td><td>запрос принят; старые данные не выдаются за новый кадр</td></tr>
+        <tr><td><strong>Актуальный / снимок</strong></td><td>Неизвестные данные</td><td>мир не подтвердил время/погоду/людей</td><td>«время не подтверждено», поля без догадок, действия ограничены</td></tr>
+        <tr><td><strong>Неизвестные данные</strong></td><td>Актуальный</td><td>подтверждение получено</td><td>появляются время, погода, люди и актуальная метка</td></tr>
+      </tbody>
+    </table>
+  </section>
+
+  <section class="section" id="rules">
+    <div class="section-head">
+      <h2>Правила достоверности</h2>
+    </div>
+    <div class="grid-2" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));gap:12px">
+      <div class="note note-critical"><strong>1. Изображение ≠ действие.</strong> Кадр не подтверждает покупку, перемещение, встречу, работу или изменение состояния. Результат подтверждается только данными мира и явным статусом.</div>
+      <div class="note note-warning"><strong>2. Никакой генерации на каждом тике.</strong> Кадр запрашивается по необходимости или после подтверждённого изменения; частые тики не запускают Flux.</div>
+      <div class="note"><strong>3. Время наблюдения — всегда.</strong> Актуальный кадр, снимок, генерация и fallback показывают время наблюдения. Неизвестное время честно помечается как неподтверждённое.</div>
+      <div class="note note-success"><strong>4. Fallback работает.</strong> Без Flux доступны осмотр, перемещение по правилам мира и продолжение без кадра. Изображение не блокирует игру.</div>
+      <div class="note"><strong>5. UI вне кадра.</strong> Кнопки, HUD, подписи и needs не встраиваются в изображение; UI остаётся отдельным слоем (§19).</div>
+      <div class="note note-warning"><strong>6. Снимок не выдаётся за сейчас.</strong> Прошлый кадр имеет метку времени и действие обновления; старая геометрия не маскируется под текущее состояние.</div>
+    </div>
+  </section>
+
+  <section class="section" id="refs">
+    <div class="section-head">
+      <h2>Сверка с #356 и #387</h2>
+      <p>
+        Кадр использует постоянную архитектурную идентичность и паспорт места, но не добавляет новые
+        игровые факты. #387 задаёт язык постройки, #356 — паспорт конкретного POI; #354 задаёт
+        правила кадра и достоверности.
+      </p>
+    </div>
+    <div class="refs">
+      <article class="ref-card">
+        <h4>#387 · Архитектурный board</h4>
+        <p>Постоянные признаки: силуэт, крыша, вход, окна, материалы, интерьерные anchors. Погода и свет меняются, геометрия — нет.</p>
+        <a href="387-architecture-board.html">Открыть 387-architecture-board.html</a>
+      </article>
+      <article class="ref-card">
+        <h4>#356 · Паспорт магазина</h4>
+        <p>Паспорт POI разделяет постоянную идентичность, локальные акценты и изменяемые факты. Кадр не превращает декорацию в обещание товара или механики.</p>
+        <a href="356-shop-passport.svg">Открыть 356-shop-passport.svg</a>
+      </article>
+      <article class="ref-card">
+        <h4>#359 · Погодные состояния</h4>
+        <p>Одна геометрия, разные подтверждённые состояния среды. Дождь, вечер и ночь не переписывают архитектуру.</p>
+        <a href="359-weather-state.svg">Открыть 359-weather-state.svg</a>
+      </article>
+    </div>
+    <div class="note">
+      <strong>Граница.</strong> Этот лист не меняет утверждённый экран мира, не вводит новые локации,
+      не объявляет конкретный кадр каноническим и не заменяет визуальную приёмку владельца.
+    </div>
+  </section>
+
+  <footer class="footer">
+    <span><strong>#354 · Контракт кадра.</strong> Предварительный концепт, не утверждённый production-ассет.</span>
+    <span>Источник: docs/VISUAL-BIBLE.md §19, §27.1, §36–§41. Связанные: #356, #359, #387.</span>
+    <span>Правило: изображение никогда не подтверждает игровое действие; генерация не выполняется на каждом тике.</span>
+  </footer>
+</main>
+<script>
+(function () {
+  "use strict";
+
+  var stateButtons = Array.prototype.slice.call(document.querySelectorAll("button[data-state]"));
+  var badge = document.querySelector(".js-badge");
+  var visual = document.querySelector(".js-visual");
+  var observation = document.querySelector(".js-observation");
+  var source = document.querySelector(".js-source");
+  var weather = document.querySelector(".js-weather");
+  var people = document.querySelector(".js-people");
+  var action = document.querySelector(".js-action");
+  var truth = document.querySelector(".js-truth");
+  var statusNode = document.querySelector(".js-status");
+  var refreshTimer = null;
+
+  var config = {
+    current: {
+      badge: "Актуально",
+      badgeClass: "badge-current",
+      visual: "current",
+      observation: "18:40",
+      source: "мир",
+      weather: "+12°C · дождь",
+      people: "продавец · 1 посетитель",
+      action: "осмотр · без перемещения",
+      truth: "подтверждено миром",
+      show: ["inspect", "move", "refresh", "continue"],
+      hide: ["confirm"],
+      refreshLabel: "Обновить кадр",
+      status: "Показано актуальное состояние. Действия подтверждает мир, не кадр."
+    },
+    past: {
+      badge: "Снимок · 12:30",
+      badgeClass: "badge-past",
+      visual: "past",
+      observation: "Снимок 12:30 · сейчас 18:40",
+      source: "исторический снимок",
+      weather: "+14°C · облачно",
+      people: "продавец · 2 посетителя",
+      action: "снимок · не текущее действие",
+      truth: "исторический снимок",
+      show: ["refresh", "continue"],
+      hide: ["inspect", "move", "confirm"],
+      refreshLabel: "Показать актуальную сцену",
+      status: "Это снимок 12:30. Показать актуальную сцену — отдельное действие."
+    },
+    generating: {
+      badge: "Генерация",
+      badgeClass: "badge-generating",
+      visual: "generating",
+      observation: "18:41 · запрос кадра",
+      source: "мир",
+      weather: "+12°C · дождь",
+      people: "продавец · 1 посетитель",
+      action: "осмотр · без перемещения",
+      truth: "данные подтверждены",
+      show: ["inspect", "move", "continue"],
+      hide: ["refresh", "confirm"],
+      status: "Кадр готовится по подтверждённому состоянию. Изображение не подтверждает действие."
+    },
+    unavailable: {
+      badge: "Flux недоступен",
+      badgeClass: "badge-unavailable",
+      visual: "unavailable",
+      observation: "18:40",
+      source: "мир",
+      weather: "+12°C · дождь",
+      people: "продавец · 1 посетитель",
+      action: "осмотр · без перемещения",
+      truth: "подтверждено миром",
+      show: ["inspect", "move", "refresh", "continue"],
+      hide: ["confirm"],
+      refreshLabel: "Повторить кадр",
+      status: "Flux недоступен. Данные и действия сохранены; кадр можно запросить позже."
+    },
+    unknown: {
+      badge: "Неизвестные данные",
+      badgeClass: "badge-unknown",
+      visual: "unknown",
+      observation: "время не подтверждено",
+      source: "нет подтверждения",
+      weather: "нет данных",
+      people: "нет данных",
+      action: "нет данных",
+      truth: "не подтверждено",
+      show: ["confirm", "continue"],
+      hide: ["inspect", "move", "refresh"],
+      status: "Данные не подтверждены. Интерфейс не заполняет неизвестное догадками."
+    }
+  };
+
+  function setStatus(text, kind) {
+    if (!statusNode) return;
+    statusNode.className = "status-line js-status" + (kind ? " " + kind : "");
+    var span = statusNode.querySelector("span");
+    if (span) span.textContent = text;
+  }
+
+  function showActions(show, hide) {
+    var buttons = document.querySelectorAll(".js-action-btn");
+    Array.prototype.forEach.call(buttons, function (button) {
+      var key = button.getAttribute("data-action");
+      if (show.indexOf(key) !== -1) {
+        button.hidden = false;
+      } else if (hide.indexOf(key) !== -1) {
+        button.hidden = true;
+      }
+    });
+  }
+
+  function setState(name) {
+    var conf = config[name];
+    if (!conf) return;
+    stateButtons.forEach(function (button) {
+      button.setAttribute("aria-pressed", button.getAttribute("data-state") === name ? "true" : "false");
+    });
+    if (badge) {
+      badge.className = "badge js-badge " + conf.badgeClass;
+      badge.textContent = conf.badge;
+    }
+    if (visual) visual.setAttribute("data-visual", name);
+    ["current", "past", "generating", "unavailable", "unknown"].forEach(function (key) {
+      var node = document.querySelector(".js-visual-" + key);
+      if (node) node.hidden = key !== conf.visual;
+    });
+    if (observation) observation.textContent = conf.observation;
+    if (source) source.textContent = conf.source;
+    if (weather) weather.textContent = conf.weather;
+    if (people) people.textContent = conf.people;
+    if (action) action.textContent = conf.action;
+    if (truth) truth.textContent = conf.truth;
+    showActions(conf.show, conf.hide);
+    var refreshButton = document.querySelector('button[data-action="refresh"]');
+    if (refreshButton && conf.refreshLabel) refreshButton.textContent = conf.refreshLabel;
+    setStatus(conf.status, name === "unknown" ? "warn" : name === "unavailable" ? "err" : "");
+  }
+
+  function requestRefresh() {
+    if (refreshTimer) window.clearTimeout(refreshTimer);
+    setState("generating");
+    setStatus("Запрос кадра отправлен. Данные мира остаются подтверждёнными.", "warn");
+    refreshTimer = window.setTimeout(function () {
+      setState("current");
+      setStatus("Кадр обновлён. Данные мира не изменились; изображение не подтверждает действие.", "ok");
+      refreshTimer = null;
+    }, 1200);
+  }
+
+  document.addEventListener("click", function (event) {
+    var target = event.target;
+    if (!(target instanceof Element)) return;
+
+    var stateButton = target.closest("button[data-state]");
+    if (stateButton) {
+      if (refreshTimer) {
+        window.clearTimeout(refreshTimer);
+        refreshTimer = null;
+      }
+      setState(stateButton.getAttribute("data-state"));
+      return;
+    }
+
+    var actionButton = target.closest(".js-action-btn");
+    if (!actionButton || actionButton.hidden) return;
+    var kind = actionButton.getAttribute("data-action");
+
+    if (kind === "inspect") {
+      setStatus("Осмотр: герой остаётся на месте. Кадр не подтверждает действие.", "");
+    } else if (kind === "move") {
+      setStatus("Команда перемещения отправлена. До ответа мира герой не перемещён.", "warn");
+    } else if (kind === "refresh") {
+      requestRefresh();
+    } else if (kind === "continue") {
+      setStatus("Продолжаем без кадра. Доступные действия не зависят от изображения.", "ok");
+    } else if (kind === "confirm") {
+      setStatus("Запрос подтверждения отправлен. Пока данных нет; кадр не генерируется.", "warn");
+    }
+  });
+
+  setState("current");
+})();
+</script>
+</body>
+</html>
