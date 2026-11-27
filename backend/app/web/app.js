@@ -2201,6 +2201,23 @@ const PILL_TABS = [
     ["path", { d: "m21 15-5-5L5 21" }]]],
 ];
 
+/* #367: shared destination dock; keep the existing icon registry and the
+   world's exact nav semantics. Rendering a link never submits an action. */
+function gameSectionNav(active) {
+  return el("nav", { class: "world-pill", "aria-label": "Разделы" },
+    ...PILL_TABS.map(([hash, label, icon]) => el("a", {
+      href: hash,
+      class: hash === active ? "active" : "",
+      // #313: the active destination is the current page for assistive
+      // tech. Conditional spread — el() setAttribute()s every prop, so a
+      // null value would render the attribute as the string "null" on
+      // the other eight anchors.
+      ...(hash === active ? { "aria-current": "page" } : {}),
+      title: label,
+      "aria-label": label,
+    }, svgIcon(icon), el("span", {}, label))));
+}
+
 /* #289: the world panel chip shows the bare description — the «Погода: »
    prefix stays a topbar-only affordance (weatherLabel() is untouched). */
 function worldWeatherShort() {
@@ -4065,18 +4082,7 @@ function renderWorld(locs, tasksData) {
 
   // #289: floating nav pill — 9 sections over the map, same routes as the
   // topbar; the world screen renders the pill INSTEAD of the topbar.
-  const worldPill = el("nav", { class: "world-pill", "aria-label": "Разделы" },
-    ...PILL_TABS.map(([hash, label, icon]) => el("a", {
-      href: hash,
-      class: hash === "#/world" ? "active" : "",
-      // #313: the active destination is the current page for assistive
-      // tech. Conditional spread — el() setAttribute()s every prop, so a
-      // null value would render the attribute as the string "null" on
-      // the other eight anchors.
-      ...(hash === "#/world" ? { "aria-current": "page" } : {}),
-      title: label,
-      "aria-label": label,
-    }, svgIcon(icon), el("span", {}, label))));
+  const worldPill = gameSectionNav("#/world");
 
   // #289: «Осмотреть окрестности» floats bottom-right over the map and zooms
   // the Living Map to region LOD (§43.2). Scene inspection keeps its existing
@@ -4524,6 +4530,8 @@ function taskSubmitLineText() {
 function refreshTaskPresentationHosts() {
   const worldHost = document.getElementById("world-now-task-host");
   if (worldHost) worldHost.replaceChildren(taskStatusHostNode());
+  const inventoryHost = document.getElementById("inventory-now-task");
+  if (inventoryHost) inventoryHost.replaceChildren(placeTaskHostNode());
   const placeHost = document.getElementById("place-task-content");
   if (placeHost) placeHost.replaceChildren(placeTaskHostNode());
   const lineText = taskSubmitLineText();
@@ -6189,6 +6197,7 @@ async function pollEvents() {
     }
     if (!S.mapFocusManual && character.location_id != null) S.mapFocusLocationId = character.location_id;
     S.mapLocations = locs;
+    refreshInventoryContext();
     // #305: apply this tick's chat presence verdict from the fresh reads —
     // a stale token (a newer revalidation, render, navigation, session or
     // target) discards itself inside chatApplyValidation.
@@ -7276,12 +7285,68 @@ function invCategoryRu(objectType) {
   return t || "Прочее";
 }
 
+/* #367: warm system shell for the inventory pilot. Context is a read
+   projection of authoritative state, not a new fetch or game action. */
+function inventoryContextText() {
+  const ch = S.character;
+  if (!ch) return "Данные о персонаже недоступны";
+  const name = ch.name || [ch.first_name, ch.last_name].filter(Boolean).join(" ")
+    || "Персонаж";
+  const loc = (S.mapLocations || []).find(l => String(l.id) === String(ch.location_id));
+  const modes = { AUTONOMOUS: "Автономно", GUIDED: "Под руководством", DIRECT: "Вручную" };
+  const mode = Object.prototype.hasOwnProperty.call(modes, ch.control_mode)
+    ? modes[ch.control_mode] : "Режим не уточнён";
+  const money = ch.money ?? ch.balance;
+  return [name, loc && loc.name ? loc.name : "Место не уточнено", mode,
+    money != null ? money + " ₽" : null].filter(Boolean).join(" · ");
+}
+
+function inventoryWeatherText() {
+  if (!S.weather) return " · Погода не уточнена";
+  return worldWeatherChipText() || " · Погода недоступна";
+}
+
+function refreshInventoryContext() {
+  const host = document.getElementById("inventory-character-context");
+  if (!host) return;
+  host.textContent = inventoryContextText();
+  const weather = document.getElementById("weather");
+  if (weather) weather.textContent = inventoryWeatherText();
+}
+
+function inventoryGameShell(content) {
+  const privileged = S.user && ["admin", "developer", "moderator"].includes(S.user.role);
+  const head = el("header", { class: "inventory-shell-header game-panel" },
+    el("h1", {}, "ВЛ1: Рейнеке"),
+    el("p", { id: "inventory-character-context", class: "game-header-meta" },
+      inventoryContextText()),
+    el("div", { class: "inventory-shell-meta" },
+      el("span", { id: "clock" },
+        S.world ? dayTime(S.world.game_timestamp) : clockPendingLabel()),
+      el("span", { id: "weather" }, inventoryWeatherText())),
+    el("p", { class: "inventory-shell-now" }, "Сейчас: ",
+      el("span", { id: "inventory-now-task" }, placeTaskHostNode())),
+    privileged ? el("a", { class: "inventory-shell-admin", href: "#/admin" },
+      "Админ") : null);
+  return el("main", { class: "game-shell inventory-game-shell" },
+    el("div", { class: "inventory-shell-scroll" }, head, content),
+    gameSectionNav("#/inventory"));
+}
+
 async function viewInventory() {
   location.hash = "#/inventory";
-  const loading = el("div", { class: "muted" }, "Загрузка…");
-  app.replaceChildren(topbar("#/inventory"), loading);
+  const epoch = ++navEpoch;
+  const user = S.user;
+  const charId = S.character && S.character.id;
+  if (!user || charId == null) return;
+  const current = () => epoch === navEpoch && S.user === user && S.character
+    && S.character.id === charId && "#/inventory" === location.hash;
+  const loading = el("div", { class: "game-state game-state-loading", role: "status" },
+    "Загрузка…");
+  app.replaceChildren(inventoryGameShell(loading));
   try {
-    const inv = await api(`/characters/${S.character.id}/inventory`);
+    const inv = await api(`/characters/${charId}/inventory`);
+    if (!current()) return;
     const items = Array.isArray(inv) ? inv : (inv.items || []);
     // Real market state: which owned objects already have an active offer —
     // the sell affordance is grounded in the validator's one-offer-per-object
@@ -7291,8 +7356,10 @@ async function viewInventory() {
       const offers = await api("/market/offers?status=active");
       (Array.isArray(offers) ? offers : []).forEach((o) => { listed[o.object_id] = o.price; });
     } catch (e) { /* market read failed: POST errors still surface below */ }
+    if (!current()) return;
     renderInventory(items, listed);
   } catch (e) {
+    if (!current()) return;
     // #93: transient failure — explicit retry instead of a dead «Загрузка…».
     loadRetryNode(loading, () => viewInventory());
     toast(e.message, true);
@@ -7392,7 +7459,7 @@ function renderInventory(items, listed) {
             el("h3", {}, `${cat} · ${rows.length}`),
             ...rows.map((it) => invItemRow(it, listed)))))
     : el("div", { class: "muted" }, "Пусто — купите что-нибудь во Владивостоке");
-  app.replaceChildren(topbar("#/inventory"),
+  app.replaceChildren(inventoryGameShell(
     el("div", { class: "panel inv-shell" },
       el("h2", {}, "Инвентарь"),
       body,
@@ -7403,7 +7470,7 @@ function renderInventory(items, listed) {
         " — что надето, режим одежды и предпросмотр желаемого образа"),
       el("p", { class: "muted" },
         el("a", { href: "#/shop" }, "Рынок"),
-        " — витрина покупки и продажи между персонажами")));
+        " — витрина покупки и продажи между персонажами"))));
 }
 
 
