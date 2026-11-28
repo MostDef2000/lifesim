@@ -7282,7 +7282,103 @@ function invCategoryRu(objectType) {
   const t = String(objectType || "");
   if (/^(food|water)_/.test(t)) return "Провизия";
   if (/^(jacket|boots|hat|clothing_)/.test(t)) return "Одежда";
-  return t || "Прочее";
+  // #368: unknown types are NOT a category — they stay in «Прочее» and are
+  // labelled honestly on the card by invTypeLabel. No invented chip.
+  return "Прочее";
+}
+
+/* #368: local view state. Selection and filters are VIEW-ONLY (zero network):
+   the card grid repaints from the last authoritative snapshot, so picking a
+   card or typing a filter never refetches. Module-level (not S) keeps the
+   pinned S initializer byte-identical and lets the view survive trips to
+   Образ/Рынок and back; the sell draft stays in S.invSellPrice. */
+const INV_UNKNOWN_TYPE = "Неизвестный тип предмета";
+const invView = { selectedId: null, category: "Всё", search: "" };
+const invCache = { items: [], listed: {} };
+
+/* #368: double-submit + stale-response guard. invActionBusy disables the
+   action while its POST is in flight (a second click is a no-op); the
+   generation counter, bumped on every authoritative reload, voids responses
+   from a superseded screen so a late answer never mutates the current view. */
+const invActionBusy = new Set();
+let invActionGen = 0;
+
+function invKnownType(objectType) {
+  const t = String(objectType || "");
+  return /^(food|water)_/.test(t) || /^(jacket|boots|hat|clothing_)/.test(t);
+}
+
+/* #368: localized label only for the seeded known families; anything else is
+   shown honestly as an unknown type plus its raw object_type — never a guess. */
+function invTypeLabel(objectType) {
+  return invKnownType(objectType) ? invCategoryRu(objectType) : INV_UNKNOWN_TYPE;
+}
+
+/* #368: location name is a local read of the already-loaded map projection;
+   when it is not known, the raw id is the honest fallback (selection itself
+   performs no /locations fetch). */
+function invLocationName(locationId) {
+  if (locationId == null) return "—";
+  const loc = (S.mapLocations || []).find(
+    (l) => String(l.id) === String(locationId));
+  return loc && loc.name ? loc.name : "#" + locationId;
+}
+
+/* #368: filter the cached snapshot — pure, local, no request. */
+function invFilteredItems() {
+  const q = String(invView.search || "").trim().toLowerCase();
+  return invCache.items.filter((it) => {
+    if (invView.category !== "Всё"
+        && invCategoryRu(it.object_type) !== invView.category) return false;
+    if (!q) return true;
+    return (invTypeLabel(it.object_type) + " " + String(it.object_type || ""))
+      .toLowerCase().includes(q);
+  });
+}
+
+/* #368: filter bar (category chips + search) — everything runs against the
+   cached snapshot through paint(), so it stays local. */
+function invFilterBar(paint) {
+  const cats = ["Всё"];
+  for (const it of invCache.items) {
+    const cat = invCategoryRu(it.object_type);
+    if (!cats.includes(cat)) cats.push(cat);
+  }
+  const chips = cats.map((cat) => el("button", {
+    type: "button", class: "inv-chip",
+    "aria-pressed": invView.category === cat ? "true" : "false",
+    onclick: () => { invView.category = cat; paint(); },
+  }, cat));
+  const search = el("input", {
+    id: "inv-search", type: "search", class: "inv-search",
+    placeholder: "Поиск по названию", "aria-label": "Поиск по инвентарю",
+    value: invView.search,
+  });
+  // Property handler: the Node DOM harness (#367) exposes no addEventListener.
+  search.oninput = () => { invView.search = search.value; paint(); };
+  return el("div", { class: "inv-filters" },
+    el("div", { class: "inv-chips" }, ...chips), search);
+}
+
+/* #368: the contextual panel always renders; with no selection it explains
+   the local selection instead of fabricating an item. */
+function invSelectedPanel() {
+  const it = invCache.items.find(
+    (x) => String(x.id) === String(invView.selectedId));
+  if (!it) {
+    return el("div", { class: "inv-detail-panel inv-detail-empty" },
+      el("div", { class: "inv-detail-title" }, "Предмет не выбран"),
+      el("p", { class: "muted" },
+        "Выберите карточку — здесь появятся её поля и действия."));
+  }
+  return invDetail(it);
+}
+
+/* #368: the single inventory panel wrapper (the #59/#367 shell literal is
+   emitted once, shared by the ready and unavailable states). */
+function invPanelShell(...children) {
+  return el("div", { class: "panel inv-shell" },
+    el("h2", {}, "Инвентарь"), ...children);
 }
 
 /* #367: warm system shell for the inventory pilot. Context is a read
@@ -7335,7 +7431,17 @@ async function viewInventory() {
   const epoch = ++navEpoch;
   const user = S.user;
   const charId = S.character && S.character.id;
-  if (!user || charId == null) return;
+  if (!user || charId == null) {
+    // #368: an unconfirmed session/character is NOT an empty bag — show the
+    // honest unavailable state instead of a fabricated empty inventory.
+    app.replaceChildren(inventoryGameShell(invPanelShell(
+      el("div", { class: "inv-detail-panel inv-detail-empty" },
+        el("div", { class: "inv-detail-title" }, "Инвентарь недоступен"),
+        el("p", { class: "muted" },
+          "Данные о персонаже недоступны — просмотр закрыт до входа.")))));
+    return;
+  }
+  invActionGen += 1;  // #368: a fresh load voids in-flight action responses
   const current = () => epoch === navEpoch && S.user === user && S.character
     && S.character.id === charId && "#/inventory" === location.hash;
   const loading = el("div", { class: "muted" }, "Загрузка…");
@@ -7365,15 +7471,28 @@ async function viewInventory() {
 }
 
 async function wearToggle(objectId) {
+  // #368: no double submit; a late answer from a superseded view is dropped.
+  if (invActionBusy.has(objectId)) return;
+  invActionBusy.add(objectId);
+  const gen = invActionGen;
+  const epoch = navEpoch;
+  if (location.hash === "#/inventory") renderInventory(invCache.items, invCache.listed);
   try {
     await api("/wear", { method: "POST", body: { object_id: objectId } });
+    invActionBusy.delete(objectId);
+    if (gen !== invActionGen || epoch !== navEpoch) return;
     // #65: re-render the ACTIVE screen after the authoritative toggle —
     // from #/appearance stay there (the typed draft survives via
     // APPEARANCE_DRAFT); every other origin is the inventory (historical
     // behavior). The screen refetches everything — /wear is authoritative.
     if (location.hash === "#/appearance") viewAppearance();
     else viewInventory();
-  } catch (e) { toast(e.message, true); }  // errors keep the screen state
+  } catch (e) {
+    invActionBusy.delete(objectId);
+    if (gen !== invActionGen || epoch !== navEpoch) return;
+    toast(e.message, true);  // errors keep the screen state
+    if (location.hash === "#/inventory") renderInventory(invCache.items, invCache.listed);
+  }
 }
 
 function invSellRow(objectId) {
@@ -7386,81 +7505,137 @@ function invSellRow(objectId) {
   const go = el("button", {
     id: "inv-sell", type: "button",
     onclick: async () => {
+      if (invActionBusy.has(objectId)) return;  // #368: no double submit
       const p = Math.floor(Number(price.value));
       if (!Number.isFinite(p) || p < 1) {
         toast("Цена должна быть целым числом ≥ 1", true);
         return;
       }
+      invActionBusy.add(objectId);
+      const gen = invActionGen;
+      const epoch = navEpoch;
+      go.disabled = true;
       try {
         await api("/market/offers", { method: "POST", body: { object_id: objectId, price: p } });
+        invActionBusy.delete(objectId);
+        // #368: drop a late answer from a superseded view (no mutation).
+        if (gen !== invActionGen || epoch !== navEpoch) return;
         toast("Предмет выставлен на рынок");
         delete S.invSellPrice[objectId];  // #256: the offer is live — the draft price is consumed
         viewInventory();  // refresh state after the authoritative action
-      } catch (e) { toast(e.message, true); }  // errors keep the screen state
+      } catch (e) {
+        invActionBusy.delete(objectId);
+        if (gen !== invActionGen || epoch !== navEpoch) return;
+        toast(e.message, true);  // errors keep the screen state
+        go.disabled = false;
+      }
     },
   }, "Продать");
+  if (invActionBusy.has(objectId)) go.disabled = true;
   return el("span", { class: "inv-sell-row" }, price, go);
 }
 
-function invDetail(it, wearable, isListed) {
-  const box = el("div", { id: "inv-detail", class: "inv-detail-box" },
-    el("div", { class: "muted" }, `Количество: ${it.quantity ?? "—"}`),
-    el("div", { class: "muted" }, `Состояние: ${it.condition ?? "—"}%`));
-  // Location name resolved lazily through the authoritative read model.
-  const locLine = el("div", { class: "muted" }, "Место: …");
-  box.append(locLine);
-  api(`/locations/${it.location_id}`).then((loc) => {
-    locLine.textContent = `Место: ${loc.name || "#" + it.location_id}`;
-  }).catch(() => { locLine.textContent = `Место: #${it.location_id}`; });
-  if (it.worn) {
-    box.append(el("div", { class: "muted" }, `Слот: ${it.slot || "—"}`));
-  }
+function invDetail(it) {
+  const wearable = INV_WEARABLE_TYPES.includes(it.object_type);
+  const listedPrice = invCache.listed[it.id];
+  const isListed = listedPrice != null;
+  const box = el("div", { id: "inv-detail", class: "inv-detail-box inv-detail-panel" },
+    el("div", { class: "inv-detail-title" }, invTypeLabel(it.object_type)),
+    el("div", { class: "muted inv-detail-type" }, String(it.object_type || "")),
+    el("div", { class: "inv-kv" },
+      el("span", {}, "Количество"), el("span", {}, `${it.quantity ?? "—"} шт`)),
+    el("div", { class: "inv-kv" },
+      el("span", {}, "Состояние"),
+      el("span", {}, it.condition != null ? `${it.condition}%` : "—")),
+    el("div", { class: "inv-kv" },
+      el("span", {}, "Состояние носки"), el("span", {}, it.worn ? "надето" : "в запасе")),
+    el("div", { class: "inv-kv" },
+      el("span", {}, "Слот"), el("span", {}, it.slot || "—")),
+    el("div", { class: "inv-kv" },
+      el("span", {}, "Место"), el("span", {}, invLocationName(it.location_id))),
+    el("div", { class: "inv-kv" },
+      el("span", {}, "Рынок"),
+      el("span", {}, isListed ? `Выставлено: ${listedPrice} ₽` : "не выставлен")));
+  const actions = el("div", { class: "inv-actions" });
   if (wearable) {
-    box.append(el("button", {
-      id: "inv-wear", type: "button", onclick: () => wearToggle(it.id),
-    }, it.worn ? "Снять" : "Надеть"));
+    const wear = el("button", { id: "inv-wear", type: "button" },
+      it.worn ? "Снять" : "Надеть");
+    if (invActionBusy.has(it.id)) wear.disabled = true;
+    wear.onclick = () => wearToggle(it.id);
+    actions.append(wear);
   }
-  if (!isListed) {
-    box.append(invSellRow(it.id));
-  }
+  if (!isListed) actions.append(invSellRow(it.id));
+  box.append(actions);
   return box;
 }
 
 function invItemRow(it, listed) {
-  const isOpen = S.invExpanded === it.id;
-  const wearable = INV_WEARABLE_TYPES.includes(it.object_type);
   const isListed = listed[it.id] != null;
-  const row = el("div", {
-    class: "inv-item", "data-object-id": String(it.id),
-    onclick: () => { S.invExpanded = isOpen ? null : it.id; viewInventory(); },
+  const selected = String(invView.selectedId) === String(it.id);
+  const flags = el("span", { class: "inv-item-row" },
+    el("span", { class: "inv-mini" }, `${it.quantity ?? "—"} шт`),
+    el("span", { class: "inv-mini" },
+      it.condition != null ? `${it.condition}%` : "—"),
+    it.worn === true
+      ? el("span", { class: "inv-mini inv-mini-ok" },
+          `надето ${it.slot || ""}`.trim())
+      : null,
+    isListed
+      ? el("span", { class: "inv-mini" }, `лот ${listed[it.id]} ₽`)
+      : null);
+  return el("button", {
+    class: "inv-item", type: "button",
+    "data-object-id": String(it.id),
+    "aria-pressed": selected ? "true" : "false",
+    onclick: () => {
+      // #368: local selection only — repaint from the cached snapshot, no fetch.
+      invView.selectedId = selected ? null : it.id;
+      renderInventory(invCache.items, invCache.listed);
+    },
   },
-    el("span", { class: "inv-item-name" }, `${it.object_type} ×${it.quantity}`),
-    it.worn === true ? el("span", { class: "badge worn" }, `надето ${it.slot || ""}`) : null,
-    isListed ? el("span", { class: "muted" }, `Выставлено: ${listed[it.id]} ₽`) : null,
-    el("span", { class: "muted" }, `#${it.id}`));
-  return el("div", {},
-    row,
-    isOpen ? invDetail(it, wearable, isListed) : null);
+    el("span", { class: "inv-item-name" }, invTypeLabel(it.object_type)),
+    el("span", { class: "muted inv-item-type" }, String(it.object_type || "")),
+    flags);
 }
 
 function renderInventory(items, listed) {
-  const groups = new Map();
-  for (const it of items) {
-    const cat = invCategoryRu(it.object_type);
-    if (!groups.has(cat)) groups.set(cat, []);
-    groups.get(cat).push(it);
-  }
-  const body = items.length
-    ? el("div", { class: "inv-groups" },
-        ...[...groups.entries()].map(([cat, rows]) =>
-          el("div", { class: "inv-group" },
-            el("h3", {}, `${cat} · ${rows.length}`),
-            ...rows.map((it) => invItemRow(it, listed)))))
-    : el("div", { class: "muted" }, "Пусто — купите что-нибудь во Владивостоке");
+  invCache.items = Array.isArray(items) ? items : [];
+  invCache.listed = listed || {};
+  const pane = el("div", { class: "inv-body" });
+  const paint = () => {
+    // #368: repaint only the local view (filters + grid + panel); focus the
+    // rebuilt search field if the user was typing in it.
+    const typing = document.activeElement && document.activeElement.id === "inv-search";
+    const filtered = invFilteredItems();
+    let grid;
+    if (!invCache.items.length) {
+      grid = el("div", { class: "muted" }, "Пусто — купите что-нибудь во Владивостоке");
+    } else if (!filtered.length) {
+      grid = el("div", { class: "inv-empty-filter" },
+        el("div", { class: "muted" }, "Ничего не найдено"),
+        el("button", {
+          type: "button",
+          onclick: () => {
+            invView.category = "Всё"; invView.search = ""; paint();
+          },
+        }, "Сбросить фильтр"));
+    } else {
+      grid = el("div", { class: "inv-group" },
+        ...filtered.map((it) => invItemRow(it, invCache.listed)));
+    }
+    pane.replaceChildren(invFilterBar(paint), grid, invSelectedPanel());
+    if (typing) {
+      const search = document.getElementById("inv-search");
+      if (search) {
+        search.focus();
+        try { search.setSelectionRange(search.value.length, search.value.length); } catch (e) { /* no caret API */ }
+      }
+    }
+  };
+  paint();
   app.replaceChildren(inventoryGameShell(
-    el("div", { class: "panel inv-shell" },
-      el("h2", {}, "Инвентарь"),
-      body,
+    invPanelShell(
+      pane,
       el("p", { class: "muted" },
         "Использование предметов выполняется игровыми действиями (EAT/DRINK)."),
       el("p", { class: "muted" },

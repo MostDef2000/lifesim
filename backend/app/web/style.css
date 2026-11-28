@@ -3784,6 +3784,126 @@ button.danger:hover { background: #93301f; }
   .inventory-game-shell .world-pill a { min-width: 0; }
 }
 
+/* ---------- #368: interactive inventory — card grid + selected panel ----------
+   Scoped to the shared inventory shell (#367). Selection and filters are
+   view-only; the panel shows only real fields. Tokens come from the shell
+   (#59 warm family, remapped to game tokens by .inventory-game-shell). */
+.inventory-game-shell .inv-filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  margin: 8px 0 12px;
+}
+.inventory-game-shell .inv-chips { display: flex; flex-wrap: wrap; gap: 6px; min-width: 0; }
+.inventory-game-shell .inv-chip {
+  min-height: 36px;
+  padding: 4px 12px;
+  border-radius: 999px;
+  font-size: 13px;
+}
+.inventory-game-shell .inv-chip[aria-pressed="true"] {
+  background: var(--w-accent);
+  border-color: var(--w-accent);
+  color: var(--w-warm-ink);
+}
+.inventory-game-shell .inv-search {
+  min-height: 36px;
+  min-width: 0;
+  flex: 1 1 160px;
+  max-width: 320px;
+  padding: 6px 10px;
+  border: 1px solid rgba(120, 96, 64, 0.35);
+  border-radius: 8px;
+  background: var(--w-panel-deep);
+  color: var(--w-text);
+  font: inherit;
+}
+.inventory-game-shell .inv-body {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(220px, 300px);
+  gap: 16px;
+  align-items: start;
+}
+.inventory-game-shell .inv-group {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+  margin-top: 0;
+}
+.inventory-game-shell .inv-item {
+  display: grid;
+  gap: 6px;
+  align-content: start;
+  min-width: 0;
+  min-height: 112px;
+  padding: 10px;
+  border: 1px solid rgba(120, 96, 64, 0.35);
+  border-radius: 12px;
+  background: var(--w-panel);
+  color: var(--w-text);
+  text-align: left;
+  cursor: pointer;
+  overflow-wrap: anywhere;
+}
+.inventory-game-shell .inv-item:hover { border-color: var(--w-accent); }
+.inventory-game-shell .inv-item[aria-pressed="true"] {
+  border-color: var(--w-accent);
+  box-shadow: 0 0 0 3px rgba(201, 138, 46, 0.2);
+  background: #fff6e6;
+}
+.inventory-game-shell .inv-item-name { font-weight: 600; font-size: 14px; }
+.inventory-game-shell .inv-item-type { font-size: 11px; overflow-wrap: anywhere; }
+.inventory-game-shell .inv-item-row { display: flex; flex-wrap: wrap; gap: 4px; }
+.inventory-game-shell .inv-mini {
+  padding: 1px 6px;
+  border: 1px solid rgba(120, 96, 64, 0.35);
+  border-radius: 999px;
+  font-size: 11px;
+  color: var(--w-dim);
+}
+.inventory-game-shell .inv-mini-ok { color: var(--w-text); border-color: var(--w-accent); }
+.inventory-game-shell .inv-detail-panel {
+  display: grid;
+  gap: 8px;
+  align-content: start;
+  min-width: 0;
+  padding: 14px;
+  border: 1px solid rgba(120, 96, 64, 0.35);
+  border-radius: 12px;
+  background: var(--w-panel);
+  overflow-wrap: anywhere;
+}
+.inventory-game-shell #inv-detail { padding: 14px; }
+.inventory-game-shell .inv-detail-title { font-size: 18px; font-weight: 600; }
+.inventory-game-shell .inv-detail-type { font-size: 12px; }
+.inventory-game-shell .inv-kv {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 4px 0;
+  border-bottom: 1px solid rgba(120, 96, 64, 0.2);
+  font-size: 13px;
+}
+.inventory-game-shell .inv-kv:last-child { border-bottom: 0; }
+.inventory-game-shell .inv-kv span:first-child { color: var(--w-dim); }
+.inventory-game-shell .inv-kv span:last-child { text-align: right; }
+.inventory-game-shell .inv-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.inventory-game-shell .inv-actions > * { flex: 1 1 auto; }
+.inventory-game-shell .inv-sell-row { display: flex; gap: 6px; }
+.inventory-game-shell .inv-sell-row input { min-width: 0; flex: 1 1 90px; }
+.inventory-game-shell .inv-detail-empty { color: var(--w-dim); }
+.inventory-game-shell .inv-empty-filter { display: grid; gap: 8px; justify-items: start; }
+@media (max-width: 720px) {
+  .inventory-game-shell .inv-body { grid-template-columns: 1fr; }
+  .inventory-game-shell .inv-group { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .inventory-game-shell .inv-search { max-width: none; }
+}
+
 /* #175: connection banner — persistent offline signal driven by consecutive
    pollEvents failures (WS close is routine on navigation, never drives it).
    Warm-warn family on the dark panel bg; fixed top-center, below nothing —
