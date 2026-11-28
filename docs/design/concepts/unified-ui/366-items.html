@@ -1,0 +1,735 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>#366 · Инвентарь — эталонный системный экран (предварительный концепт)</title>
+<style>
+  :root {
+    --bg: #F3ECDF;
+    --panel: #FFF9EF;
+    --ink: #30271F;
+    --dim: #69594C;
+    --accent: #86551E;
+    --accent-hover: #6E4519;
+    --success: #42613E;
+    --warning: #805316;
+    --critical: #A13D32;
+    --border: rgba(48, 39, 31, 0.14);
+    --line: rgba(48, 39, 31, 0.12);
+    --focus: rgba(134, 85, 30, 0.45);
+    --warm: rgba(134, 85, 30, 0.12);
+    --shadow-panel: 0 12px 32px rgba(48, 39, 31, 0.16), 0 2px 8px rgba(48, 39, 31, 0.10);
+    --shadow-soft: 0 2px 8px rgba(48, 39, 31, 0.14);
+    --r-panel: 12px;
+    --r-control: 8px;
+    --s1: 4px;
+    --s2: 8px;
+    --s3: 12px;
+    --s4: 20px;
+    --s5: 28px;
+    --font-body: system-ui, -apple-system, "Segoe UI", sans-serif;
+    --font-head: Georgia, "Times New Roman", serif;
+  }
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  body { margin: 0; background: var(--bg); color: var(--ink); font: 16px/1.55 var(--font-body); }
+  h1, h2, h3 { margin: 0; font-family: var(--font-head); font-weight: 400; line-height: 1.18; }
+  h1 { font-size: clamp(30px, 4vw, 46px); }
+  h2 { font-size: 30px; }
+  h3 { font-size: 19px; }
+  p { margin: 0; }
+  a { color: var(--accent); }
+  code { padding: 1px 5px; border: 1px solid var(--border); border-radius: 5px; background: var(--warm); font: 0.92em/1.4 ui-monospace, SFMono-Regular, Menlo, monospace; }
+  button {
+    min-height: 44px; padding: 10px 16px; border: 1px solid var(--border); border-radius: var(--r-control);
+    background: var(--panel); color: var(--ink); font: inherit; cursor: pointer;
+  }
+  button:hover { border-color: var(--accent); background: var(--warm); }
+  button:focus-visible, [tabindex]:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+  button:disabled { opacity: 0.55; cursor: default; }
+  button[aria-pressed="true"], button.is-active { background: var(--accent); border-color: var(--accent); color: var(--panel); }
+  button[aria-pressed="true"]:hover, button.is-active:hover { background: var(--accent-hover); border-color: var(--accent-hover); }
+
+  .concept-flag {
+    position: sticky; top: 0; z-index: 50; display: flex; flex-wrap: wrap; gap: var(--s2) var(--s3);
+    align-items: center; justify-content: center; padding: 8px 16px;
+    border-bottom: 1px solid rgba(161, 61, 50, 0.32); background: #F8E8DC; color: #6B2A22;
+    font-size: 13px; line-height: 1.35; text-align: center;
+  }
+  .concept-flag strong { letter-spacing: 0.02em; }
+  .sheet { width: min(1320px, calc(100% - 32px)); margin: 0 auto; padding: 28px 0 72px; }
+  .sheet-header { display: grid; gap: var(--s4); padding: 28px 0 24px; border-bottom: 1px solid var(--line); }
+  .eyebrow { color: var(--accent); font-size: 13px; font-weight: 700; letter-spacing: 0.14em; text-transform: uppercase; }
+  .lede { max-width: 84ch; color: var(--dim); font-size: 18px; }
+  .meta-row { display: flex; flex-wrap: wrap; gap: var(--s2); }
+  .pill {
+    display: inline-flex; gap: 6px; align-items: center; min-height: 32px; padding: 4px 10px;
+    border: 1px solid var(--border); border-radius: 999px; background: var(--panel); color: var(--dim); font-size: 13px;
+  }
+  .pill strong { color: var(--ink); font-weight: 600; }
+  .note { padding: 10px 14px; border-left: 3px solid var(--accent); background: var(--warm); color: var(--dim); font-size: 14px; }
+  .note strong { color: var(--ink); }
+  .note-critical { border-left-color: var(--critical); background: rgba(161, 61, 50, 0.08); }
+  .note-success { border-left-color: var(--success); background: rgba(66, 97, 62, 0.08); }
+  .note-warning { border-left-color: var(--warning); background: rgba(128, 83, 22, 0.08); }
+
+  .toolbar {
+    position: sticky; top: 40px; z-index: 40; display: flex; flex-wrap: wrap; gap: var(--s2);
+    align-items: center; justify-content: space-between; margin: 20px 0; padding: 12px;
+    border: 1px solid var(--border); border-radius: var(--r-panel);
+    background: rgba(255, 249, 239, 0.96); box-shadow: var(--shadow-soft);
+  }
+  .toolbar-group { display: flex; flex-wrap: wrap; gap: var(--s2); align-items: center; }
+  .toolbar-label { color: var(--dim); font-size: 13px; }
+  .toolbar button { padding: 8px 12px; }
+
+  .section { display: grid; gap: var(--s3); margin-top: 44px; padding-top: 8px; border-top: 1px solid var(--line); }
+  .section-head { display: grid; gap: var(--s2); max-width: 88ch; }
+  .section-head p { color: var(--dim); }
+
+  .viewport-stage { display: flex; gap: 20px; align-items: flex-start; width: 100%; overflow: auto; padding: 4px 0 8px; --scale: 1; }
+  .viewport-stage[data-view="desktop"] .frame-mobile, .viewport-stage[data-view="mobile"] .frame-desktop { display: none; }
+  .viewport-stage[data-view="mobile"] { justify-content: center; }
+  .frame-wrap {
+    position: relative; flex: 0 0 auto; width: calc(var(--fw) * var(--scale)); height: calc(var(--fh) * var(--scale) + 22px);
+    overflow: hidden; border: 1px solid var(--border); border-radius: var(--r-panel); background: var(--bg); box-shadow: var(--shadow-panel);
+  }
+  .frame-wrap.frame-desktop { --fw: 1440px; --fh: 900px; }
+  .frame-wrap.frame-mobile { --fw: 390px; --fh: 844px; }
+  .frame { width: var(--fw); height: var(--fh); overflow: hidden; transform: scale(var(--scale)); transform-origin: top left; background: var(--bg); }
+  .frame-label {
+    position: static; display: block; height: 22px; line-height: 22px; padding: 0 8px; border: 1px solid var(--border);
+    border-radius: 6px; background: rgba(255, 249, 239, 0.94); color: var(--dim); font-size: 11px; pointer-events: none;
+  }
+
+  .grid2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: var(--s3); }
+  .rule-card { display: grid; gap: var(--s2); align-content: start; padding: var(--s3); border: 1px solid var(--border); border-radius: var(--r-panel); background: var(--panel); }
+  .rule-card ul { margin: 0; padding-left: 18px; color: var(--dim); font-size: 14px; display: grid; gap: 4px; }
+  .rule-card p { color: var(--dim); font-size: 14px; }
+  table { width: 100%; border-collapse: collapse; font-size: 14px; background: var(--panel); border-radius: var(--r-panel); overflow: hidden; }
+  th, td { padding: 9px 12px; border-bottom: 1px solid var(--line); text-align: left; vertical-align: top; }
+  th { font-size: 12px; letter-spacing: 0.05em; text-transform: uppercase; color: var(--dim); background: var(--bg); }
+  tr:last-child td { border-bottom: 0; }
+  .states-list { display: flex; flex-wrap: wrap; gap: var(--s2); }
+  .states-list button { padding: 8px 12px; }
+  .footer { display: grid; gap: 6px; margin-top: 48px; padding-top: 16px; border-top: 1px solid var(--line); color: var(--dim); font-size: 13px; }
+  .footer strong { color: var(--ink); }
+  [hidden] { display: none !important; }
+
+  /* ===== simulated app ===== */
+  .app { width: 100%; height: 100%; display: grid; grid-template-columns: 270px 1fr; grid-template-rows: 88px 1fr auto; background: var(--bg); }
+  .app .demo-note { grid-column: 1 / -1; grid-row: 3; }
+  .app.m { position: relative; }
+  .app .brand { grid-column: 1; grid-row: 1; display: grid; align-content: center; gap: 2px; padding: 0 20px; border-right: 1px solid var(--line); border-bottom: 1px solid var(--line); background: var(--panel); }
+  .app .brand b { font-family: var(--font-head); font-size: 24px; font-weight: 400; }
+  .app .brand span { color: var(--dim); font-size: 12px; }
+  .app .top { grid-column: 2; grid-row: 1; display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 0 24px; border-bottom: 1px solid var(--line); background: var(--panel); }
+  .app .ctx { display: flex; align-items: center; gap: 12px; }
+  .app .avatar { display: grid; place-items: center; width: 44px; height: 44px; border-radius: 50%; background: var(--warm); color: var(--accent); font-size: 13px; font-weight: 700; }
+  .app .who { display: grid; line-height: 1.25; }
+  .app .who b { font-size: 15px; }
+  .app .who span { color: var(--dim); font-size: 12px; }
+  .app .meta { display: flex; flex-wrap: wrap; gap: 8px; }
+  .app .meta span { padding: 4px 9px; border: 1px solid var(--border); border-radius: 999px; font-size: 12px; color: var(--dim); }
+  .app .rail { grid-column: 1; grid-row: 2; display: grid; align-content: start; gap: 2px; padding: 10px; border-right: 1px solid var(--line); background: var(--panel); }
+  .app .rail button { display: flex; align-items: center; gap: 10px; min-height: 46px; padding: 8px 12px; border: 0; border-radius: 8px; background: transparent; font-size: 14px; color: var(--dim); }
+  .app .rail button:hover { background: var(--warm); }
+  .app .rail button[aria-current="page"] { background: var(--warm); color: var(--accent); font-weight: 700; box-shadow: inset 3px 0 0 var(--accent); }
+  .app .rail .ico { width: 22px; text-align: center; font-size: 16px; }
+  .app .main { grid-column: 2; grid-row: 2; overflow: hidden; display: grid; grid-template-rows: auto auto 1fr; }
+  .app .head { display: flex; flex-wrap: wrap; gap: 12px; align-items: end; justify-content: space-between; padding: 18px 24px 10px; }
+  .app .head h3 { font-size: 30px; }
+  .app .head p { color: var(--dim); font-size: 13px; }
+  .app .counts { display: flex; gap: 6px; flex-wrap: wrap; }
+  .app .counts span { padding: 3px 8px; border: 1px solid var(--border); border-radius: 999px; font-size: 11px; color: var(--dim); }
+  .app .cats { display: flex; flex-wrap: wrap; gap: 6px; padding: 0 24px 10px; border-bottom: 1px solid var(--line); }
+  .app .cats button { min-height: 36px; padding: 4px 12px; border-radius: 999px; font-size: 13px; }
+  .app .body { display: grid; grid-template-columns: minmax(0, 1fr) 340px; gap: 18px; padding: 16px 24px; overflow: hidden; }
+  .app .items { overflow: hidden; display: grid; align-content: start; gap: 10px; }
+  .app .items-head { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; justify-content: space-between; color: var(--dim); font-size: 12px; }
+  .app .search { min-height: 40px; min-width: 220px; padding: 8px 10px; border: 1px solid var(--border); border-radius: 8px; background: var(--panel); color: var(--ink); font: inherit; font-size: 13px; }
+  .app .cards { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; align-content: start; }
+  .app .card { display: grid; gap: 6px; padding: 10px; border: 1px solid var(--border); border-radius: 12px; background: var(--panel); text-align: left; min-height: 128px; }
+  .app .card:hover { border-color: var(--accent); }
+  .app .card[aria-pressed="true"] { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(134, 85, 30, 0.16); background: #FFF6E6; }
+  .app .thumb { height: 46px; border-radius: 8px; background: #EADCC5; display: grid; place-items: center; font-size: 20px; color: var(--accent); }
+  .app .card b { font-size: 13px; line-height: 1.3; }
+  .app .card small { color: var(--dim); font-size: 11px; }
+  .app .card .row { display: flex; flex-wrap: wrap; gap: 4px; }
+  .app .mini { padding: 1px 6px; border-radius: 999px; border: 1px solid var(--border); font-size: 10px; color: var(--dim); }
+  .app .mini.warn { color: var(--warning); border-color: rgba(128, 83, 22, 0.35); background: rgba(128, 83, 22, 0.08); }
+  .app .mini.ok { color: var(--success); border-color: rgba(66, 97, 62, 0.35); background: rgba(66, 97, 62, 0.1); }
+  .app .aside { display: grid; gap: 12px; align-content: start; padding: 14px; border: 1px solid var(--border); border-radius: 12px; background: var(--panel); overflow: hidden; }
+  .app .aside h4 { margin: 0; font-size: 12px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--dim); }
+  .app .aside .big { font-family: var(--font-head); font-size: 22px; line-height: 1.2; }
+  .app .aside .sub { color: var(--dim); font-size: 12px; }
+  .app .hero-img { height: 96px; border-radius: 10px; background: #E7DAC6; display: grid; place-items: center; font-size: 34px; color: var(--accent); }
+  .app .kv { display: flex; justify-content: space-between; gap: 10px; padding: 4px 0; border-bottom: 1px solid var(--line); font-size: 12px; }
+  .app .kv:last-child { border-bottom: 0; }
+  .app .kv span:first-child { color: var(--dim); }
+  .app .kv span:last-child { text-align: right; }
+  .app .actions { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+  .app .actions button { padding: 6px 10px; font-size: 12px; min-height: 40px; }
+  .app .actions button.primary { background: var(--accent); border-color: var(--accent); color: var(--panel); }
+  .app .actions button.primary:hover { background: var(--accent-hover); }
+  .app .status { padding: 8px 10px; border: 1px dashed var(--border); border-radius: 8px; font-size: 11px; color: var(--dim); }
+  .app .status b { color: var(--ink); }
+  .app .status.pending { border-color: rgba(128, 83, 22, 0.4); background: rgba(128, 83, 22, 0.06); }
+  .app .status.ok { border-color: rgba(66, 97, 62, 0.4); background: rgba(66, 97, 62, 0.07); }
+  .app .status.bad { border-color: rgba(161, 61, 50, 0.4); background: rgba(161, 61, 50, 0.06); }
+  .app .sell { display: grid; gap: 6px; }
+  .app .sell input { min-height: 40px; padding: 8px 10px; border: 1px solid var(--border); border-radius: 8px; background: var(--bg); font: inherit; font-size: 13px; width: 100%; }
+  .app .empty { display: grid; gap: 8px; align-content: start; padding: 24px; border: 1px dashed var(--border); border-radius: 12px; background: var(--panel); }
+  .app .empty h4 { margin: 0; font-family: var(--font-head); font-size: 20px; }
+  .app .empty p { color: var(--dim); font-size: 13px; max-width: 48ch; }
+  .app .quiet { display: flex; align-items: center; gap: 8px; color: var(--dim); font-size: 13px; padding: 8px 0; }
+  .app .quiet .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--accent); opacity: 0.7; }
+  .app .skel { height: 128px; border-radius: 12px; background: linear-gradient(90deg, #EFE6D6 0%, #F7F0E4 50%, #EFE6D6 100%); border: 1px solid var(--line); }
+  .app .demo-note { padding: 8px 12px; border-top: 1px solid var(--line); background: rgba(243, 236, 223, 0.6); color: var(--dim); font-size: 11px; display: flex; flex-wrap: wrap; gap: 4px 10px; justify-content: space-between; }
+  .app .demo-note b { color: var(--ink); }
+  .app .toast { position: absolute; left: 24px; bottom: 40px; z-index: 20; max-width: 420px; padding: 10px 14px; border: 1px solid var(--border); border-radius: 10px; background: var(--panel); box-shadow: var(--shadow-soft); font-size: 13px; color: var(--dim); }
+  .app .toast b { color: var(--ink); }
+
+  .app.m { grid-template-columns: 1fr; grid-template-rows: 92px 1fr 78px; }
+  .app.m .brand { display: none; }
+  .app.m .top { grid-column: 1; grid-row: 1; display: grid; align-content: center; gap: 4px; padding: 10px 14px; border-right: 0; }
+  .app.m .avatar { width: 38px; height: 38px; font-size: 12px; }
+  .app.m .who b { font-size: 14px; }
+  .app.m .meta { display: none; }
+  .app.m .main { grid-column: 1; grid-row: 2; }
+  .app.m .head { padding: 12px 14px 6px; gap: 6px; }
+  .app.m .head h3 { font-size: 24px; }
+  .app.m .head p { display: none; }
+  .app.m .counts span:nth-child(2) { display: none; }
+  .app.m .cats { padding: 0 14px 8px; overflow: auto; flex-wrap: nowrap; }
+  .app.m .cats button { white-space: nowrap; }
+  .app.m .body { grid-template-columns: 1fr; gap: 10px; padding: 10px 14px; overflow: hidden; }
+  .app.m .cards { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+  .app.m .card { min-height: 112px; padding: 8px; }
+  .app.m .card .thumb { height: 34px; }
+  .app.m .search { display: none; }
+  .app.m .aside { display: none; }
+  .app.m .aside.is-open { display: grid; position: absolute; left: 10px; right: 10px; bottom: 86px; z-index: 15; max-height: 340px; overflow: auto; box-shadow: var(--shadow-panel); }
+  .app.m .toast { left: 14px; right: 14px; bottom: 90px; }
+  .app.m .demo-note { grid-column: 1; grid-row: 3; display: none; }
+  .app.m .dock { grid-column: 1; grid-row: 3; display: grid; grid-template-columns: repeat(9, 1fr); align-items: center; padding: 6px 4px; border-top: 1px solid var(--line); background: var(--panel); }
+  .app.m .dock button { display: grid; justify-items: center; gap: 2px; min-height: 44px; padding: 2px; border: 0; background: transparent; color: var(--dim); font-size: 9px; }
+  .app.m .dock button[aria-current="page"] { color: var(--accent); font-weight: 700; }
+  .app.m .dock .ico { font-size: 15px; }
+  .app.m .rail { display: none; }
+  .app .dock { display: none; }
+</style>
+</head>
+<body>
+<div class="concept-flag" role="note">
+  <strong>ПРЕДВАРИТЕЛЬНЫЙ КОНЦЕПТ, НЕ УТВЕРЖДЁННЫЙ PRODUCTION-АССЕТ</strong>
+  <span>Issue #366 · эталонный системный экран «Инвентарь» · §27/§27.1 · не production-код и не игровой факт</span>
+</div>
+
+<main class="sheet">
+  <header class="sheet-header">
+    <div class="eyebrow">#366 · системный экран · волна 2</div>
+    <h1>Инвентарь задаёт грамматику системных экранов</h1>
+    <p class="lede">
+      Категории, карточки предметов и контекстная панель выбранного предмета. Только реальные поля:
+      количество, состояние, надетость, слот, место хранения, рыночный лот. Шесть состояний экрана,
+      локальные выбор и фильтры, честное отображение неизвестного типа.
+    </p>
+    <div class="meta-row">
+      <span class="pill"><strong>Канон:</strong> §27, §27.1</span>
+      <span class="pill"><strong>Поля:</strong> quantity · condition · worn · slot · location · market listing</span>
+      <span class="pill"><strong>Основа:</strong> #363, #364</span>
+      <span class="pill"><strong>Part 1/3:</strong> #364 · #366 · #365</span>
+    </div>
+    <div class="note">
+      <strong>Граница артефакта.</strong> Это design handoff, не production-код. Предметы, состояние,
+      цены и лоты — условные демонстрационные данные. Тип предмета показывается локализованно только
+      для известных <code>object_type</code>; неизвестный тип честно помечается, а не выдумывается.
+    </div>
+  </header>
+
+  <div class="toolbar" role="toolbar" aria-label="Управление просмотром инвентаря">
+    <div class="toolbar-group">
+      <span class="toolbar-label">Композиция:</span>
+      <button type="button" data-view="desktop" aria-pressed="true">Desktop 1440×900</button>
+      <button type="button" data-view="mobile" aria-pressed="false">Mobile 390×844</button>
+      <button type="button" data-view="both" aria-pressed="false">Оба рядом</button>
+    </div>
+    <div class="toolbar-group">
+      <span class="toolbar-label">Состояние:</span>
+      <button type="button" data-state="normal" aria-pressed="true">Обычное</button>
+      <button type="button" data-state="selected" aria-pressed="false">Выбрано</button>
+      <button type="button" data-state="empty" aria-pressed="false">Пусто</button>
+      <button type="button" data-state="error" aria-pressed="false">Ошибка</button>
+      <button type="button" data-state="unavailable" aria-pressed="false">Недоступно</button>
+      <button type="button" data-state="loading" aria-pressed="false">Загрузка</button>
+      <button type="button" id="inv-reset">Сбросить демо</button>
+    </div>
+  </div>
+
+  <section class="section" id="screen">
+    <div class="section-head">
+      <h2>Экран</h2>
+      <p>
+        Выбор карточки и смена категории — локальные изменения вида: счётчик запросов к миру не растёт.
+        Действия «надеть» и «выставить» показывают ожидание, а статус и изменение данных появляются
+        только после ответа мира.
+      </p>
+    </div>
+    <div class="viewport-stage" data-view="desktop" id="viewport-stage">
+      <div class="frame-wrap frame-desktop">
+        <span class="frame-label">DESKTOP · 1440×900 · логический размер</span>
+        <div class="frame"><div class="frame-slot" data-frame="desktop"></div></div>
+      </div>
+      <div class="frame-wrap frame-mobile">
+        <span class="frame-label">MOBILE · 390×844</span>
+        <div class="frame"><div class="frame-slot" data-frame="mobile"></div></div>
+      </div>
+    </div>
+    <div class="note note-warning">
+      <strong>Проверяйте:</strong> выбранная карточка отличима от hover; неизвестный тип не получает
+      придуманного названия; при уходе в Образ или на Рынок черновик продажи и рыночный лот сохраняются;
+      во время ожидания карточка не меняет количество и надетость.
+    </div>
+  </section>
+
+  <section class="section" id="model">
+    <div class="section-head">
+      <h2>Модель данных и правила</h2>
+      <p>Инвентарь — эталон: те же поля и состояния переиспользуют Образ, Рынок и карточки в других системных экранах.</p>
+    </div>
+    <div class="grid2">
+      <div class="rule-card">
+        <h3>Реальные поля</h3>
+        <ul>
+          <li><b>quantity</b> — количество, целое число;</li>
+          <li><b>condition</b> — состояние, процент или статус;</li>
+          <li><b>worn</b> — надет ли предмет;</li>
+          <li><b>slot</b> — слот экипировки (только для носимого);</li>
+          <li><b>location</b> — где хранится предмет;</li>
+          <li><b>market listing</b> — активный лот или «не выставлен».</li>
+        </ul>
+        <p>Никаких скрытых «качеств», редкости, звёздочек и бонусов, которых нет в данных.</p>
+      </div>
+      <div class="rule-card">
+        <h3>Тип предмета</h3>
+        <p>Известные <code>object_type</code> получают локализованное название из словаря. Неизвестный тип показывается как «Неизвестный тип предмета» с сырым значением — без догадок.</p>
+        <table>
+          <thead><tr><th>object_type</th><th>Подпись</th></tr></thead>
+          <tbody>
+            <tr><td><code>jacket_work</code></td><td>Рабочая куртка</td></tr>
+            <tr><td><code>boots_rubber</code></td><td>Резиновые сапоги</td></tr>
+            <tr><td><code>hammer</code></td><td>Молоток</td></tr>
+            <tr><td><code>bread</code></td><td>Хлеб</td></tr>
+            <tr><td><code>planks</code></td><td>Доски</td></tr>
+            <tr><td><code>kelp_dried_v2</code></td><td>Неизвестный тип · fallback</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="rule-card">
+        <h3>Статусы только по ответу мира</h3>
+        <p><code>pending</code> → <code>accepted</code> → <code>completed</code> либо <code>failed</code> — это серверные статусы. Интерфейс показывает их лишь после авторитетного ответа и не мутирует инвентарь оптимистично.</p>
+        <div class="note note-critical" style="font-size:13px">
+          <strong>Запрет:</strong> нажатие «Надеть» не переключает <code>worn</code> и не меняет слот до ответа. Во время ожидания кнопка неактивна, данные прежние.
+        </div>
+      </div>
+      <div class="rule-card">
+        <h3>Локальное и сетевое</h3>
+        <ul>
+          <li>выбор карточки — локально, 0 запросов;</li>
+          <li>смена категории — локально, 0 запросов;</li>
+          <li>поиск/фильтр — локально, 0 запросов;</li>
+          <li>действия с предметом — запрос к миру и ответ;</li>
+          <li>переходы Образ/Рынок — смена экрана, черновик сохраняется.</li>
+        </ul>
+        <p>Счётчики внизу кадра показывают это различие явно.</p>
+      </div>
+    </div>
+  </section>
+
+  <footer class="footer">
+    <span><strong>#366 · Инвентарь.</strong> Предварительный концепт, не утверждённый production-ассет.</span>
+    <span>Источники: docs/VISUAL-BIBLE.md §27, §27.1; #363 component sheet; #364 навигация; SVG-борд 366-items.svg.</span>
+    <span>Связанные: #372 Образ, #373 Рынок, #365 пилот. Данные условны; приёмка владельцем — отдельный шаг.</span>
+  </footer>
+</main>
+
+<script>
+(function () {
+  "use strict";
+
+  var stage = document.getElementById("viewport-stage");
+  var viewButtons = Array.prototype.slice.call(document.querySelectorAll("button[data-view]"));
+  var stateButtons = Array.prototype.slice.call(document.querySelectorAll("button[data-state]"));
+
+  /* ---------- viewport ---------- */
+  function fitFrames() {
+    var view = stage.getAttribute("data-view") || "desktop";
+    var available = Math.max(240, stage.clientWidth - 4);
+    var total = view === "desktop" ? 1440 : view === "mobile" ? 390 : 1440 + 390 + 20;
+    stage.style.setProperty("--scale", String(Math.max(0.2, Math.min(1, available / total))));
+  }
+  function setView(view) {
+    stage.setAttribute("data-view", view);
+    viewButtons.forEach(function (b) { b.setAttribute("aria-pressed", b.getAttribute("data-view") === view ? "true" : "false"); });
+    fitFrames();
+  }
+  viewButtons.forEach(function (b) { b.addEventListener("click", function () { setView(b.getAttribute("data-view")); }); });
+
+  /* ---------- demo data ---------- */
+  var TYPE = {
+    jacket_work: "Рабочая куртка",
+    boots_rubber: "Резиновые сапоги",
+    hammer: "Молоток",
+    bread: "Хлеб",
+    planks: "Доски"
+  };
+  var ITEMS = [
+    { id: "jacket", object_type: "jacket_work", category: "Одежда", icon: "◨", quantity: 1, condition: 78, worn: false, slot: "Верх", location: "Дом · шкаф", listing: null },
+    { id: "boots", object_type: "boots_rubber", category: "Одежда", icon: "◩", quantity: 1, condition: 55, worn: true, slot: "Обувь", location: "Дом · прихожая", listing: { id: "L-12", price: 180 } },
+    { id: "hammer", object_type: "hammer", category: "Инструменты", icon: "⚒", quantity: 1, condition: 91, worn: false, slot: null, location: "Мастерская · верстак", listing: null },
+    { id: "bread", object_type: "bread", category: "Еда", icon: "◒", quantity: 3, condition: 100, worn: false, slot: null, location: "Кухня · хлебница", listing: null },
+    { id: "planks", object_type: "planks", category: "Материалы", icon: "▤", quantity: 12, condition: 100, worn: false, slot: null, location: "Сарай · стеллаж", listing: { id: "L-9", price: 40 } },
+    { id: "kelp", object_type: "kelp_dried_v2", category: "Особые", icon: "◌", quantity: 2, condition: 64, worn: false, slot: null, location: "Кладовая · полка", listing: null }
+  ];
+  var CATS = ["Всё", "Одежда", "Инструменты", "Еда", "Материалы", "Особые"];
+  var NAV = ["Мир", "Чат", "Люди", "Инвентарь", "Рынок", "Дела", "Цель", "Профиль", "Образ"];
+  var ICON = { "Мир": "◎", "Чат": "✉", "Люди": "☺", "Инвентарь": "▣", "Рынок": "◇", "Дела": "✎", "Цель": "⚑", "Профиль": "☰", "Образ": "◧" };
+
+  var S = {
+    view: "normal",
+    category: "Всё",
+    selected: "jacket",
+    items: ITEMS.map(function (i) { return Object.assign({}, i); }),
+    status: {},          // itemId -> {status, note}
+    inFlight: {},        // itemId -> true
+    sellDraft: "220",
+    listingDraft: "",
+    route: "inventory",
+    localViews: 0,
+    worldCalls: 0,
+    toast: "Демонстрационные данные. Реальная симуляция не подключена.",
+    generation: 0
+  };
+
+  function esc(v) {
+    return String(v == null ? "" : v).replace(/[&<>"']/g, function (c) {
+      return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c];
+    });
+  }
+  function typeLabel(item) {
+    return TYPE[item.object_type] || "Неизвестный тип предмета";
+  }
+  function isUnknown(item) { return !TYPE[item.object_type]; }
+  function byId(id) { return S.items.filter(function (i) { return i.id === id; })[0]; }
+  function price(v) { return v == null ? "—" : String(v).replace(/\B(?=(\d{3})+(?!\d))/g, " ") + " ₽"; }
+
+  function filteredItems() {
+    return S.items.filter(function (i) {
+      if (S.category !== "Всё" && i.category !== S.category) return false;
+      return true;
+    });
+  }
+
+  function statusBadge(item) {
+    var st = S.status[item.id];
+    if (!st) return "";
+    var cls = st.status === "failed" ? "bad" : st.status === "pending" ? "pending" : "ok";
+    var label = st.status === "pending" ? "pending · мир обрабатывает" : st.status === "accepted" ? "accepted · подтверждено" : st.status === "completed" ? "completed · завершено" : "failed · отказ";
+    return '<div class="status ' + cls + '"><b>' + esc(label) + '</b><br>' + esc(st.note || "") + "</div>";
+  }
+
+  function actionDisabled(item) {
+    if (S.inFlight[item.id]) return " disabled";
+    if (S.route !== "inventory") return " disabled";
+    return "";
+  }
+
+  function card(item) {
+    var qty = item.quantity > 1 ? "× " + item.quantity : "1 шт";
+    var cond = item.condition == null ? "—" : item.condition + "%";
+    var flags = [];
+    if (item.worn) flags.push('<span class="mini ok">надето</span>');
+    if (item.listing) flags.push('<span class="mini">лот ' + esc(item.listing.id) + "</span>");
+    return '<button type="button" class="card" data-act="select" data-id="' + esc(item.id) + '" aria-pressed="' + (S.selected === item.id ? "true" : "false") + '">' +
+      '<span class="thumb" aria-hidden="true">' + item.icon + "</span>" +
+      "<b>" + esc(typeLabel(item)) + "</b>" +
+      "<small>" + (isUnknown(item) ? "object_type: " + esc(item.object_type) : esc(item.object_type)) + "</small>" +
+      '<span class="row"><span class="mini">' + qty + '</span><span class="mini">' + cond + "</span>" + flags.join("") + "</span>" +
+      "</button>";
+  }
+
+  function aside(item) {
+    if (!item) {
+      return '<aside class="aside"><h4>Предмет не выбран</h4><p class="sub">Выберите карточку — поля появятся здесь. Выбор локален и не создаёт сетевых запросов.</p></aside>';
+    }
+    var worn = item.worn ? "да" : "нет";
+    var slot = item.slot || "—";
+    var list = item.listing ? "лот " + esc(item.listing.id) + " · " + price(item.listing.price) : "не выставлен";
+    var status = statusBadge(item);
+    var unknown = isUnknown(item)
+      ? '<div class="status bad"><b>Неизвестный тип предмета</b><br>object_type: ' + esc(item.object_type) + "</div>"
+      : "";
+    return '<aside class="aside">' +
+      '<div class="hero-img" aria-hidden="true">' + item.icon + "</div>" +
+      '<div><div class="big">' + esc(typeLabel(item)) + '</div><div class="sub">' + esc(item.category) + (isUnknown(item) ? " · неизвестный object_type" : " · " + esc(item.object_type)) + "</div></div>" +
+      unknown +
+      '<div><div class="kv"><span>quantity</span><span>' + esc(item.quantity) + " шт</span></div>" +
+      '<div class="kv"><span>condition</span><span>' + (item.condition == null ? "—" : esc(item.condition) + "%") + "</span></div>" +
+      '<div class="kv"><span>worn</span><span>' + worn + "</span></div>" +
+      '<div class="kv"><span>slot</span><span>' + esc(slot) + "</span></div>" +
+      '<div class="kv"><span>location</span><span>' + esc(item.location) + "</span></div>" +
+      '<div class="kv"><span>market listing</span><span>' + list + "</span></div></div>" +
+      status +
+      '<div class="actions">' +
+      '<button type="button" data-act="wear" data-id="' + esc(item.id) + '"' + actionDisabled(item) + ">" + (item.worn ? "Снять" : "Надеть") + "</button>" +
+      '<button type="button" data-act="appearance" data-id="' + esc(item.id) + '"' + actionDisabled(item) + ">В Образ</button>" +
+      '<button type="button" data-act="market" data-id="' + esc(item.id) + '"' + actionDisabled(item) + ">На Рынок</button>" +
+      '<button type="button" data-act="sell" data-id="' + esc(item.id) + '"' + actionDisabled(item) + ">Выставить</button>" +
+      "</div>" +
+      '<div class="sell"><label class="sub" for="sell-price">черновик цены</label><input id="sell-price" data-act="sell-draft" type="text" inputmode="numeric" value="' + esc(S.sellDraft) + '"></div>' +
+      '<label class="sub" style="display:flex;gap:6px;align-items:center"><input type="checkbox" data-act="fail-toggle"' + (S.failNext ? " checked" : "") + "> смоделировать отказ мира</label>" +
+      '<div class="sub">Черновик и лот сохраняются при переходе на Рынок и обратно.</div>' +
+      '<div class="status"><b>Серверные статусы:</b> pending / accepted / completed / failed появляются только после ответа мира. Оптимистичной мутации нет.</div>' +
+      "</aside>";
+  }
+
+  function emptyPanel(mode) {
+    var copy = {
+      empty: ["Инвентарь пуст", "В этой категории нет предметов. Сбросьте фильтр — данные не меняются, это локальный вид."],
+      error: ["Не удалось загрузить инвентарь", "Ответ мира не получен. Повтор — явное действие; показанные данные не считаются подтверждёнными."],
+      unavailable: ["Инвентарь недоступен", "Сессия не подтверждена. Просмотр закрыт до входа; это не пустой инвентарь."]
+    }[mode];
+    return '<div class="empty"><h4>' + copy[0] + "</h4><p>" + copy[1] + "</p>" +
+      (mode === "empty" ? '<button type="button" data-act="reset-filter">Сбросить фильтр</button>' : "") +
+      (mode === "error" ? '<button type="button" data-act="retry">Повторить</button>' : "") +
+      (mode === "unavailable" ? '<button type="button" data-act="noop">Войти</button>' : "") +
+      "</div>";
+  }
+
+  function skeleton() {
+    return '<div class="quiet"><span class="dot"></span><span>Загружаем инвентарь…</span></div>' +
+      '<div class="cards"><div class="skel"></div><div class="skel"></div><div class="skel"></div><div class="skel"></div><div class="skel"></div><div class="skel"></div></div>';
+  }
+
+  function headerLine() {
+    var n = S.items.length;
+    return '<div class="counts"><span>предметов: ' + n + "</span><span>категория: " + esc(S.category) + "</span><span>демо-данные</span></div>";
+  }
+
+  function mainMarkup() {
+    if (S.view === "error") {
+      return '<div class="head"><div><h3>Инвентарь</h3><p>Системный экран · §27</p></div>' + headerLine() + "</div>" +
+        '<div class="cats">' + CATS.map(function (c) { return '<button type="button" data-act="cat" data-cat="' + esc(c) + '" aria-pressed="' + (S.category === c ? "true" : "false") + '">' + esc(c) + "</button>"; }).join("") + "</div>" +
+        '<div class="body"><div class="items">' + emptyPanel("error") + '</div><aside class="aside">' + emptyPanel("error") + "</aside></div>";
+    }
+    if (S.view === "unavailable") {
+      return '<div class="head"><div><h3>Инвентарь</h3><p>Системный экран · §27</p></div>' + headerLine() + "</div>" +
+        '<div class="cats">' + CATS.map(function (c) { return '<button type="button" data-act="cat" data-cat="' + esc(c) + '" aria-pressed="' + (S.category === c ? "true" : "false") + '">' + esc(c) + "</button>"; }).join("") + "</div>" +
+        '<div class="body"><div class="items">' + emptyPanel("unavailable") + '</div><aside class="aside">' + emptyPanel("unavailable") + "</aside></div>";
+    }
+    if (S.view === "loading") {
+      return '<div class="head"><div><h3>Инвентарь</h3><p>Системный экран · §27</p></div>' + headerLine() + "</div>" +
+        '<div class="cats">' + CATS.map(function (c) { return '<button type="button" data-act="cat" data-cat="' + esc(c) + '" aria-pressed="' + (S.category === c ? "true" : "false") + '">' + esc(c) + "</button>"; }).join("") + "</div>" +
+        '<div class="body"><div class="items">' + skeleton() + "</div><aside class=\"aside\"><h4>Загрузка</h4><p class=\"sub\">Тихая строка ожидания, без спиннеров и блокировки навигации.</p></aside></div>";
+    }
+    var items = filteredItems();
+    var grid = items.length ? '<div class="cards">' + items.map(card).join("") + "</div>" : emptyPanel("empty");
+    var sel = byId(S.selected);
+    var selectedOpen = S.view === "selected" || !!sel;
+    return '<div class="head"><div><h3>Инвентарь</h3><p>Системный экран · §27</p></div>' + headerLine() + "</div>" +
+      '<div class="cats">' + CATS.map(function (c) { return '<button type="button" data-act="cat" data-cat="' + esc(c) + '" aria-pressed="' + (S.category === c ? "true" : "false") + '">' + esc(c) + "</button>"; }).join("") + "</div>" +
+      '<div class="body"><div class="items"><div class="items-head"><span>Карточки предметов · ' + items.length + ' из ' + S.items.length + '</span><span>фильтр по категории — локально</span></div>' + grid + "</div>" +
+      aside(selectedOpen ? sel : null).replace('class="aside"', 'class="aside' + (sel ? " is-open" : "") + '"') + "</div>";
+  }
+
+  function screen(variant) {
+    var nav = NAV.map(function (n) {
+      return '<button type="button" data-act="nav" data-nav="' + n + '"' + (n === "Инвентарь" ? ' aria-current="page"' : "") + '><span class="ico" aria-hidden="true">' + ICON[n] + "</span><span>" + n + "</span></button>";
+    }).join("");
+    var top = '<header class="top"><div class="ctx"><span class="avatar" aria-hidden="true">АМ</span><span class="who"><b>Алиса Морозова</b><span>Фермер · Дом · День 17</span></span></div><div class="meta"><span><b>18:40</b></span><span>+12°C</span><span>Автономно</span><span><b>1 000 ₽</b></span></div></header>';
+    var body = S.route === "market" ? marketMarkup() : S.route === "appearance" ? appearanceMarkup() : mainMarkup();
+    return '<div class="app ' + (variant === "mobile" ? "m" : "") + '">' +
+      '<div class="brand"><b>ВЛ1: Рейнеке</b><span>Северный остров · Тёплый вечер</span></div>' + top +
+      (variant === "mobile" ? '<div class="main">' + body + "</div>" : '<nav class="rail" aria-label="Основная навигация">' + nav + '</nav><div class="main">' + body + "</div>") +
+      (variant === "mobile" ? '<nav class="dock" aria-label="Основная навигация">' + nav + "</nav><div class=\"demo-note\"></div>" : '<div class="demo-note"><span>Локальных перерисовок: <b data-local>' + S.localViews + "</b> · Запросов к миру: <b data-world>" + S.worldCalls + "</b></span><span>Выбор/фильтр — 0 сетевых запросов · демо-данные</span></div>") +
+      '<div class="toast" data-toast><b>Демо.</b> ' + esc(S.toast) + "</div>" +
+      "</div>";
+  }
+
+  function marketMarkup() {
+    var item = byId(S.selected);
+    return '<div class="head"><div><h3>Рынок</h3><p>Переход из Инвентаря · черновик сохраняется</p></div><div class="counts"><span>лот: ' + (item && item.listing ? esc(item.listing.id) : "не выставлен") + "</span></div></div>" +
+      '<div class="cats"><button type="button" data-act="back-inv">← Назад в Инвентарь</button></div>' +
+      '<div class="body"><div class="items"><div class="empty"><h4>Витрина и лоты</h4><p>Экран Рынка открыт из Инвентаря. Черновик цены «' + esc(S.sellDraft) + '» и рыночный лот сохранены в состоянии — вернитесь и убедитесь.</p><button type="button" data-act="back-inv">Вернуться в Инвентарь</button></div></div>' +
+      '<aside class="aside"><h4>Черновик продажи</h4><div class="big">' + price(S.sellDraft) + '</div><p class="sub">Значение перенесено из Инвентаря без потери.</p><div class="kv"><span>Предмет</span><span>' + esc(item ? typeLabel(item) : "—") + '</span></div><div class="kv"><span>Лот</span><span>' + (item && item.listing ? "лот " + esc(item.listing.id) : "не выставлен") + "</span></div></aside></div>";
+  }
+
+  function appearanceMarkup() {
+    var item = byId(S.selected);
+    return '<div class="head"><div><h3>Образ</h3><p>Переход из Инвентаря · надетость из данных</p></div><div class="counts"><span>worn: ' + (item && item.worn ? "да" : "нет") + "</span></div></div>" +
+      '<div class="cats"><button type="button" data-act="back-inv">← Назад в Инвентарь</button></div>' +
+      '<div class="body"><div class="items"><div class="empty"><h4>Слоты образа</h4><p>Предмет «' + esc(item ? typeLabel(item) : "—") + '» показан в слоте «' + esc(item && item.slot ? item.slot : "—") + '». Надетость меняется только ответом мира; экран Образ лишь отражает подтверждённое.</p><button type="button" data-act="back-inv">Вернуться в Инвентарь</button></div></div>' +
+      '<aside class="aside"><h4>Контекст</h4><div class="kv"><span>Предмет</span><span>' + esc(item ? typeLabel(item) : "—") + '</span></div><div class="kv"><span>Слот</span><span>' + esc(item && item.slot ? item.slot : "—") + '</span></div><div class="kv"><span>Черновик</span><span>' + esc(S.sellDraft) + "</span></div></aside></div>";
+  }
+
+  /* ---------- rendering ---------- */
+  function render() {
+    Array.prototype.forEach.call(document.querySelectorAll("[data-frame]"), function (slot) {
+      slot.innerHTML = screen(slot.getAttribute("data-frame"));
+    });
+    stateButtons.forEach(function (b) { b.setAttribute("aria-pressed", b.getAttribute("data-state") === S.view ? "true" : "false"); });
+  }
+
+  /* ---------- world action simulation ---------- */
+  function respond(itemId, kind) {
+    if (S.inFlight[itemId]) return;
+    S.inFlight[itemId] = true;
+    S.status[itemId] = null;
+    S.toast = "Запрос отправлен. Статус появится только после ответа мира.";
+    render();
+    var gen = S.generation;
+    S.worldCalls += 1;
+    setTimeout(function () {
+      if (gen !== S.generation) return;
+      S.status[itemId] = { status: "pending", note: "Мир принял запрос; данные ещё не изменены." };
+      S.toast = "Ответ мира: pending. Предмет пока не изменён.";
+      render();
+      setTimeout(function () {
+        if (gen !== S.generation) return;
+        S.inFlight[itemId] = false;
+        if (S.failNext) {
+          S.status[itemId] = { status: "failed", note: "Мир отказал. Инвентарь не изменён." };
+          S.toast = "Ответ мира: failed. Мутации нет.";
+        } else {
+          var item = byId(itemId);
+          if (item) {
+            if (kind === "wear") {
+              item.worn = !item.worn;
+              S.status[itemId] = { status: "accepted", note: item.worn ? "Предмет надет по ответу мира." : "Предмет снят по ответу мира." };
+            } else {
+              item.listing = { id: "L-" + (20 + Math.floor(Math.random() * 70)), price: Number(String(S.sellDraft).replace(/[^\d]/g, "")) || 0 };
+              S.status[itemId] = { status: "accepted", note: "Лот создан по ответу мира." };
+            }
+            S.toast = "Ответ мира: accepted. Изменение применено после ответа.";
+          }
+        }
+        render();
+        setTimeout(function () {
+          if (gen !== S.generation) return;
+          if (S.status[itemId] && S.status[itemId].status === "accepted") {
+            S.status[itemId] = { status: "completed", note: "Мир завершил операцию." };
+            render();
+          }
+        }, 650);
+      }, 750);
+    }, 420);
+  }
+
+  /* ---------- delegated events ---------- */
+  function onClick(e) {
+    var t = e.target.closest("[data-act]");
+    if (!t) return;
+    var act = t.getAttribute("data-act");
+    if (act === "select") {
+      S.selected = t.getAttribute("data-id");
+      S.localViews += 1;
+      S.toast = "Выбран предмет. Локальное изменение вида, без запроса к миру.";
+      render();
+    } else if (act === "cat") {
+      S.category = t.getAttribute("data-cat");
+      S.localViews += 1;
+      S.toast = "Категория «" + S.category + "» — локальный фильтр, 0 сетевых запросов.";
+      render();
+    } else if (act === "reset-filter") {
+      S.category = "Всё";
+      S.localViews += 1;
+      render();
+    } else if (act === "wear") {
+      respond(t.getAttribute("data-id"), "wear");
+    } else if (act === "sell") {
+      respond(t.getAttribute("data-id"), "list");
+    } else if (act === "appearance") {
+      S.route = "appearance";
+      S.toast = "Переход в Образ. Черновик и лот сохранены.";
+      render();
+    } else if (act === "market") {
+      S.route = "market";
+      S.toast = "Переход на Рынок. Черновик продажи и лот сохранены.";
+      render();
+    } else if (act === "back-inv") {
+      S.route = "inventory";
+      S.toast = "Возврат в Инвентарь: выбор, черновик и лот на месте.";
+      render();
+    } else if (act === "retry") {
+      S.view = "loading";
+      S.worldCalls += 1;
+      render();
+      setTimeout(function () { S.view = "normal"; render(); }, 900);
+    } else if (act === "noop") {
+      S.toast = "Вход — отдельный экран; демонстрация не выполняет вход.";
+      render();
+    } else if (act === "nav") {
+      var nav = t.getAttribute("data-nav");
+      if (nav === "Инвентарь") { S.route = "inventory"; render(); }
+      else { S.toast = "В демонстрации активен только Инвентарь. Навигация описана в #364."; render(); }
+    }
+  }
+  function onInput(e) {
+    var t = e.target.closest("[data-act]");
+    if (!t) return;
+    if (t.getAttribute("data-act") === "sell-draft") {
+      S.sellDraft = t.value;
+    }
+    if (t.getAttribute("data-act") === "search") {
+      S.localViews += 1;
+      S.toast = "Локальный поиск по названию; сетевых запросов нет.";
+    }
+  }
+  function onKey(e) {
+    if (e.key === "Escape" && S.route !== "inventory") { S.route = "inventory"; S.toast = "Esc: возврат в Инвентарь, состояние сохранено."; render(); }
+  }
+  function onChange(e) {
+    var t = e.target.closest("[data-act]");
+    if (!t) return;
+    if (t.getAttribute("data-act") === "fail-toggle") {
+      S.failNext = !!t.checked;
+      S.toast = S.failNext ? "Следующий ответ мира будет отказом — без мутации инвентаря." : "Следующий ответ мира — обычный.";
+      render();
+    }
+  }
+
+  document.addEventListener("click", onClick);
+  document.addEventListener("input", onInput);
+  document.addEventListener("change", onChange);
+  document.addEventListener("keydown", onKey);
+
+  stateButtons.forEach(function (b) {
+    b.addEventListener("click", function () {
+      S.view = b.getAttribute("data-state");
+      S.route = "inventory";
+      if (S.view === "selected") S.selected = S.selected || "jacket";
+      if (S.view === "error") S.failNext = false;
+      S.toast = "Состояние экрана: " + S.view + ". Демонстрационный переключатель.";
+      render();
+    });
+  });
+
+  var resetBtn = document.getElementById("inv-reset");
+  resetBtn.addEventListener("click", function () {
+    S.view = "normal"; S.category = "Всё"; S.selected = "jacket"; S.route = "inventory";
+    S.items = ITEMS.map(function (i) { return Object.assign({}, i); });
+    S.status = {}; S.inFlight = {}; S.sellDraft = "220"; S.localViews = 0; S.worldCalls = 0;
+    S.generation += 1; S.failNext = false;
+    S.toast = "Демо сброшено к исходным данным.";
+    render();
+  });
+
+  fitFrames();
+  window.addEventListener("resize", fitFrames);
+  render();
+})();
+</script>
+</body>
+</html>

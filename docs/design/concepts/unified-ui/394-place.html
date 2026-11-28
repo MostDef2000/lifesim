@@ -1,0 +1,710 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>#394 · Место — осмотр, сцена и действия — предварительный концепт</title>
+<style>
+  :root {
+    --bg: #F3ECDF;
+    --panel: #FFF9EF;
+    --ink: #30271F;
+    --dim: #69594C;
+    --accent: #86551E;
+    --accent-hover: #6E4519;
+    --success: #42613E;
+    --warning: #805316;
+    --critical: #A13D32;
+    --border: rgba(48, 39, 31, 0.14);
+    --line: rgba(48, 39, 31, 0.12);
+    --focus: rgba(134, 85, 30, 0.45);
+    --warm: rgba(134, 85, 30, 0.12);
+    --shadow-panel: 0 12px 32px rgba(48, 39, 31, 0.16), 0 2px 8px rgba(48, 39, 31, 0.10);
+    --shadow-soft: 0 2px 8px rgba(48, 39, 31, 0.14);
+    --r-panel: 12px;
+    --r-control: 8px;
+    --font-body: system-ui, -apple-system, "Segoe UI", sans-serif;
+    --font-head: Georgia, "Times New Roman", serif;
+  }
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  body { margin: 0; background: var(--bg); color: var(--ink); font: 16px/1.55 var(--font-body); }
+  h1, h2, h3, h4 { margin: 0; font-family: var(--font-head); font-weight: 400; line-height: 1.18; }
+  h1 { font-size: clamp(30px, 4vw, 44px); }
+  h2 { font-size: 30px; }
+  h3 { font-size: 22px; }
+  h4 { font-size: 17px; font-family: var(--font-body); font-weight: 700; }
+  p { margin: 0; }
+  a { color: var(--accent); }
+  code { padding: 1px 5px; border: 1px solid var(--border); border-radius: 5px; background: var(--warm); font: 0.92em/1.4 ui-monospace, SFMono-Regular, Menlo, monospace; }
+  button {
+    min-height: 44px; padding: 10px 16px; border: 1px solid var(--border); border-radius: var(--r-control);
+    background: var(--panel); color: var(--ink); font: inherit; cursor: pointer;
+  }
+  button:hover { border-color: var(--accent); background: var(--warm); }
+  button:focus-visible, [tabindex]:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+  button:disabled { opacity: 0.55; cursor: default; }
+  button[aria-pressed="true"] { background: var(--accent); border-color: var(--accent); color: var(--panel); }
+  button[aria-pressed="true"]:hover { background: var(--accent-hover); border-color: var(--accent-hover); }
+
+  .concept-flag {
+    position: sticky; top: 0; z-index: 50; display: flex; flex-wrap: wrap; gap: 8px 12px;
+    align-items: center; justify-content: center; padding: 8px 16px;
+    border-bottom: 1px solid rgba(161, 61, 50, 0.32); background: #F8E8DC; color: #6B2A22;
+    font-size: 13px; line-height: 1.35; text-align: center;
+  }
+  .concept-flag strong { letter-spacing: 0.02em; }
+
+  .sheet { width: min(1320px, calc(100% - 32px)); margin: 0 auto; padding: 28px 0 72px; }
+  .sheet-header { display: grid; gap: 20px; padding: 28px 0 24px; border-bottom: 1px solid var(--line); }
+  .eyebrow { color: var(--accent); font-size: 13px; font-weight: 700; letter-spacing: 0.14em; text-transform: uppercase; }
+  .lede { max-width: 84ch; color: var(--dim); font-size: 18px; }
+  .meta-row { display: flex; flex-wrap: wrap; gap: 8px; }
+  .pill { display: inline-flex; gap: 6px; align-items: center; min-height: 32px; padding: 4px 10px; border: 1px solid var(--border); border-radius: 999px; background: var(--panel); color: var(--dim); font-size: 13px; }
+  .pill strong { color: var(--ink); font-weight: 600; }
+  .note { padding: 10px 14px; border-left: 3px solid var(--accent); background: var(--warm); color: var(--dim); font-size: 14px; }
+  .note strong { color: var(--ink); }
+  .note-critical { border-left-color: var(--critical); background: rgba(161, 61, 50, 0.08); }
+  .note-success { border-left-color: var(--success); background: rgba(66, 97, 62, 0.08); }
+  .note-warning { border-left-color: var(--warning); background: rgba(128, 83, 22, 0.08); }
+
+  .toolbar {
+    position: sticky; top: 40px; z-index: 40; display: flex; flex-wrap: wrap; gap: 8px;
+    align-items: center; justify-content: space-between; margin: 20px 0; padding: 12px;
+    border: 1px solid var(--border); border-radius: var(--r-panel);
+    background: rgba(255, 249, 239, 0.96); box-shadow: var(--shadow-soft);
+  }
+  .toolbar-group { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+  .toolbar-label { color: var(--dim); font-size: 13px; }
+  .toolbar button { padding: 8px 14px; font-size: 14px; }
+
+  .section { display: grid; gap: 12px; margin-top: 44px; padding-top: 8px; border-top: 1px solid var(--line); }
+  .section-head { display: grid; gap: 8px; max-width: 88ch; }
+  .section-head p { color: var(--dim); }
+
+  .viewport-stage { display: flex; gap: 20px; align-items: flex-start; width: 100%; overflow: auto; padding: 4px 0 8px; --scale: 1; }
+  .viewport-stage[data-view="desktop"] .frame-mobile,
+  .viewport-stage[data-view="mobile"] .frame-desktop { display: none; }
+  .viewport-stage[data-view="mobile"] { justify-content: center; }
+  .frame-wrap {
+    position: relative; flex: 0 0 auto; width: calc(var(--fw) * var(--scale)); height: calc(var(--fh) * var(--scale) + 22px);
+    overflow: hidden; border: 1px solid var(--border); border-radius: var(--r-panel); background: var(--bg); box-shadow: var(--shadow-panel);
+  }
+  .frame-wrap.frame-desktop { --fw: 1440px; --fh: 900px; }
+  .frame-wrap.frame-mobile { --fw: 390px; --fh: 844px; }
+  .frame { width: var(--fw); height: var(--fh); overflow: hidden; transform: scale(var(--scale)); transform-origin: top left; background: var(--bg); }
+  .frame-label { position: static; display: block; height: 22px; line-height: 22px; padding: 0 8px; border: 1px solid var(--border); border-radius: 6px; background: rgba(255, 249, 239, 0.94); color: var(--dim); font-size: 11px; pointer-events: none; }
+
+  .rule-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 12px; }
+  .rule-card { display: grid; gap: 8px; align-content: start; padding: 12px; border: 1px solid var(--border); border-radius: var(--r-panel); background: var(--panel); }
+  .rule-card ul { margin: 0; padding-left: 18px; color: var(--dim); font-size: 14px; display: grid; gap: 4px; }
+  .tag { padding: 2px 8px; border-radius: 999px; font-size: 11px; font-weight: 700; letter-spacing: 0.04em; border: 1px solid var(--border); color: var(--dim); background: var(--bg); }
+  .tag-ok { color: var(--success); border-color: rgba(66, 97, 62, 0.35); background: rgba(66, 97, 62, 0.1); }
+  .tag-bad { color: var(--critical); border-color: rgba(161, 61, 50, 0.35); background: rgba(161, 61, 50, 0.08); }
+  .tag-warn { color: var(--warning); border-color: rgba(128, 83, 22, 0.35); background: rgba(128, 83, 22, 0.08); }
+
+  table { width: 100%; border-collapse: collapse; font-size: 14px; background: var(--panel); border-radius: var(--r-panel); overflow: hidden; }
+  th, td { padding: 9px 12px; border-bottom: 1px solid var(--line); text-align: left; vertical-align: top; }
+  th { font-size: 12px; letter-spacing: 0.05em; text-transform: uppercase; color: var(--dim); background: var(--bg); }
+  tr:last-child td { border-bottom: 0; }
+
+  .footer { display: grid; gap: 6px; margin-top: 48px; padding-top: 16px; border-top: 1px solid var(--line); color: var(--dim); font-size: 13px; }
+  .footer strong { color: var(--ink); }
+
+  /* simulated app shell */
+  .app { width: 100%; height: 100%; display: grid; grid-template-columns: 270px 1fr; grid-template-rows: 88px 1fr; background: var(--bg); }
+  .app .brand { grid-column: 1; grid-row: 1; display: grid; align-content: center; gap: 2px; padding: 0 20px; border-right: 1px solid var(--line); border-bottom: 1px solid var(--line); background: var(--panel); }
+  .app .brand b { font-family: var(--font-head); font-size: 24px; font-weight: 400; }
+  .app .brand span { color: var(--dim); font-size: 12px; }
+  .app .top { grid-column: 2; grid-row: 1; display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 0 24px; border-bottom: 1px solid var(--line); background: var(--panel); }
+  .app .ctx { display: flex; align-items: center; gap: 12px; }
+  .app .avatar { display: grid; place-items: center; width: 44px; height: 44px; border-radius: 50%; background: var(--warm); color: var(--accent); font-size: 13px; font-weight: 700; }
+  .app .who { display: grid; line-height: 1.25; }
+  .app .who b { font-size: 15px; }
+  .app .who span { color: var(--dim); font-size: 12px; }
+  .app .meta { display: flex; flex-wrap: wrap; gap: 8px; }
+  .app .meta span { padding: 4px 9px; border: 1px solid var(--border); border-radius: 999px; font-size: 12px; color: var(--dim); }
+  .app .rail { grid-column: 1; grid-row: 2; display: grid; align-content: start; gap: 2px; padding: 10px; border-right: 1px solid var(--line); background: var(--panel); }
+  .app .rail button { display: flex; align-items: center; gap: 10px; min-height: 46px; padding: 8px 12px; border: 0; border-radius: 8px; background: transparent; font-size: 14px; color: var(--dim); text-align: left; }
+  .app .rail button:hover { background: var(--warm); }
+  .app .rail button[aria-current="page"] { background: var(--warm); color: var(--accent); font-weight: 700; box-shadow: inset 3px 0 0 var(--accent); }
+  .app .rail .ico { width: 22px; text-align: center; font-size: 16px; }
+  .app .content { grid-column: 2; grid-row: 2; overflow: hidden; padding: 22px 26px; display: grid; align-content: start; gap: 12px; }
+  .app .route-head { display: grid; gap: 2px; }
+  .app .route-head .eyebrow { font-size: 11px; }
+  .app .route-head h3 { font-size: 30px; }
+  .app .route-head p { color: var(--dim); font-size: 14px; max-width: 74ch; }
+  .app .cols { display: grid; grid-template-columns: 1.25fr 1fr; gap: 14px; align-items: start; }
+  .app .panel { padding: 12px; border: 1px solid var(--border); border-radius: 12px; background: var(--panel); display: grid; gap: 8px; align-content: start; }
+  .app .panel h4 { font-size: 12px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--dim); font-family: var(--font-body); }
+  .app .row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+  .app .kv { display: flex; justify-content: space-between; gap: 12px; font-size: 13px; }
+  .app .kv span:first-child { color: var(--dim); }
+  .app .toast { color: var(--dim); font-size: 12px; min-height: 17px; }
+
+  .app .lod { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; font-size: 11px; color: var(--dim); }
+  .app .lod span { padding: 2px 8px; border: 1px solid var(--border); border-radius: 999px; background: var(--panel); }
+  .app .lod span.on { border-color: var(--accent); color: var(--accent); font-weight: 700; }
+
+  .app .map { position: relative; height: 330px; border: 1px solid var(--border); border-radius: 10px; overflow: hidden; background: linear-gradient(180deg, #C6D6D8 0%, #B7CBD0 58%, #AFC3C3 59%, #A7B9B6 100%); }
+  .app .map .land { position: absolute; inset: 34% 0 0 0; background: linear-gradient(180deg, rgba(243, 236, 223, 0.55), rgba(243, 236, 223, 0.85)); clip-path: polygon(0 34%, 12% 24%, 28% 32%, 45% 20%, 62% 28%, 78% 18%, 100% 30%, 100% 100%, 0 100%); }
+  .app .marker { position: absolute; z-index: 3; transform: translate(-50%, -50%); display: flex; align-items: center; gap: 6px; min-height: 44px; min-width: 44px; padding: 4px 9px 4px 4px; border: 1px solid var(--border); border-radius: 999px; background: var(--panel); color: var(--ink); font-size: 11px; }
+  .app .marker .dot { display: grid; place-items: center; flex: 0 0 auto; width: 28px; height: 28px; border: 1px solid var(--border); border-radius: 50%; background: var(--bg); color: var(--accent); font-size: 10px; font-weight: 700; }
+  .app .marker.here { border-color: var(--accent); box-shadow: 0 0 0 4px rgba(134, 85, 30, 0.16); }
+  .app .marker.here .dot { background: var(--accent); color: var(--panel); }
+  .app .marker.sel { box-shadow: 0 0 0 2px var(--accent); }
+  .app .marker.unavailable { border-style: dashed; color: var(--dim); }
+  .app .marker.unavailable .dot { color: var(--dim); }
+  .app .map .here-tag { position: absolute; z-index: 4; left: 12px; bottom: 10px; padding: 3px 8px; border: 1px solid var(--border); border-radius: 6px; background: rgba(255, 249, 239, 0.92); color: var(--dim); font-size: 10px; }
+
+  .app .scene { display: grid; gap: 6px; }
+  .app .scene-art { position: relative; height: 176px; border: 1px solid var(--border); border-radius: 10px; overflow: hidden; background: #C6D6D8; }
+  .app .scene-art svg { display: block; width: 100%; height: 100%; }
+  .app .scene-cap { position: absolute; left: 8px; bottom: 8px; padding: 3px 8px; border: 1px solid var(--border); border-radius: 6px; background: rgba(255, 249, 239, 0.92); color: var(--dim); font-size: 10px; }
+  .app .scene-cap b { color: var(--ink); }
+  .app .participants { display: grid; gap: 3px; font-size: 12px; color: var(--dim); }
+  .app .participants .p { display: flex; gap: 6px; align-items: baseline; }
+  .app .participants .p b { color: var(--ink); font-weight: 600; }
+  .app .participants .none { font-style: italic; }
+  .app .where { display: grid; gap: 4px; padding: 8px 10px; border: 1px solid var(--border); border-radius: 8px; background: var(--bg); font-size: 13px; }
+  .app .where .line { display: flex; justify-content: space-between; gap: 10px; }
+  .app .where .line span:first-child { color: var(--dim); }
+  .app .where .sel { color: var(--accent); font-weight: 700; }
+  .app .status { display: grid; gap: 2px; padding: 8px 10px; border: 1px dashed var(--border); border-radius: 8px; font-size: 12px; color: var(--dim); }
+  .app .status.ok { border-style: solid; border-color: rgba(66, 97, 62, 0.35); background: rgba(66, 97, 62, 0.08); }
+  .app .status.bad { border-style: solid; border-color: rgba(161, 61, 50, 0.35); background: rgba(161, 61, 50, 0.07); }
+  .app .status.pending { border-style: solid; border-color: rgba(128, 83, 22, 0.35); background: rgba(128, 83, 22, 0.07); }
+  .app .status b { color: var(--ink); }
+  .app .skeleton { height: 11px; border-radius: 999px; background: linear-gradient(90deg, rgba(48,39,31,0.08), rgba(48,39,31,0.16), rgba(48,39,31,0.08)); }
+  .app .fallback { display: grid; place-items: center; gap: 4px; height: 176px; padding: 16px; border: 1px dashed rgba(128, 83, 22, 0.5); border-radius: 10px; background: rgba(128, 83, 22, 0.06); color: var(--dim); font-size: 12px; text-align: center; }
+  .app .fallback b { color: var(--warning); font-size: 13px; }
+  .app .herostrip { display: flex; flex-wrap: wrap; gap: 8px 16px; align-items: center; padding: 7px 12px; border: 1px solid var(--border); border-radius: 10px; background: var(--panel); font-size: 12px; color: var(--dim); }
+  .app .herostrip .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--success); }
+  .app .herostrip b { color: var(--ink); }
+  .app .counters { display: flex; flex-wrap: wrap; gap: 8px 16px; padding-top: 6px; border-top: 1px solid var(--line); color: var(--dim); font-size: 12px; }
+  .app .counters b { color: var(--ink); font-variant-numeric: tabular-nums; }
+
+  .app.m { grid-template-columns: 1fr; grid-template-rows: 96px 1fr 78px; }
+  .app.m .brand { display: none; }
+  .app.m .top { grid-column: 1; grid-row: 1; display: grid; align-content: center; gap: 2px; padding: 10px 14px; border-right: 0; }
+  .app.m .top .ctx { gap: 10px; }
+  .app.m .avatar { width: 40px; height: 40px; font-size: 12px; }
+  .app.m .who b { font-size: 14px; }
+  .app.m .meta { display: none; }
+  .app.m .content { grid-column: 1; grid-row: 2; padding: 12px 14px; gap: 9px; overflow: auto; }
+  .app.m .route-head h3 { font-size: 24px; }
+  .app.m .cols { grid-template-columns: 1fr; gap: 9px; }
+  .app.m .map { height: 226px; }
+  .app.m .scene-art, .app.m .fallback { height: 132px; }
+  .app.m .marker { font-size: 10px; padding: 3px 7px 3px 3px; }
+  .app.m .marker .dot { width: 24px; height: 24px; }
+  .app.m .dock { grid-column: 1; grid-row: 3; display: grid; grid-template-columns: repeat(9, 1fr); align-items: center; gap: 0; padding: 6px 4px; border-top: 1px solid var(--line); background: var(--panel); }
+  .app.m .dock button { display: grid; justify-items: center; gap: 2px; min-height: 44px; padding: 2px; border: 0; background: transparent; color: var(--dim); font-size: 9px; }
+  .app.m .dock button[aria-current="page"] { color: var(--accent); font-weight: 700; }
+  .app.m .dock .ico { font-size: 15px; }
+  .app .dock { display: none; }
+  .app.m .rail { display: none; }
+
+  [hidden] { display: none !important; }
+  @media (prefers-reduced-motion: reduce) {
+    html { scroll-behavior: auto; }
+    *, *::before, *::after { animation-duration: 0.001ms !important; transition-duration: 0.001ms !important; }
+  }
+  @media (max-width: 720px) {
+    table { table-layout: fixed; }
+    th, td { overflow-wrap: break-word; }
+  }
+</style>
+</head>
+<body>
+<div class="concept-flag" role="note">
+  <strong>ПРЕДВАРИТЕЛЬНЫЙ КОНЦЕПТ, НЕ УТВЕРЖДЁННЫЙ PRODUCTION-АССЕТ</strong>
+  <span>Issue #394 · экран «Место» · §27/§27.1 · design handoff, не код и не игровой факт</span>
+</div>
+
+<main class="sheet">
+  <header class="sheet-header">
+    <div class="eyebrow">#394 · Место · волна 2, часть 4</div>
+    <h1>Осмотр места не перемещает героя</h1>
+    <p class="lede">
+      Единый экран POI: карта, сцена наблюдения и доступные действия. Выбор точки меняет только
+      осмотр; текущее место героя остаётся прежним, пока мир не подтвердил явный переход.
+      Участники, время и погода подписаны как данные; при недоступном Flux — честный fallback.
+    </p>
+    <div class="meta-row">
+      <span class="pill"><strong>Канон:</strong> §27, §27.1</span>
+      <span class="pill"><strong>Кадр:</strong> #354 frame contract</span>
+      <span class="pill"><strong>Уровни:</strong> #391–#393</span>
+      <span class="pill"><strong>Борд:</strong> 394-place.svg</span>
+    </div>
+    <div class="note">
+      <strong>Граница артефакта.</strong> Это design handoff, а не изменение <code>backend/**</code> и не
+      игровой факт. Места, люди и кадры — условные демонстрационные данные. Перемещение и сцена
+      имитированы в браузере, сеть не вызывается.
+    </div>
+  </header>
+
+  <div class="toolbar" role="toolbar" aria-label="Управление просмотром макета">
+    <div class="toolbar-group">
+      <span class="toolbar-label">Композиция:</span>
+      <button type="button" data-view="desktop" aria-pressed="true">Desktop 1440×900</button>
+      <button type="button" data-view="mobile" aria-pressed="false">Mobile 390×844</button>
+      <button type="button" data-view="both" aria-pressed="false">Оба рядом</button>
+    </div>
+    <div class="toolbar-group">
+      <span class="toolbar-label">Состояние:</span>
+      <button type="button" data-state="normal" aria-pressed="true">Обычное</button>
+      <button type="button" data-state="loading" aria-pressed="false">Загрузка сцены</button>
+      <button type="button" data-state="flux" aria-pressed="false">Flux недоступен</button>
+      <button type="button" data-state="refused" aria-pressed="false">Отказ перехода</button>
+      <button type="button" data-state="moved" aria-pressed="false">Переход подтверждён</button>
+      <button type="button" id="plc-reset">Сбросить демо</button>
+    </div>
+  </div>
+
+  <section class="section" id="screen">
+    <div class="section-head">
+      <h2>Экран</h2>
+      <p>
+        Кликните любую точку на карте: изменится «Выбрано», но не «Вы сейчас». Переход выполняется
+        только кнопкой «Пойти сюда» и только для подтверждённо доступного места; после ответа мира
+        обновляется текущее место и время кадра. Причал недоступен — кнопка объясняет причину.
+      </p>
+    </div>
+    <div class="viewport-stage" data-view="desktop" id="viewport-stage">
+      <div class="frame-wrap frame-desktop">
+        <span class="frame-label">DESKTOP · 1440×900 · логический размер</span>
+        <div class="frame"><div class="frame-slot" data-frame="desktop"></div></div>
+      </div>
+      <div class="frame-wrap frame-mobile">
+        <span class="frame-label">MOBILE · 390×844</span>
+        <div class="frame"><div class="frame-slot" data-frame="mobile"></div></div>
+      </div>
+    </div>
+    <div class="note note-critical">
+      <strong>Главное правило.</strong> Выбор POI — это осмотр, а не перемещение. Текущее место,
+      сцена и участники меняются только после подтверждённого доступного перехода; снимок всегда
+      несёт время наблюдения, а недоступный кадр не подменяется выдуманной картинкой.
+    </div>
+  </section>
+
+  <section class="section" id="rules">
+    <div class="section-head">
+      <h2>Правила, которым следует макет</h2>
+      <p>Осмотр, переход и кадр — три разные вещи. Ниже их границы и связи с #354 и уровнями карты #391–#393.</p>
+    </div>
+    <div class="rule-grid">
+      <div class="rule-card">
+        <h3>Осмотр <span class="tag">select</span></h3>
+        <ul>
+          <li>меняет «Выбрано» и карточку сцены;</li>
+          <li>не двигает героя и не меняет «Вы сейчас»;</li>
+          <li>не запускает переход сам по себе;</li>
+          <li>повторный выбор той же точки ничего не ломает.</li>
+        </ul>
+      </div>
+      <div class="rule-card">
+        <h3>Переход <span class="tag tag-ok">move</span></h3>
+        <ul>
+          <li>только явная кнопка «Пойти сюда»;</li>
+          <li>только подтверждённо доступное место;</li>
+          <li>во время ожидания место прежнее;</li>
+          <li>после ответа обновляются место и время.</li>
+        </ul>
+      </div>
+      <div class="rule-card">
+        <h3>Сцена <span class="tag">observe</span></h3>
+        <ul>
+          <li>у кадра есть время наблюдения;</li>
+          <li>участники — только подтверждённые люди;</li>
+          <li>«нет подтверждённых людей» вместо догадки;</li>
+          <li>осмотр не утверждает наличие действия.</li>
+        </ul>
+      </div>
+      <div class="rule-card">
+        <h3>Fallback <span class="tag tag-warn">Flux off</span></h3>
+        <ul>
+          <li>кадр недоступен — явная подпись, не заглушка-арт;</li>
+          <li>время и данные наблюдения сохраняются;</li>
+          <li>действия не выдумываются из картинки;</li>
+          <li>уровни карты #391–#393 остаются навигацией.</li>
+        </ul>
+      </div>
+    </div>
+    <div class="note note-success" style="margin-top:12px">
+      <strong>Пример приёмки.</strong> Дано: герой дома, выбрано место «Магазин». Когда игрок
+      кликает по магазину, тогда меняется только «Выбрано», а «Вы сейчас» остаётся «Дом». Когда
+      игрок нажимает «Пойти сюда», тогда до ответа место не меняется. Когда мир подтверждает
+      переход, тогда текущим становится «Магазин», а время кадра обновляется. Когда Flux недоступен,
+      тогда вместо кадра показывается честный fallback с временем наблюдения.
+    </div>
+  </section>
+
+  <section class="section" id="map">
+    <div class="section-head">
+      <h2>Что где лежит</h2>
+      <p>Короткая карта поведения, чтобы проверяющий не искал элементы наугад.</p>
+    </div>
+    <table>
+      <thead><tr><th>Элемент</th><th>Поведение</th><th>Изменения мира</th></tr></thead>
+      <tbody>
+        <tr><td>Клик по маркеру POI</td><td>осмотр: «Выбрано», сцена, действия</td><td>0, герой не двигается</td></tr>
+        <tr><td>«Пойти сюда» (доступно)</td><td>переход: pending → подтверждение</td><td>только после ответа: место, время</td></tr>
+        <tr><td>«Пойти сюда» (недоступно)</td><td>кнопка неактивна, причина видима</td><td>0</td></tr>
+        <tr><td>«К карте»</td><td>сбрасывает выбор на текущее место</td><td>0</td></tr>
+        <tr><td>Flux недоступен</td><td>fallback вместо кадра, данные сохраняются</td><td>0</td></tr>
+        <tr><td>Уровни карты #391–#393</td><td>остров → поселение → POI, только навигация</td><td>0</td></tr>
+      </tbody>
+    </table>
+  </section>
+
+  <footer class="footer">
+    <span><strong>#394 · Место.</strong> Предварительный концепт, не утверждённый production-ассет. Приёмка владельцем — отдельный шаг.</span>
+    <span>Источники: docs/VISUAL-BIBLE.md §27, §27.1; #354 frame contract; #391–#393 уровни карты; 394-place.svg. Связанные: #373 Рынок, #365 пилот.</span>
+  </footer>
+</main>
+
+<script>
+(function () {
+  "use strict";
+
+  var stage = document.getElementById("viewport-stage");
+  var viewButtons = Array.prototype.slice.call(document.querySelectorAll("button[data-view]"));
+  var stateButtons = Array.prototype.slice.call(document.querySelectorAll("button[data-state]"));
+
+  function fitFrames() {
+    var view = stage.getAttribute("data-view") || "desktop";
+    var available = Math.max(240, stage.clientWidth - 4);
+    var total = view === "desktop" ? 1440 : view === "mobile" ? 390 : 1440 + 390 + 20;
+    stage.style.setProperty("--scale", String(Math.max(0.2, Math.min(1, available / total))));
+  }
+  function setView(view) {
+    stage.setAttribute("data-view", view);
+    viewButtons.forEach(function (b) {
+      b.setAttribute("aria-pressed", b.getAttribute("data-view") === view ? "true" : "false");
+    });
+    fitFrames();
+  }
+  viewButtons.forEach(function (b) {
+    b.addEventListener("click", function () { setView(b.getAttribute("data-view")); });
+  });
+
+  var NAV = ["Мир", "Чат", "Люди", "Инвентарь", "Рынок", "Дела", "Цель", "Профиль", "Образ"];
+  var ICON = { "Мир": "◎", "Чат": "✉", "Люди": "☺", "Инвентарь": "▣", "Рынок": "◇", "Дела": "✎", "Цель": "⚑", "Профиль": "☰", "Образ": "◧" };
+  var HERO = { name: "Алиса Морозова", role: "Фермер", day: "День 17", weather: "+18 °C · ясно" };
+
+  var POIS = [
+    { id: "home", name: "Дом", kind: "Жилое", x: 50, y: 62, available: true, people: [{ who: "вы", note: "дома" }] },
+    { id: "shop", name: "Магазин", kind: "Торговля", x: 24, y: 32, available: true, people: [{ who: "Мира", note: "продавец" }] },
+    { id: "pier", name: "Причал", kind: "Хозяйство", x: 76, y: 36, available: false, reason: "переход не подтверждён: тропа закрыта", people: [] },
+    { id: "shore", name: "Берег", kind: "Прогулка", x: 62, y: 78, available: true, people: [] },
+    { id: "fields", name: "Поля", kind: "Работа", x: 18, y: 72, available: true, people: [{ who: "Борис", note: "работник" }] }
+  ];
+
+  var S = {
+    route: "place",
+    location: "home",
+    selected: "home",
+    sceneTime: "08:03",
+    loading: false,
+    fluxOff: false,
+    travel: null,
+    movedIds: {},
+    localViews: 0,
+    worldCalls: 0,
+    toast: "Демонстрационные данные. Перемещение имитировано.",
+    generation: 0
+  };
+
+  function esc(v) {
+    return String(v == null ? "" : v).replace(/[&<>"']/g, function (c) {
+      return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c];
+    });
+  }
+  function poiById(id) {
+    for (var i = 0; i < POIS.length; i++) { if (POIS[i].id === id) return POIS[i]; }
+    return null;
+  }
+  function nameOf(id) { var p = poiById(id); return p ? p.name : "—"; }
+
+  function sceneSvg(id) {
+    var sky = '<rect x="0" y="0" width="320" height="176" fill="#C6D6D8"/>';
+    var sea = '<rect x="0" y="112" width="320" height="64" fill="#A7B9B6"/>';
+    var ground = '<path d="M0 120 Q80 108 160 118 T320 114 V176 H0Z" fill="#DDD2BE"/>';
+    if (id === "shop") {
+      return '<svg viewBox="0 0 320 176" role="img" aria-label="Условная сцена: магазин">' + sky +
+        '<rect x="0" y="120" width="320" height="56" fill="#D9CDB8"/>' +
+        '<rect x="104" y="52" width="118" height="76" fill="#E6DCC8" stroke="#69594C" stroke-width="1.4"/>' +
+        '<path d="M96 52h134l-8-14H104z" fill="#86551E"/>' +
+        '<rect x="150" y="92" width="30" height="36" fill="#FFF9EF" stroke="#69594C"/>' +
+        '<rect x="108" y="64" width="160" height="12" fill="#A13D32" opacity="0.55"/>' +
+        '<circle cx="270" cy="40" r="10" fill="#E8DCC0"/></svg>';
+    }
+    if (id === "home") {
+      return '<svg viewBox="0 0 320 176" role="img" aria-label="Условная сцена: дом">' + sky + sea +
+        '<rect x="0" y="124" width="320" height="52" fill="#DDD2BE"/>' +
+        '<path d="M112 92l52-40 52 40v54h-104z" fill="#E6DCC8" stroke="#69594C" stroke-width="1.4"/>' +
+        '<path d="M104 94l60-46 60 46" fill="none" stroke="#805316" stroke-width="6"/>' +
+        '<rect x="152" y="112" width="26" height="34" fill="#86551E" opacity="0.7"/>' +
+        '<rect x="210" y="138" width="56" height="8" fill="#42613E" opacity="0.45"/></svg>';
+    }
+    if (id === "pier") {
+      return '<svg viewBox="0 0 320 176" role="img" aria-label="Условная сцена: причал">' + sky + sea +
+        '<rect x="0" y="126" width="320" height="50" fill="#DDD2BE"/>' +
+        '<rect x="96" y="96" width="120" height="10" fill="#86551E"/>' +
+        '<rect x="108" y="106" width="8" height="44" fill="#69594C"/><rect x="150" y="106" width="8" height="44" fill="#69594C"/><rect x="196" y="106" width="8" height="44" fill="#69594C"/>' +
+        '<path d="M240 92l26-40 26 40z" fill="#FFF9EF" stroke="#69594C"/></svg>';
+    }
+    if (id === "shore") {
+      return '<svg viewBox="0 0 320 176" role="img" aria-label="Условная сцена: берег">' + sky + sea +
+        '<path d="M0 122 Q90 108 190 120 T320 118 V176 H0Z" fill="#DDD2BE"/>' +
+        '<ellipse cx="84" cy="146" rx="18" ry="8" fill="#A79B86"/><ellipse cx="128" cy="152" rx="12" ry="6" fill="#B7AA94"/>' +
+        '<path d="M196 118l16-28 16 28" fill="none" stroke="#42613E" stroke-width="3"/></svg>';
+    }
+    return '<svg viewBox="0 0 320 176" role="img" aria-label="Условная сцена: поля">' + sky +
+      '<path d="M0 108 Q80 96 160 106 T320 100 V176 H0Z" fill="#C9C39A"/>' +
+      '<path d="M0 126h320M0 144h320M0 162h320" stroke="#8A7B52" stroke-width="3" opacity="0.6"/>' +
+      '<rect x="236" y="64" width="34" height="44" fill="#E6DCC8" stroke="#69594C" stroke-width="1.2"/>' +
+      '<path d="M232 66l21-16 21 16" fill="#805316"/></svg>';
+  }
+
+  var LABEL = { place: "Место", market: "Рынок", inventory: "Инвентарь" };
+  function routeFor(name) {
+    if (name === "Рынок") return "market";
+    if (name === "Инвентарь") return "inventory";
+    if (name === "Мир") return "place";
+    return null;
+  }
+  function rail(current) {
+    return NAV.map(function (n) {
+      var r = routeFor(n);
+      var active = n === current ? ' aria-current="page"' : "";
+      return '<button type="button" data-act="nav" data-route="' + (r || "") + '"' + active + '><span class="ico" aria-hidden="true">' + ICON[n] + "</span>" + n + "</button>";
+    }).join("");
+  }
+  function topBar() {
+    return '<div class="top"><div class="ctx"><span class="avatar" aria-hidden="true">АМ</span>' +
+      '<span class="who"><b>' + HERO.name + "</b><span>" + HERO.role + " · " + nameOf(S.location).toLowerCase() + "</span></span></div>" +
+      '<div class="meta"><span>' + HERO.day + " · " + S.sceneTime + "</span><span>" + HERO.weather + "</span></div></div>";
+  }
+  function heroStrip() {
+    return '<div class="herostrip"><span class="dot" aria-hidden="true"></span><span>Герой: <b>' + HERO.name + "</b></span>" +
+      "<span>Вы сейчас: <b>" + nameOf(S.location) + "</b></span>" +
+      "<span>" + HERO.day + " · " + S.sceneTime + "</span><span>" + HERO.weather + "</span></div>";
+  }
+  function counters() {
+    return '<div class="counters"><span>Локальные осмотры: <b>' + S.localViews + "</b></span>" +
+      "<span>Запросы к миру: <b>" + S.worldCalls + "</b></span>" +
+      "<span>Подтверждённых переходов: <b>" + Object.keys(S.movedIds).length + "</b></span>" +
+      "<span>Экран: <b>" + LABEL[S.route] + "</b></span></div>";
+  }
+
+  function mapPanel() {
+    var markers = POIS.map(function (p) {
+      var cls = "marker" + (p.id === S.location ? " here" : "") + (p.id === S.selected ? " sel" : "") + (p.available ? "" : " unavailable");
+      return '<button type="button" class="' + cls + '" style="left:' + p.x + "%;top:" + p.y + '%" data-act="select" data-id="' + p.id + '" aria-pressed="' + (p.id === S.selected) + '">' +
+        '<span class="dot" aria-hidden="true">' + (p.id === S.location ? "●" : "○") + "</span>" + esc(p.name) + "</button>";
+    }).join("");
+    return '<section class="panel"><h4>Карта · поселение</h4><div class="map"><div class="land"></div>' + markers +
+      '<span class="here-tag">● вы здесь · ' + esc(nameOf(S.location)) + "</span></div>" +
+      '<div class="lod" aria-label="Уровни карты"><span>остров</span><span class="on">поселение</span><span class="on">POI</span><span>#391–#393</span></div></section>';
+  }
+
+  function participantRows(p) {
+    if (!p.people.length) {
+      return '<div class="participants"><span class="none">Нет подтверждённых людей в этой сцене.</span></div>';
+    }
+    return '<div class="participants">' + p.people.map(function (x) {
+      return '<span class="p"><b>' + esc(x.who) + "</b><span>" + esc(x.note) + "</span></span>";
+    }).join("") + "</div>";
+  }
+
+  function scenePanel() {
+    var p = poiById(S.selected);
+    if (!p) return "";
+    var cap = '<div class="scene-cap">Сцена наблюдения · <b>' + esc(S.sceneTime) + "</b></div>";
+    var art;
+    if (S.loading) {
+      art = '<div class="fallback"><b>Сцена загружается</b><span>Кадр и участники ещё не получены. Показаны только последние подтверждённые данные наблюдения.</span></div>';
+    } else if (S.fluxOff) {
+      art = '<div class="fallback"><b>Кадр недоступен · Flux не ответил</b><span>Время наблюдения: ' + esc(S.sceneTime) + ". Схема и подпись заменяют картинку; выдуманный вид места не показывается.</span></div>";
+    } else {
+      art = '<div class="scene-art">' + sceneSvg(p.id) + cap + "</div>";
+    }
+    return '<section class="panel"><h4>Сцена · ' + esc(p.name) + "</h4>" + art + participantRows(p) +
+      '<p class="toast">Люди и объекты — только по подтверждённым данным мира. Иллюстрация не подтверждает действие.</p></section>';
+  }
+
+  function travelPending() { return S.travel && S.travel.state === "pending"; }
+
+  function moveButton() {
+    var p = poiById(S.selected);
+    if (!p) return "";
+    if (S.selected === S.location) return '<button type="button" disabled>Вы уже здесь</button>';
+    if (!p.available) return '<button type="button" disabled>Переход недоступен</button>';
+    if (travelPending()) return '<button type="button" disabled>Перемещение…</button>';
+    return '<button type="button" data-act="move">Пойти сюда</button>';
+  }
+
+  function actionPanel() {
+    var p = poiById(S.selected);
+    if (!p) return "";
+    var status;
+    if (travelPending()) {
+      status = '<div class="status pending"><b>pending</b><br>Запрос перехода отправлен. Текущее место — «' + esc(nameOf(S.location)) + "» — не изменилось.</div>";
+    } else if (S.travel && S.travel.state === "refused") {
+      status = '<div class="status bad"><b>refused</b><br>' + esc(S.travel.reason) + "</div>";
+    } else if (S.travel && S.travel.state === "moved") {
+      status = '<div class="status ok"><b>подтверждено</b><br>Вы в «' + esc(nameOf(S.location)) + '». Время наблюдения обновлено: ' + esc(S.sceneTime) + ".</div>";
+    } else {
+      status = '<div class="status"><b>Осмотр.</b> Карточка сцены описывает выбранное место, а не перемещение. Переход — отдельное действие.</div>';
+    }
+    var reason = !p.available ? '<div class="status bad"><b>Недоступно.</b> ' + esc(p.reason) + "</div>" : "";
+    return '<section class="panel"><h4>Действия</h4>' +
+      '<div class="where"><span class="line"><span>Вы сейчас</span><span>' + esc(nameOf(S.location)) + "</span></span>" +
+      '<span class="line"><span>Выбрано</span><span class="sel">' + esc(p.name) + (p.id === S.location ? " · здесь" : "") + "</span></span></div>" +
+      '<div class="row">' + moveButton() + '<button type="button" data-act="reset-sel">К карте</button></div>' +
+      reason + status +
+      '<div class="toast" aria-live="polite">' + esc(S.toast) + "</div></section>";
+  }
+
+  function content() {
+    var head = '<div class="route-head"><div class="eyebrow">' + (S.route === "place" ? "МЕСТО · #394" : S.route === "market" ? "РЫНОК · #373" : "ИНВЕНТАРЬ · #366") + "</div>" +
+      "<h3>" + (S.route === "place" ? "Место" : LABEL[S.route]) + "</h3><p>" +
+      (S.route === "place"
+        ? "Осмотр, сцена и действия. Выбор точки не двигает героя; переход — только явной кнопкой к доступному месту."
+        : "Переход между экранами — одна навигация; герой, время и выбранное место сохраняются.") + "</p></div>";
+    if (S.route === "market") {
+      return head + heroStrip() + '<div class="cols"><section class="panel"><h4>Рынок</h4><p class="toast">Здесь макет не раскрывается: экран Рынка — отдельный артефакт #373. Возврат в «Место» не меняет героя.</p><div class="row"><button type="button" data-act="nav" data-route="place">Вернуться в «Место»</button></div></section>' +
+        '<section class="panel"><h4>Контекст сохраняется</h4><div class="kv"><span>Вы сейчас</span><span>' + nameOf(S.location) + '</span></div><div class="kv"><span>Время</span><span>' + HERO.day + " · " + S.sceneTime + "</span></div></section></div>" + counters();
+    }
+    if (S.route === "inventory") {
+      return head + heroStrip() + '<div class="cols"><section class="panel"><h4>Инвентарь</h4><p class="toast">Экран Инвентаря — отдельный артефакт #366. Возврат в «Место» не меняет героя.</p><div class="row"><button type="button" data-act="nav" data-route="place">Вернуться в «Место»</button></div></section></div>' + counters();
+    }
+    return head + heroStrip() + '<div class="cols">' + mapPanel() + '<div style="display:grid;gap:9px">' + scenePanel() + actionPanel() + "</div></div>" + counters();
+  }
+
+  function appHtml(mobile) {
+    return '<div class="app' + (mobile ? " m" : "") + '">' +
+      '<div class="brand"><b>ВЛ1: Рейнеке</b><span>Северный остров · Тёплый вечер</span></div>' +
+      topBar() +
+      '<nav class="rail" aria-label="Разделы">' + rail(S.route === "place" ? "Мир" : LABEL[S.route]) + "</nav>" +
+      '<div class="content">' + content() + "</div>" +
+      '<nav class="dock" aria-label="Разделы">' + rail(S.route === "place" ? "Мир" : LABEL[S.route]) + "</nav>" +
+      "</div>";
+  }
+  function render() {
+    var d = document.querySelector('[data-frame="desktop"]');
+    var m = document.querySelector('[data-frame="mobile"]');
+    if (d) d.innerHTML = appHtml(false);
+    if (m) m.innerHTML = appHtml(true);
+  }
+  function toast(text) { S.toast = text; render(); }
+
+  function move() {
+    var p = poiById(S.selected);
+    if (!p || !p.available || S.selected === S.location || travelPending()) return;
+    S.worldCalls += 1;
+    var gen = ++S.generation;
+    S.travel = { state: "pending", to: p.id, gen: gen };
+    S.toast = "Запрос перехода в «" + p.name + "». До ответа вы остаётесь на месте.";
+    render();
+    window.setTimeout(function () {
+      if (S.generation !== gen) return;
+      S.location = p.id;
+      S.movedIds[p.id] = true;
+      S.sceneTime = "08:05";
+      S.travel = { state: "moved", to: p.id };
+      S.toast = "Подтверждено: вы в «" + p.name + "». Время наблюдения обновлено.";
+      render();
+    }, 900);
+  }
+
+  document.addEventListener("click", function (ev) {
+    var el = ev.target.closest ? ev.target.closest("[data-act]") : null;
+    if (!el) return;
+    var act = el.getAttribute("data-act");
+    if (act === "select") {
+      var id = el.getAttribute("data-id");
+      S.selected = id;
+      S.travel = null;
+      S.generation += 1;
+      S.localViews += 1;
+      S.toast = "Осмотр «" + nameOf(id) + "»: герой остаётся в «" + nameOf(S.location) + "».";
+      render();
+    } else if (act === "move") { move(); }
+    else if (act === "reset-sel") {
+      S.selected = S.location;
+      S.travel = null;
+      S.generation += 1;
+      S.toast = "Выбор сброшен на текущее место.";
+      render();
+    } else if (act === "nav") {
+      var route = el.getAttribute("data-route");
+      if (!route) { toast("Раздел вне этого макета."); return; }
+      if (route === S.route) { toast("Вы уже на экране «" + LABEL[route] + "»."); return; }
+      S.route = route;
+      S.localViews += 1;
+      S.toast = "Переход на «" + LABEL[route] + "» — локально, место героя сохраняется.";
+      render();
+    }
+  });
+
+  stateButtons.forEach(function (b) {
+    b.addEventListener("click", function () {
+      var st = b.getAttribute("data-state");
+      stateButtons.forEach(function (x) { x.setAttribute("aria-pressed", x === b ? "true" : "false"); });
+      S.route = "place";
+      S.travel = null;
+      S.generation += 1;
+      S.loading = false;
+      S.fluxOff = false;
+      if (st === "loading") {
+        S.loading = true;
+        S.toast = "Сцена загружается: кадр и участники ещё не получены.";
+      } else if (st === "flux") {
+        S.fluxOff = true;
+        S.toast = "Flux недоступен: показан честный fallback с временем наблюдения.";
+      } else if (st === "refused") {
+        S.selected = "shop";
+        S.travel = { state: "refused", reason: "Мир отклонил переход: путь недоступен. Вы остались в «" + nameOf(S.location) + "»." };
+        S.toast = "Переход отклонён. Текущее место не изменилось.";
+      } else if (st === "moved") {
+        S.selected = "shop";
+        S.location = "shop";
+        S.movedIds = { shop: true };
+        S.sceneTime = "08:05";
+        S.travel = { state: "moved", to: "shop" };
+        S.toast = "Подтверждённый переход: вы в «Магазине», время обновлено (демонстрация).";
+      } else {
+        S.selected = S.location;
+        S.toast = "Обычное состояние: осмотр и переход доступны.";
+      }
+      render();
+    });
+  });
+
+  document.getElementById("plc-reset").addEventListener("click", function () {
+    S.route = "place";
+    S.location = "home";
+    S.selected = "home";
+    S.sceneTime = "08:03";
+    S.loading = false;
+    S.fluxOff = false;
+    S.travel = null;
+    S.movedIds = {};
+    S.localViews = 0;
+    S.worldCalls = 0;
+    S.generation += 1;
+    S.toast = "Демо сброшено к исходным данным.";
+    stateButtons.forEach(function (x) { x.setAttribute("aria-pressed", x.getAttribute("data-state") === "normal" ? "true" : "false"); });
+    render();
+  });
+
+  fitFrames();
+  window.addEventListener("resize", fitFrames);
+  render();
+})();
+</script>
+</body>
+</html>

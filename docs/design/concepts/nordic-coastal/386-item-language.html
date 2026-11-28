@@ -1,0 +1,544 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>#386 · Предметы — единый язык изображения — предварительный концепт</title>
+<style>
+  :root {
+    --bg: #F3ECDF;
+    --panel: #FFF9EF;
+    --ink: #30271F;
+    --dim: #69594C;
+    --accent: #86551E;
+    --accent-hover: #6E4519;
+    --success: #42613E;
+    --warning: #805316;
+    --critical: #A13D32;
+    --border: rgba(48, 39, 31, 0.14);
+    --line: rgba(48, 39, 31, 0.12);
+    --focus: rgba(134, 85, 30, 0.45);
+    --warm: rgba(134, 85, 30, 0.12);
+    --shadow-panel: 0 12px 32px rgba(48, 39, 31, 0.16), 0 2px 8px rgba(48, 39, 31, 0.10);
+    --shadow-soft: 0 2px 8px rgba(48, 39, 31, 0.14);
+    --r-panel: 12px;
+    --r-control: 8px;
+    --font-body: system-ui, -apple-system, "Segoe UI", sans-serif;
+    --font-head: Georgia, "Times New Roman", serif;
+  }
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  body { margin: 0; background: var(--bg); color: var(--ink); font: 16px/1.55 var(--font-body); }
+  h1, h2, h3, h4 { margin: 0; font-family: var(--font-head); font-weight: 400; line-height: 1.18; }
+  h1 { font-size: clamp(30px, 4vw, 44px); }
+  h2 { font-size: 30px; }
+  h3 { font-size: 22px; }
+  h4 { font-size: 17px; font-family: var(--font-body); font-weight: 700; }
+  p { margin: 0; }
+  a { color: var(--accent); }
+  code { padding: 1px 5px; border: 1px solid var(--border); border-radius: 5px; background: var(--warm); font: 0.92em/1.4 ui-monospace, SFMono-Regular, Menlo, monospace; }
+  button {
+    min-height: 44px; padding: 10px 16px; border: 1px solid var(--border); border-radius: var(--r-control);
+    background: var(--panel); color: var(--ink); font: inherit; cursor: pointer;
+  }
+  button:hover { border-color: var(--accent); background: var(--warm); }
+  button:focus-visible, [tabindex]:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+  button:disabled { opacity: 0.55; cursor: default; }
+  button[aria-pressed="true"] { background: var(--accent); border-color: var(--accent); color: var(--panel); }
+  button[aria-pressed="true"]:hover { background: var(--accent-hover); border-color: var(--accent-hover); }
+
+  .concept-flag {
+    position: sticky; top: 0; z-index: 50; display: flex; flex-wrap: wrap; gap: 8px 12px;
+    align-items: center; justify-content: center; padding: 8px 16px;
+    border-bottom: 1px solid rgba(161, 61, 50, 0.32); background: #F8E8DC; color: #6B2A22;
+    font-size: 13px; line-height: 1.35; text-align: center;
+  }
+  .concept-flag strong { letter-spacing: 0.02em; }
+
+  .sheet { width: min(1320px, calc(100% - 32px)); margin: 0 auto; padding: 28px 0 72px; }
+  .sheet-header { display: grid; gap: 20px; padding: 28px 0 24px; border-bottom: 1px solid var(--line); }
+  .eyebrow { color: var(--accent); font-size: 13px; font-weight: 700; letter-spacing: 0.14em; text-transform: uppercase; }
+  .lede { max-width: 84ch; color: var(--dim); font-size: 18px; }
+  .meta-row { display: flex; flex-wrap: wrap; gap: 8px; }
+  .pill { display: inline-flex; gap: 6px; align-items: center; min-height: 32px; padding: 4px 10px; border: 1px solid var(--border); border-radius: 999px; background: var(--panel); color: var(--dim); font-size: 13px; }
+  .pill strong { color: var(--ink); font-weight: 600; }
+  .note { padding: 10px 14px; border-left: 3px solid var(--accent); background: var(--warm); color: var(--dim); font-size: 14px; }
+  .note strong { color: var(--ink); }
+  .note-critical { border-left-color: var(--critical); background: rgba(161, 61, 50, 0.08); }
+  .note-success { border-left-color: var(--success); background: rgba(66, 97, 62, 0.08); }
+  .note-warning { border-left-color: var(--warning); background: rgba(128, 83, 22, 0.08); }
+
+  .toolbar {
+    position: sticky; top: 40px; z-index: 40; display: flex; flex-wrap: wrap; gap: 8px;
+    align-items: center; justify-content: space-between; margin: 20px 0; padding: 12px;
+    border: 1px solid var(--border); border-radius: var(--r-panel);
+    background: rgba(255, 249, 239, 0.96); box-shadow: var(--shadow-soft);
+  }
+  .toolbar-group { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+  .toolbar-label { color: var(--dim); font-size: 13px; }
+  .toolbar button { padding: 8px 14px; font-size: 14px; }
+
+  .section { display: grid; gap: 12px; margin-top: 44px; padding-top: 8px; border-top: 1px solid var(--line); }
+  .section-head { display: grid; gap: 8px; max-width: 88ch; }
+  .section-head p { color: var(--dim); }
+
+  .viewport-stage { display: flex; gap: 20px; align-items: flex-start; width: 100%; overflow: auto; padding: 4px 0 8px; --scale: 1; }
+  .viewport-stage[data-view="desktop"] .frame-mobile,
+  .viewport-stage[data-view="mobile"] .frame-desktop { display: none; }
+  .viewport-stage[data-view="mobile"] { justify-content: center; }
+  .frame-wrap {
+    position: relative; flex: 0 0 auto; width: calc(var(--fw) * var(--scale)); height: calc(var(--fh) * var(--scale) + 22px);
+    overflow: hidden; border: 1px solid var(--border); border-radius: var(--r-panel); background: var(--bg); box-shadow: var(--shadow-panel);
+  }
+  .frame-wrap.frame-desktop { --fw: 1440px; --fh: 900px; }
+  .frame-wrap.frame-mobile { --fw: 390px; --fh: 844px; }
+  .frame { width: var(--fw); height: var(--fh); overflow: hidden; transform: scale(var(--scale)); transform-origin: top left; background: var(--bg); }
+  .frame-label { position: static; display: block; height: 22px; line-height: 22px; padding: 0 8px; border: 1px solid var(--border); border-radius: 6px; background: rgba(255, 249, 239, 0.94); color: var(--dim); font-size: 11px; pointer-events: none; }
+
+  .rule-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 12px; }
+  .rule-card { display: grid; gap: 8px; align-content: start; padding: 12px; border: 1px solid var(--border); border-radius: var(--r-panel); background: var(--panel); }
+  .rule-card ul { margin: 0; padding-left: 18px; color: var(--dim); font-size: 14px; display: grid; gap: 4px; }
+  .tag { padding: 2px 8px; border-radius: 999px; font-size: 11px; font-weight: 700; letter-spacing: 0.04em; border: 1px solid var(--border); color: var(--dim); background: var(--bg); }
+  .tag-ok { color: var(--success); border-color: rgba(66, 97, 62, 0.35); background: rgba(66, 97, 62, 0.1); }
+  .tag-bad { color: var(--critical); border-color: rgba(161, 61, 50, 0.35); background: rgba(161, 61, 50, 0.08); }
+  .tag-warn { color: var(--warning); border-color: rgba(128, 83, 22, 0.35); background: rgba(128, 83, 22, 0.08); }
+
+  table { width: 100%; border-collapse: collapse; font-size: 14px; background: var(--panel); border-radius: var(--r-panel); overflow: hidden; }
+  th, td { padding: 9px 12px; border-bottom: 1px solid var(--line); text-align: left; vertical-align: top; }
+  th { font-size: 12px; letter-spacing: 0.05em; text-transform: uppercase; color: var(--dim); background: var(--bg); }
+  tr:last-child td { border-bottom: 0; }
+
+  .footer { display: grid; gap: 6px; margin-top: 48px; padding-top: 16px; border-top: 1px solid var(--line); color: var(--dim); font-size: 13px; }
+  .footer strong { color: var(--ink); }
+
+  /* reference sheet inside the frame */
+  .ref { width: 100%; height: 100%; display: grid; grid-template-rows: auto auto auto 1fr; gap: 16px; padding: 24px 28px 20px; background: var(--bg); }
+  .ref-head { display: grid; gap: 3px; }
+  .ref-head .eyebrow { font-size: 11px; }
+  .ref-head h3 { font-size: 28px; }
+  .ref-head p { color: var(--dim); font-size: 13px; max-width: 96ch; }
+  .ref-chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 4px; }
+  .ref-chips span { padding: 2px 8px; border: 1px solid var(--border); border-radius: 999px; background: var(--panel); color: var(--dim); font-size: 10px; }
+
+  .items { display: grid; grid-template-columns: repeat(5, 1fr); gap: 12px; }
+  .tile { display: grid; gap: 6px; align-content: start; padding: 10px; border: 1px solid var(--border); border-radius: 12px; background: var(--panel); text-align: left; }
+  .tile.is-selected { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent); }
+  .tile .imgbox { display: grid; place-items: center; height: 116px; border: 1px solid var(--border); border-radius: 8px; background: linear-gradient(160deg, #FFF9EF, #F3ECDF); color: var(--accent); }
+  .tile .imgbox svg { width: 66px; height: 66px; }
+  .tile .imgbox.missing { border-style: dashed; border-color: rgba(128, 83, 22, 0.5); background: rgba(128, 83, 22, 0.05); color: var(--warning); }
+  .tile .imgbox.missing .mk { font-size: 10px; letter-spacing: 0.06em; text-transform: uppercase; text-align: center; padding: 0 8px; }
+  .tile b { font-size: 14px; }
+  .tile small { color: var(--dim); font-size: 11px; }
+  .tile .chips { display: flex; flex-wrap: wrap; gap: 4px; min-height: 20px; }
+  .chip { padding: 1px 7px; border: 1px solid var(--border); border-radius: 999px; font-size: 10px; color: var(--dim); background: var(--bg); }
+  .chip.ok { color: var(--success); border-color: rgba(66, 97, 62, 0.35); background: rgba(66, 97, 62, 0.09); }
+  .chip.worn { color: var(--accent); border-color: rgba(134, 85, 30, 0.45); background: var(--warm); }
+  .chip.sel { color: var(--accent); border-color: var(--accent); background: var(--panel); }
+  .chip.none { color: var(--critical); border-color: rgba(161, 61, 50, 0.35); background: rgba(161, 61, 50, 0.08); }
+  .tile .stateline { color: var(--dim); font-size: 11px; }
+
+  .surfaces { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; }
+  .surface { display: grid; gap: 8px; align-content: start; padding: 12px; border: 1px solid var(--border); border-radius: 12px; background: var(--panel); }
+  .surface h4 { font-size: 11px; text-transform: uppercase; letter-spacing: 0.07em; color: var(--dim); }
+  .surface-body { display: grid; grid-template-columns: 72px 1fr; gap: 10px; align-items: center; }
+  .surface-body .thumb { display: grid; place-items: center; width: 72px; height: 72px; border: 1px solid var(--border); border-radius: 8px; background: linear-gradient(160deg, #FFF9EF, #F3ECDF); color: var(--accent); }
+  .surface-body .thumb svg { width: 46px; height: 46px; }
+  .surface-body .thumb.missing { border-style: dashed; border-color: rgba(128, 83, 22, 0.5); background: rgba(128, 83, 22, 0.05); color: var(--warning); }
+  .surface-body .thumb.missing .mk { font-size: 8px; letter-spacing: 0.05em; text-transform: uppercase; text-align: center; }
+  .surface-body b { font-size: 13px; display: block; }
+  .surface-body small { display: block; color: var(--dim); font-size: 11px; }
+  .surface .kv { display: flex; justify-content: space-between; gap: 8px; font-size: 11px; }
+  .surface .kv span:first-child { color: var(--dim); }
+  .surface .act { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+  .surface .act button { min-height: 34px; padding: 3px 10px; font-size: 11px; }
+  .surface .micro { color: var(--dim); font-size: 10px; }
+  .scene-shot { position: relative; height: 72px; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; background: linear-gradient(180deg, #C6D6D8 0%, #DDD2BE 62%, #CFC2A8 100%); display: grid; place-items: center; color: var(--accent); }
+  .scene-shot svg { width: 40px; height: 40px; }
+  .scene-shot .ground { position: absolute; left: 0; right: 0; bottom: 0; height: 18px; background: rgba(134, 85, 30, 0.12); }
+  .ref-foot { display: flex; flex-wrap: wrap; gap: 8px 16px; align-items: center; padding-top: 10px; border-top: 1px solid var(--line); color: var(--dim); font-size: 11px; }
+  .ref-foot b { color: var(--ink); }
+
+  .ref.m { padding: 14px; gap: 10px; grid-template-rows: auto auto auto auto; overflow: auto; }
+  .ref.m .ref-head h3 { font-size: 22px; }
+  .ref.m .ref-head p { font-size: 12px; }
+  .ref.m .ref-chips { display: none; }
+  .ref.m .items { grid-template-columns: repeat(2, 1fr); gap: 8px; }
+  .ref.m .tile { padding: 7px; gap: 4px; }
+  .ref.m .tile .imgbox { height: 78px; }
+  .ref.m .tile .imgbox svg { width: 46px; height: 46px; }
+  .ref.m .tile .stateline { display: none; }
+  .ref.m .surfaces { grid-template-columns: 1fr; gap: 8px; }
+  .ref.m .surface { padding: 8px; }
+  .ref.m .surface-body { grid-template-columns: 56px 1fr; }
+  .ref.m .surface-body .thumb { width: 56px; height: 56px; }
+  .ref.m .surface-body .thumb svg { width: 36px; height: 36px; }
+  .ref.m .scene-shot { display: none; }
+  .ref.m .surface .micro { display: none; }
+
+  [hidden] { display: none !important; }
+  @media (prefers-reduced-motion: reduce) {
+    html { scroll-behavior: auto; }
+    *, *::before, *::after { animation-duration: 0.001ms !important; transition-duration: 0.001ms !important; }
+  }
+</style>
+</head>
+<body>
+<div class="concept-flag" role="note">
+  <strong>ПРЕДВАРИТЕЛЬНЫЙ КОНЦЕПТ, НЕ УТВЕРЖДЁННЫЙ PRODUCTION-АССЕТ</strong>
+  <span>Issue #386 · язык предметов · §27/§27.1 · design handoff, не код и не игровой факт</span>
+</div>
+
+<main class="sheet">
+  <header class="sheet-header">
+    <div class="eyebrow">#386 · Предметы · волна 2, часть 5</div>
+    <h1>Один образ вещи — один язык состояний</h1>
+    <p class="lede">
+      Опорный лист личных предметов: куртка, сапоги, шапка, один тип еды и один тип воды.
+      Нейтральный свет, общий масштаб, читаемый силуэт и никакого HUD внутри предмета.
+      Одна и та же иллюстрация используется в инвентаре, на рынке и в сцене; состояния
+      «в наличии / надето / выбрано / изображение недоступно» показаны только там, где они есть.
+    </p>
+    <div class="meta-row">
+      <span class="pill"><strong>Канон:</strong> §27, §27.1</span>
+      <span class="pill"><strong>Основа:</strong> #363 токены, #366 Инвентарь</span>
+      <span class="pill"><strong>Борд:</strong> 386-item-language.svg</span>
+    </div>
+    <div class="note">
+      <strong>Граница артефакта.</strong> Это design handoff, а не изменение <code>backend/**</code> и не
+      игровой факт. Названия типов, цены и количества — условные демонстрационные данные.
+      Иллюстрации — предварительные inline-SVG-пиктограммы, не финальный арт.
+    </div>
+  </header>
+
+  <div class="toolbar" role="toolbar" aria-label="Управление просмотром листа">
+    <div class="toolbar-group">
+      <span class="toolbar-label">Композиция:</span>
+      <button type="button" data-view="desktop" aria-pressed="true">Desktop 1440×900</button>
+      <button type="button" data-view="mobile" aria-pressed="false">Mobile 390×844</button>
+      <button type="button" data-view="both" aria-pressed="false">Оба рядом</button>
+    </div>
+    <div class="toolbar-group">
+      <span class="toolbar-label">Состояние:</span>
+      <button type="button" data-state="normal" aria-pressed="true">В наличии</button>
+      <button type="button" data-state="worn" aria-pressed="false">Надето</button>
+      <button type="button" data-state="selected" aria-pressed="false">Выбрано</button>
+      <button type="button" data-state="missing" aria-pressed="false">Изображение недоступно</button>
+      <button type="button" id="itm-reset">Сбросить демо</button>
+    </div>
+  </div>
+
+  <section class="section" id="screen">
+    <div class="section-head">
+      <h2>Лист</h2>
+      <p>
+        Кликните предмет, чтобы увидеть его в трёх поверхностях. Надетость показывается только у
+        одежды; у еды и воды её нет — там честно указано «расходуемый». Недоступное изображение —
+        пунктирная рамка с подписью, а не выдуманная картинка.
+      </p>
+    </div>
+    <div class="viewport-stage" data-view="desktop" id="viewport-stage">
+      <div class="frame-wrap frame-desktop">
+        <span class="frame-label">DESKTOP · 1440×900 · логический размер</span>
+        <div class="frame"><div class="frame-slot" data-frame="desktop"></div></div>
+      </div>
+      <div class="frame-wrap frame-mobile">
+        <span class="frame-label">MOBILE · 390×844</span>
+        <div class="frame"><div class="frame-slot" data-frame="mobile"></div></div>
+      </div>
+    </div>
+    <div class="note note-critical">
+      <strong>Главное правило.</strong> Иконка никогда не обещает неизвестный цвет, материал или
+      состояние. Цвет, ткань и износ — свойства конкретного экземпляра из данных; пиктограмма
+      обозначает только тип вещи.
+    </div>
+  </section>
+
+  <section class="section" id="rules">
+    <div class="section-head">
+      <h2>Правила, которым следует лист</h2>
+      <p>Пять типов, общий масштаб и четыре состояния — без декоративного HUD внутри предмета.</p>
+    </div>
+    <div class="rule-grid">
+      <div class="rule-card">
+        <h3>Один образ <span class="tag">reuse</span></h3>
+        <ul>
+          <li>одна иллюстрация на инвентарь, рынок и сцену;</li>
+          <li>общий масштаб и нейтральный свет;</li>
+          <li>силуэт читается без подписи;</li>
+          <li>никакого HUD, цены или кнопок внутри предмета.</li>
+        </ul>
+      </div>
+      <div class="rule-card">
+        <h3>Честные состояния <span class="tag tag-ok">state</span></h3>
+        <ul>
+          <li>«надето» — только у одежды;</li>
+          <li>«выбрано» — рамка, а не смена цвета вещи;</li>
+          <li>«в наличии» — по данным остатка;</li>
+          <li>у еды и воды надетости не существует.</li>
+        </ul>
+      </div>
+      <div class="rule-card">
+        <h3>Неизвестное <span class="tag tag-warn">unknown</span></h3>
+        <ul>
+          <li>изображение недоступно — пунктир и подпись;</li>
+          <li>цвет и материал не угадываются;</li>
+          <li>износ показывается числом/подписью из данных;</li>
+          <li>нейтральный символ типа вместо фантазии.</li>
+        </ul>
+      </div>
+      <div class="rule-card">
+        <h3>Тип и экземпляр <span class="tag">type</span></h3>
+        <ul>
+          <li><code>food_bread</code> и <code>water_bottle</code> — типы;</li>
+          <li>цена, количество и состояние — экземпляр;</li>
+          <li>состояние не рисуется в пиктограмме;</li>
+          <li>неизвестный экземпляр не получает выдуманный вид.</li>
+        </ul>
+      </div>
+    </div>
+    <div class="note note-success" style="margin-top:12px">
+      <strong>Пример приёмки.</strong> Дано: куртка в запасе. Когда её надевают, тогда появляется
+      подпись «надето», а сама пиктограмма не меняет цвет или материал. Когда изображение
+      недоступно, тогда вместо арта показывается пунктирная рамка с подписью типа. Когда открыт
+      хлеб, тогда состояния «надето» нет — есть «расходуемый» и остаток.
+    </div>
+  </section>
+
+  <section class="section" id="map">
+    <div class="section-head">
+      <h2>Что где лежит</h2>
+      <p>Короткая карта соответствия состояний поверхностям.</p>
+    </div>
+    <table>
+      <thead><tr><th>Состояние</th><th>Где существует</th><th>Как показано</th></tr></thead>
+      <tbody>
+        <tr><td>в наличии</td><td>инвентарь, рынок, сцена</td><td>чип «в наличии» + остаток из данных</td></tr>
+        <tr><td>надето</td><td>только одежда</td><td>чип «надето», без изменения пиктограммы</td></tr>
+        <tr><td>выбрано</td><td>любая поверхность</td><td>рамка выбора, не цвет вещи</td></tr>
+        <tr><td>изображение недоступно</td><td>любая поверхность</td><td>пунктирная рамка + подпись типа</td></tr>
+        <tr><td>расходуемый</td><td>еда и вода</td><td>подпись вместо «надето»</td></tr>
+      </tbody>
+    </table>
+  </section>
+
+  <footer class="footer">
+    <span><strong>#386 · Предметы.</strong> Предварительный концепт, не утверждённый production-ассет. Приёмка владельцем — отдельный шаг.</span>
+    <span>Источники: docs/VISUAL-BIBLE.md §27, §27.1; #363 токены; 386-item-language.svg. Связанные: #366 Инвентарь, #373 Рынок, #372 Образ.</span>
+  </footer>
+</main>
+
+<script>
+(function () {
+  "use strict";
+
+  var stage = document.getElementById("viewport-stage");
+  var viewButtons = Array.prototype.slice.call(document.querySelectorAll("button[data-view]"));
+  var stateButtons = Array.prototype.slice.call(document.querySelectorAll("button[data-state]"));
+
+  function fitFrames() {
+    var view = stage.getAttribute("data-view") || "desktop";
+    var available = Math.max(240, stage.clientWidth - 4);
+    var total = view === "desktop" ? 1440 : view === "mobile" ? 390 : 1440 + 390 + 20;
+    stage.style.setProperty("--scale", String(Math.max(0.2, Math.min(1, available / total))));
+  }
+  function setView(view) {
+    stage.setAttribute("data-view", view);
+    viewButtons.forEach(function (b) {
+      b.setAttribute("aria-pressed", b.getAttribute("data-view") === view ? "true" : "false");
+    });
+    fitFrames();
+  }
+  viewButtons.forEach(function (b) {
+    b.addEventListener("click", function () { setView(b.getAttribute("data-view")); });
+  });
+
+  var ITEMS = [
+    { id: "jacket", name: "Куртка", type: "Одежда · верх", wearable: true, qty: 1, price: 320, avail: true },
+    { id: "boots", name: "Сапоги", type: "Одежда · обувь", wearable: true, qty: 2, price: 260, avail: true },
+    { id: "hat", name: "Шапка", type: "Одежда · голова", wearable: true, qty: 3, price: 90, avail: true },
+    { id: "bread", name: "Хлеб", type: "Еда · food_bread", wearable: false, qty: 0, price: 14, avail: false },
+    { id: "water", name: "Вода", type: "Вода · water_bottle", wearable: false, qty: 5, price: 10, avail: true }
+  ];
+
+  var S = {
+    mode: "normal",
+    focus: "jacket",
+    worn: {},
+    imgFail: {},
+    toast: "Демонстрационные данные. Иллюстрации условные."
+  };
+
+  function esc(v) {
+    return String(v == null ? "" : v).replace(/[&<>"']/g, function (c) {
+      return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c];
+    });
+  }
+  function rub(n) { return String(n).replace(/\B(?=(\d{3})+(?!\d))/g, " ") + " ₽"; }
+  function itemById(id) {
+    for (var i = 0; i < ITEMS.length; i++) { if (ITEMS[i].id === id) return ITEMS[i]; }
+    return null;
+  }
+
+  function iconSvg(kind) {
+    var paths = {
+      jacket: '<path d="M9 3.5 5 5.5v6.5h2V21h10v-9h2V5.5l-4-2-3 3z"/><path d="M12 6.5V21"/>',
+      boots: '<path d="M7.5 3.5h4V13h4.5l1 4.5h-10z"/><path d="M7 17.5h10"/>',
+      hat: '<path d="M7.5 12c0-5 1.8-8 4.5-8s4.5 3 4.5 8"/><path d="M4 12.5h16"/><path d="M6 16.5h12"/>',
+      bread: '<path d="M4 13.5c0-4 3.6-6.5 8-6.5s8 2.5 8 6.5-3.6 5-8 5-8-1-8-5z"/><path d="M9 9.5v7.5M13 9v8"/>',
+      water: '<path d="M10 3.5h4v2.5l1.5 2v11h-7v-11l1.5-2z"/><path d="M9 13.5h6"/>'
+    };
+    return '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' + (paths[kind] || "") + "</svg>";
+  }
+  function unavailableBox(kind) {
+    return '<span class="mk">изображение<br>недоступно</span>';
+  }
+
+  function chipsFor(it) {
+    var chips = [];
+    var isSel = it.id === S.focus;
+    if (it.avail) chips.push('<span class="chip ok">в наличии</span>');
+    else chips.push('<span class="chip none">нет в наличии</span>');
+    if (it.wearable) {
+      if (S.worn[it.id]) chips.push('<span class="chip worn">надето</span>');
+    } else {
+      chips.push('<span class="chip">расходуемый</span>');
+    }
+    if (isSel) chips.push('<span class="chip sel">выбрано</span>');
+    if (S.imgFail[it.id]) chips.push('<span class="chip none">изображение недоступно</span>');
+    return chips.join("");
+  }
+
+  function tile(it) {
+    var missing = !!S.imgFail[it.id];
+    var box = missing
+      ? '<div class="imgbox missing">' + unavailableBox(it.id) + "</div>"
+      : '<div class="imgbox">' + iconSvg(it.id) + "</div>";
+    return '<button type="button" class="tile' + (it.id === S.focus ? " is-selected" : "") + '" data-act="focus" data-id="' + it.id + '" aria-pressed="' + (it.id === S.focus) + '">' +
+      box + "<b>" + esc(it.name) + "</b><small>" + esc(it.type) + "</small>" +
+      '<span class="chips">' + chipsFor(it) + "</span>" +
+      '<span class="stateline">' + (it.qty > 0 ? "Количество: " + it.qty : "Количество: 0") + "</span></button>";
+  }
+
+  function thumb(it) {
+    if (S.imgFail[it.id]) return '<span class="thumb missing">' + unavailableBox(it.id) + "</span>";
+    return '<span class="thumb">' + iconSvg(it.id) + "</span>";
+  }
+
+  function inventorySurface(it) {
+    var action = it.wearable
+      ? '<button type="button" data-act="wear" data-id="' + it.id + '">' + (S.worn[it.id] ? "Снять" : "Надеть") + "</button>"
+      : '<button type="button" data-act="use" data-id="' + it.id + '">Использовать</button>';
+    return '<section class="surface"><h4>Инвентарь</h4><div class="surface-body">' + thumb(it) +
+      "<span><b>" + esc(it.name) + "</b><small>" + esc(it.type) + " · " + it.qty + " шт.</small></span></div>" +
+      '<div class="kv"><span>Состояние</span><span>' + (it.wearable ? (S.worn[it.id] ? "надето" : "в запасе") : "расходуемый") + "</span></div>" +
+      '<div class="act">' + action + "</div>" +
+      '<div class="micro">HUD снаружи вещи; пиктограмма не меняется от состояния.</div></section>';
+  }
+
+  function marketSurface(it) {
+    return '<section class="surface"><h4>Рынок</h4><div class="surface-body">' + thumb(it) +
+      "<span><b>" + esc(it.name) + "</b><small>" + rub(it.price) + (it.avail ? " · в наличии" : " · нет у продавца") + "</small></span></div>" +
+      '<div class="kv"><span>Цена</span><span>' + rub(it.price) + "</span></div>" +
+      '<div class="kv"><span>Доступность</span><span>' + (it.avail ? "подтверждена" : "нет остатка") + "</span></div>" +
+      '<div class="act"><button type="button" data-act="noop">Посмотреть</button></div>' +
+      '<div class="micro">Та же иллюстрация типа; цена и остаток — данные предложения.</div></section>';
+  }
+
+  function sceneSurface(it) {
+    var art = S.imgFail[it.id] ? unavailableBox(it.id) : iconSvg(it.id);
+    var shot = '<div class="scene-shot"><span class="ground"></span>' + art + "</div>";
+    return '<section class="surface"><h4>Сцена</h4><div class="surface-body">' + thumb(it) +
+      "<span><b>" + esc(it.name) + "</b><small>один образ вещи · по данным</small></span></div>" + shot +
+      '<div class="micro">В кадре нет HUD, цены и кнопок внутри предмета.</div></section>';
+  }
+
+  function refHtml(mobile) {
+    var it = itemById(S.focus) || ITEMS[0];
+    var chips = '<span>#386</span><span>общий масштаб</span><span>нейтральный свет</span><span>без HUD в предмете</span>';
+    return '<div class="ref' + (mobile ? " m" : "") + '">' +
+      '<div class="ref-head"><div class="eyebrow">ПРЕДМЕТЫ · ЕДИНЫЙ ЯЗЫК · #386</div>' +
+      "<h3>Пять типов — один образ</h3>" +
+      "<p>Одежда, еда и вода в общем масштабе. Состояния показаны подписями и рамкой; сам силуэт типа не притворяется цветом, тканью или износом.</p>" +
+      '<div class="ref-chips">' + chips + "</div></div>" +
+      '<div class="items" role="list" aria-label="Типы предметов">' + ITEMS.map(tile).join("") + "</div>" +
+      '<div class="surfaces">' + inventorySurface(it) + marketSurface(it) + sceneSurface(it) + "</div>" +
+      '<div class="ref-foot"><span><b>Один образ:</b> инвентарь · рынок · сцена</span>' +
+      "<span>Иконка не обещает неизвестный цвет, материал или состояние.</span>" +
+      "<span>Данные условные.</span></div></div>";
+  }
+
+  function render() {
+    var d = document.querySelector('[data-frame="desktop"]');
+    var m = document.querySelector('[data-frame="mobile"]');
+    if (d) d.innerHTML = refHtml(false);
+    if (m) m.innerHTML = refHtml(true);
+  }
+
+  document.addEventListener("click", function (ev) {
+    var el = ev.target.closest ? ev.target.closest("[data-act]") : null;
+    if (!el) return;
+    var act = el.getAttribute("data-act");
+    if (act === "focus") {
+      S.focus = el.getAttribute("data-id");
+      S.toast = "Выбран тип «" + (itemById(S.focus) || {}).name + "».";
+      render();
+    } else if (act === "wear") {
+      var id = el.getAttribute("data-id");
+      var it = itemById(id);
+      if (!it || !it.wearable) return;
+      if (S.worn[id]) delete S.worn[id];
+      else S.worn[id] = true;
+      S.toast = it.name + ": " + (S.worn[id] ? "подписано «надето»" : "снова в запасе") + ". Пиктограмма не изменена.";
+      render();
+    } else if (act === "use") {
+      S.toast = "Тип «расходуемый»: надетости не существует. Демонстрационное действие.";
+      render();
+    } else if (act === "noop") {
+      S.toast = "Действие вне демо: здесь показан только вид карточки.";
+      render();
+    }
+  });
+
+  stateButtons.forEach(function (b) {
+    b.addEventListener("click", function () {
+      var st = b.getAttribute("data-state");
+      stateButtons.forEach(function (x) { x.setAttribute("aria-pressed", x === b ? "true" : "false"); });
+      S.mode = st;
+      S.worn = {};
+      S.imgFail = {};
+      if (st === "worn") {
+        S.worn = { jacket: true, boots: true };
+        S.focus = "jacket";
+        S.toast = "Надетость есть только у одежды; у еды и воды — «расходуемый».";
+      } else if (st === "selected") {
+        S.focus = "hat";
+        S.toast = "Выбрано: рамка выбора, а не изменение цвета вещи.";
+      } else if (st === "missing") {
+        S.imgFail = { bread: true };
+        S.focus = "bread";
+        S.toast = "Изображение недоступно: пунктир и подпись вместо выдуманного арта.";
+      } else {
+        S.focus = "jacket";
+        S.toast = "Базовое состояние: наличие по данным, выбор — рамкой.";
+      }
+      render();
+    });
+  });
+
+  document.getElementById("itm-reset").addEventListener("click", function () {
+    S.mode = "normal";
+    S.focus = "jacket";
+    S.worn = {};
+    S.imgFail = {};
+    S.toast = "Демо сброшено к исходным данным.";
+    stateButtons.forEach(function (x) { x.setAttribute("aria-pressed", x.getAttribute("data-state") === "normal" ? "true" : "false"); });
+    render();
+  });
+
+  fitFrames();
+  window.addEventListener("resize", fitFrames);
+  render();
+})();
+</script>
+</body>
+</html>

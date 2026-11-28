@@ -1,0 +1,693 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>#355 · Путь: дом → магазин → покупка → одежда → мир — предварительный концепт</title>
+<style>
+  :root {
+    --bg: #F3ECDF;
+    --panel: #FFF9EF;
+    --ink: #30271F;
+    --dim: #69594C;
+    --accent: #86551E;
+    --accent-hover: #6E4519;
+    --success: #42613E;
+    --warning: #805316;
+    --critical: #A13D32;
+    --border: rgba(48, 39, 31, 0.14);
+    --line: rgba(48, 39, 31, 0.12);
+    --focus: rgba(134, 85, 30, 0.45);
+    --warm: rgba(134, 85, 30, 0.12);
+    --shadow-panel: 0 12px 32px rgba(48, 39, 31, 0.16), 0 2px 8px rgba(48, 39, 31, 0.10);
+    --shadow-soft: 0 2px 8px rgba(48, 39, 31, 0.14);
+    --r-panel: 12px;
+    --r-control: 8px;
+    --font-body: system-ui, -apple-system, "Segoe UI", sans-serif;
+    --font-head: Georgia, "Times New Roman", serif;
+  }
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  body { margin: 0; background: var(--bg); color: var(--ink); font: 16px/1.55 var(--font-body); }
+  h1, h2, h3, h4 { margin: 0; font-family: var(--font-head); font-weight: 400; line-height: 1.18; }
+  h1 { font-size: clamp(30px, 4vw, 44px); }
+  h2 { font-size: 30px; }
+  h3 { font-size: 21px; }
+  h4 { font-size: 13px; font-family: var(--font-body); font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em; color: var(--dim); }
+  p { margin: 0; }
+  a { color: var(--accent); }
+  code { padding: 1px 5px; border: 1px solid var(--border); border-radius: 5px; background: var(--warm); font: 0.92em/1.4 ui-monospace, SFMono-Regular, Menlo, monospace; }
+  button {
+    min-height: 44px; padding: 10px 16px; border: 1px solid var(--border); border-radius: var(--r-control);
+    background: var(--panel); color: var(--ink); font: inherit; cursor: pointer;
+  }
+  button:hover { border-color: var(--accent); background: var(--warm); }
+  button:focus-visible, [tabindex]:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+  button:disabled { opacity: 0.55; cursor: default; }
+  button[aria-pressed="true"] { background: var(--accent); border-color: var(--accent); color: var(--panel); }
+  button[aria-pressed="true"]:hover { background: var(--accent-hover); border-color: var(--accent-hover); }
+
+  .concept-flag {
+    position: sticky; top: 0; z-index: 50; display: flex; flex-wrap: wrap; gap: 8px 12px;
+    align-items: center; justify-content: center; padding: 8px 16px;
+    border-bottom: 1px solid rgba(161, 61, 50, 0.32); background: #F8E8DC; color: #6B2A22;
+    font-size: 13px; line-height: 1.35; text-align: center;
+  }
+  .concept-flag strong { letter-spacing: 0.02em; }
+
+  .sheet { width: min(1320px, calc(100% - 32px)); margin: 0 auto; padding: 28px 0 72px; }
+  .sheet-header { display: grid; gap: 20px; padding: 28px 0 24px; border-bottom: 1px solid var(--line); }
+  .eyebrow { color: var(--accent); font-size: 13px; font-weight: 700; letter-spacing: 0.14em; text-transform: uppercase; }
+  .lede { max-width: 84ch; color: var(--dim); font-size: 18px; }
+  .meta-row { display: flex; flex-wrap: wrap; gap: 8px; }
+  .pill { display: inline-flex; gap: 6px; align-items: center; min-height: 32px; padding: 4px 10px; border: 1px solid var(--border); border-radius: 999px; background: var(--panel); color: var(--dim); font-size: 13px; }
+  .pill strong { color: var(--ink); font-weight: 600; }
+  .note { padding: 10px 14px; border-left: 3px solid var(--accent); background: var(--warm); color: var(--dim); font-size: 14px; }
+  .note strong { color: var(--ink); }
+  .note-critical { border-left-color: var(--critical); background: rgba(161, 61, 50, 0.08); }
+  .note-success { border-left-color: var(--success); background: rgba(66, 97, 62, 0.08); }
+  .note-warning { border-left-color: var(--warning); background: rgba(128, 83, 22, 0.08); }
+
+  .toolbar {
+    position: sticky; top: 40px; z-index: 40; display: flex; flex-wrap: wrap; gap: 8px;
+    align-items: center; justify-content: space-between; margin: 20px 0; padding: 12px;
+    border: 1px solid var(--border); border-radius: var(--r-panel);
+    background: rgba(255, 249, 239, 0.96); box-shadow: var(--shadow-soft);
+  }
+  .toolbar-group { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+  .toolbar-label { color: var(--dim); font-size: 13px; }
+  .toolbar button { padding: 8px 14px; font-size: 14px; }
+
+  .section { display: grid; gap: 12px; margin-top: 44px; padding-top: 8px; border-top: 1px solid var(--line); }
+  .section-head { display: grid; gap: 8px; max-width: 88ch; }
+  .section-head p { color: var(--dim); }
+
+  .viewport-stage { display: flex; gap: 20px; align-items: flex-start; width: 100%; overflow: auto; padding: 4px 0 8px; --scale: 1; }
+  .viewport-stage[data-view="desktop"] .frame-mobile,
+  .viewport-stage[data-view="mobile"] .frame-desktop { display: none; }
+  .viewport-stage[data-view="mobile"] { justify-content: center; }
+  .frame-wrap {
+    position: relative; flex: 0 0 auto; width: calc(var(--fw) * var(--scale)); height: calc(var(--fh) * var(--scale) + 22px);
+    overflow: hidden; border: 1px solid var(--border); border-radius: var(--r-panel); background: var(--bg); box-shadow: var(--shadow-panel);
+  }
+  .frame-wrap.frame-desktop { --fw: 1440px; --fh: 900px; }
+  .frame-wrap.frame-mobile { --fw: 390px; --fh: 844px; }
+  .frame { width: var(--fw); height: var(--fh); overflow: hidden; transform: scale(var(--scale)); transform-origin: top left; background: var(--bg); }
+  .frame-label { position: static; display: block; height: 22px; line-height: 22px; padding: 0 8px; border: 1px solid var(--border); border-radius: 6px; background: rgba(255, 249, 239, 0.94); color: var(--dim); font-size: 11px; pointer-events: none; }
+
+  .rule-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 12px; }
+  .rule-card { display: grid; gap: 8px; align-content: start; padding: 12px; border: 1px solid var(--border); border-radius: var(--r-panel); background: var(--panel); }
+  .rule-card ul { margin: 0; padding-left: 18px; color: var(--dim); font-size: 14px; display: grid; gap: 4px; }
+  .tag { display: inline-block; padding: 2px 8px; border-radius: 999px; font-size: 11px; font-weight: 700; border: 1px solid var(--border); color: var(--dim); background: var(--bg); }
+
+  table { width: 100%; border-collapse: collapse; font-size: 14px; background: var(--panel); border-radius: var(--r-panel); overflow: hidden; }
+  th, td { padding: 9px 12px; border-bottom: 1px solid var(--line); text-align: left; vertical-align: top; }
+  th { font-size: 12px; letter-spacing: 0.05em; text-transform: uppercase; color: var(--dim); background: var(--bg); }
+  tr:last-child td { border-bottom: 0; }
+
+  .footer { display: grid; gap: 6px; margin-top: 48px; padding-top: 16px; border-top: 1px solid var(--line); color: var(--dim); font-size: 13px; }
+  .footer strong { color: var(--ink); }
+
+  /* journey app inside frames */
+  .japp { width: 100%; height: 100%; display: grid; grid-template-rows: 76px 1fr; background: var(--bg); }
+  .japp .bar { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 0 28px; border-bottom: 1px solid var(--line); background: var(--panel); }
+  .japp .bar .t { display: grid; gap: 1px; }
+  .japp .bar b { font-family: var(--font-head); font-size: 22px; font-weight: 400; }
+  .japp .bar span { color: var(--dim); font-size: 12px; }
+  .japp .bar .chips { display: flex; flex-wrap: wrap; gap: 8px; }
+  .japp .bar .chips span { padding: 4px 9px; border: 1px solid var(--border); border-radius: 999px; font-size: 12px; color: var(--dim); }
+  .japp .body { display: grid; grid-template-columns: 310px minmax(0, 1fr); grid-template-rows: 1fr auto; gap: 14px 18px; padding: 18px 28px; overflow: hidden; min-height: 0; }
+  .japp .steps { display: grid; gap: 6px; align-content: start; overflow: auto; padding-right: 4px; grid-row: 1 / span 2; }
+  .japp .step { display: grid; grid-template-columns: 30px 1fr; gap: 10px; align-items: center; width: 100%; padding: 8px 10px; border: 1px solid var(--border); border-radius: 10px; background: var(--panel); text-align: left; min-height: 56px; }
+  .japp .step:hover { border-color: var(--accent); }
+  .japp .step[aria-pressed="true"] { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(134, 85, 30, 0.14); background: var(--panel); }
+  .japp .step .num { display: grid; place-items: center; width: 30px; height: 30px; border-radius: 50%; background: var(--warm); color: var(--accent); font-size: 13px; font-weight: 700; }
+  .japp .step b { display: block; font-size: 13px; }
+  .japp .step small { color: var(--dim); font-size: 11px; }
+  .japp .step .st { margin-left: 4px; font-size: 10px; padding: 1px 6px; border-radius: 999px; border: 1px solid var(--border); color: var(--dim); }
+  .japp .step .st.ok { color: var(--success); border-color: rgba(66,97,62,0.35); background: rgba(66,97,62,0.08); }
+  .japp .step .st.bad { color: var(--critical); border-color: rgba(161,61,50,0.35); background: rgba(161,61,50,0.07); }
+  .japp .step .st.live { color: var(--warning); border-color: rgba(128,83,22,0.35); background: rgba(128,83,22,0.07); }
+
+  .japp .detail { display: grid; gap: 12px; align-content: start; min-height: 0; }
+  .japp .scene { display: grid; grid-template-columns: minmax(0, 1fr) 300px; gap: 14px; min-height: 0; }
+  .japp .panel { padding: 14px; border: 1px solid var(--border); border-radius: 12px; background: var(--panel); display: grid; gap: 10px; align-content: start; }
+  .japp .stage { position: relative; display: grid; place-items: center; min-height: 226px; border: 1px solid var(--border); border-radius: 10px; background: linear-gradient(165deg, #E7E1D2, #D9D2BE); overflow: hidden; }
+  .japp .stage .place { display: grid; justify-items: center; gap: 4px; color: var(--dim); font-size: 12px; }
+  .japp .stage .place .box { width: 120px; height: 78px; border-radius: 8px 8px 2px 2px; background: #C9B99C; border: 1px solid rgba(48,39,31,0.18); position: relative; }
+  .japp .stage .place .box::before { content: ""; position: absolute; top: -16px; left: 4px; right: 4px; height: 18px; background: #A99878; clip-path: polygon(50% 0, 100% 100%, 0 100%); }
+  .japp .stage .place .box.shop { background: #B9A98C; }
+  .japp .stage .place .box.shop::after { content: ""; position: absolute; left: 14px; bottom: 10px; width: 26px; height: 34px; border: 1px solid rgba(48,39,31,0.25); background: #8E7C5E; }
+  .japp .stage .tagline { position: absolute; left: 12px; top: 10px; display: flex; gap: 6px; align-items: center; }
+  .japp .stage .tagline span { padding: 3px 8px; border: 1px solid var(--border); border-radius: 999px; background: rgba(255,249,239,0.92); font-size: 11px; color: var(--dim); }
+  .japp .stage .travel { position: absolute; right: 12px; bottom: 12px; display: grid; gap: 2px; padding: 6px 10px; border: 1px solid rgba(128,83,22,0.4); border-radius: 8px; background: rgba(255,249,239,0.94); color: var(--warning); font-size: 11px; font-weight: 700; }
+  .japp .stage .travel.ok { border-color: rgba(66,97,62,0.4); color: var(--success); }
+  .japp .money { display: flex; justify-content: space-between; gap: 12px; font-size: 14px; }
+  .japp .money b { font-variant-numeric: tabular-nums; }
+  .japp .states { display: flex; flex-wrap: wrap; gap: 6px; }
+  .japp .chip { padding: 3px 9px; border-radius: 999px; border: 1px solid var(--border); background: var(--bg); color: var(--dim); font-size: 11px; }
+  .japp .chip.on { border-color: var(--accent); background: var(--accent); color: var(--panel); }
+  .japp .chip.ok { border-color: rgba(66,97,62,0.4); color: var(--success); }
+  .japp .chip.bad { border-color: rgba(161,61,50,0.4); color: var(--critical); }
+  .japp .status { display: grid; gap: 2px; padding: 8px 10px; border: 1px dashed var(--border); border-radius: 8px; font-size: 12px; color: var(--dim); }
+  .japp .status.ok { border-style: solid; border-color: rgba(66,97,62,0.35); background: rgba(66,97,62,0.08); }
+  .japp .status.bad { border-style: solid; border-color: rgba(161,61,50,0.35); background: rgba(161,61,50,0.07); }
+  .japp .status.live { border-style: solid; border-color: rgba(128,83,22,0.35); background: rgba(128,83,22,0.07); }
+  .japp .status b { color: var(--ink); }
+  .japp .row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+  .japp .logwrap { display: grid; gap: 6px; align-content: start; min-height: 0; }
+  .japp .log { display: grid; gap: 3px; margin: 0; padding: 8px 10px; list-style: none; border: 1px dashed var(--border); border-radius: 8px; background: rgba(243,236,223,0.5); font-size: 12px; color: var(--dim); max-height: 116px; overflow: auto; }
+  .japp .log b { color: var(--ink); }
+  .japp .empty { display: grid; gap: 8px; align-content: start; }
+  .japp .refusal { padding: 8px 10px; border-left: 3px solid var(--critical); background: rgba(161,61,50,0.07); color: var(--dim); font-size: 12px; }
+  .japp .flux { padding: 8px 10px; border-left: 3px solid var(--warning); background: rgba(128,83,22,0.07); color: var(--dim); font-size: 12px; }
+  .japp .counters { display: flex; flex-wrap: wrap; gap: 8px 16px; padding-top: 6px; border-top: 1px solid var(--line); color: var(--dim); font-size: 11px; }
+  .japp .counters b { color: var(--ink); }
+
+  .japp.m { grid-template-rows: 70px 1fr; }
+  .japp.m .bar { padding: 8px 14px; }
+  .japp.m .bar b { font-size: 18px; }
+  .japp.m .bar .chips { display: none; }
+  .japp.m .body { grid-template-columns: 1fr; grid-template-rows: auto 1fr auto; padding: 10px 12px; gap: 8px; }
+  .japp.m .steps { grid-row: auto; display: flex; gap: 6px; overflow-x: auto; padding-bottom: 2px; }
+  .japp.m .step { grid-template-columns: 20px 1fr; min-width: 156px; min-height: 48px; padding: 6px 8px; }
+  .japp.m .step .num { width: 20px; height: 20px; font-size: 10px; }
+  .japp.m .step small { display: none; }
+  .japp.m .scene { grid-template-columns: 1fr; gap: 8px; }
+  .japp.m .stage { min-height: 132px; }
+  .japp.m .panel { padding: 10px; gap: 8px; }
+  .japp.m .log { max-height: 78px; font-size: 11px; }
+  .japp.m .counters { font-size: 10px; }
+
+  [hidden] { display: none !important; }
+  @media (prefers-reduced-motion: reduce) {
+    html { scroll-behavior: auto; }
+    *, *::before, *::after { animation-duration: 0.001ms !important; transition-duration: 0.001ms !important; }
+  }
+  @media (max-width: 720px) {
+    table { table-layout: fixed; }
+    th, td { overflow-wrap: break-word; }
+  }
+</style>
+</head>
+<body>
+<div class="concept-flag" role="note">
+  <strong>ПРЕДВАРИТЕЛЬНЫЙ КОНЦЕПТ, НЕ УТВЕРЖДЁННЫЙ PRODUCTION-АССЕТ</strong>
+  <span>Issue #355 · путь «дом → магазин → покупка → одежда → мир» · §27/§27.1 · не код и не игровой факт</span>
+</div>
+
+<main class="sheet">
+  <header class="sheet-header">
+    <div class="eyebrow">#355 · сквозной сценарий · волна 2, часть 2</div>
+    <h1>Из дома в магазин за курткой</h1>
+    <p class="lede">
+      Один маршрут в пяти кадрах. Каждый шаг различает запрос, подтверждение, ожидание, завершение и
+      отказ. Навигация не выполняет действие, покупка и надетость появляются только по ответу мира,
+      отказ при нехватке денег ничего не подтверждает, а возврат идёт через «в пути», без телепортации.
+    </p>
+    <div class="meta-row">
+      <span class="pill"><strong>Канон:</strong> §27, §27.1</span>
+      <span class="pill"><strong>Основа:</strong> #363, #364, #366</span>
+      <span class="pill"><strong>Борд:</strong> 355-journey.svg</span>
+      <span class="pill"><strong>Fixture:</strong> #365 (не заменяется)</span>
+    </div>
+    <div class="note">
+      <strong>Граница артефакта.</strong> Это design handoff, не изменение кода и не игровой факт.
+      Деньги, цены, статусы и место — условные демонстрационные данные. Используются только реально
+      поддерживаемые действия: запрос перемещения, покупка, надеть, возврат.
+    </div>
+  </header>
+
+  <div class="toolbar" role="toolbar" aria-label="Управление просмотром макета">
+    <div class="toolbar-group">
+      <span class="toolbar-label">Композиция:</span>
+      <button type="button" data-view="desktop" aria-pressed="true">Desktop 1440×900</button>
+      <button type="button" data-view="mobile" aria-pressed="false">Mobile 390×844</button>
+      <button type="button" data-view="both" aria-pressed="false">Оба рядом</button>
+    </div>
+    <div class="toolbar-group">
+      <span class="toolbar-label">Сценарий:</span>
+      <button type="button" id="scenario-funds">Недостаточно средств</button>
+      <button type="button" id="scenario-flux">Flux недоступен</button>
+      <button type="button" id="journey-reset">Сбросить демо</button>
+    </div>
+  </div>
+
+  <section class="section" id="screen">
+    <div class="section-head">
+      <h2>Сториборд</h2>
+      <p>
+        Выберите шаг слева и выполните действие. Статусы <code>request</code> → <code>accepted</code> →
+        <code>active</code> → <code>completed</code> либо <code>refused</code> — серверные: интерфейс
+        показывает их по ответу и не мутирует мир оптимистично.
+      </p>
+    </div>
+    <div class="viewport-stage" data-view="desktop" id="viewport-stage">
+      <div class="frame-wrap frame-desktop">
+        <span class="frame-label">DESKTOP · 1440×900 · логический размер</span>
+        <div class="frame"><div class="frame-slot" data-frame="desktop"></div></div>
+      </div>
+      <div class="frame-wrap frame-mobile">
+        <span class="frame-label">MOBILE · 390×844</span>
+        <div class="frame"><div class="frame-slot" data-frame="mobile"></div></div>
+      </div>
+    </div>
+    <div class="note note-warning">
+      <strong>Проверяйте:</strong> «Недостаточно средств» даёт отказ без вещи и без списания; «Flux
+      недоступен» не подтверждает предпросмотр и не блокирует проверенное действие; возврат показывает
+      «в пути» и не перескакивает домой мгновенно; двойное нажатие не создаёт второй запрос.
+    </div>
+  </section>
+
+  <section class="section" id="rules">
+    <div class="section-head">
+      <h2>Правила состояний</h2>
+      <p>Один и тот же набор статусов на каждом шаге, без «магического» успеха.</p>
+    </div>
+    <div class="rule-grid">
+      <div class="rule-card">
+        <h3>Запрос <span class="tag">request</span></h3>
+        <ul>
+          <li>кнопка блокируется на время запроса;</li>
+          <li>показанные данные прежние;</li>
+          <li>второй клик не отправляет второй запрос;</li>
+          <li>ответ привязан к сессии и шагу.</li>
+        </ul>
+      </div>
+      <div class="rule-card">
+        <h3>Ожидание <span class="tag">accepted · active</span></h3>
+        <ul>
+          <li>accepted — мир принял запрос;</li>
+          <li>active — действие выполняется (в пути, обработка);</li>
+          <li>это ещё не результат;</li>
+          <li>отмена — отдельное действие, если поддерживается.</li>
+        </ul>
+      </div>
+      <div class="rule-card">
+        <h3>Завершение <span class="tag">completed</span></h3>
+        <ul>
+          <li>прибытие подтверждено;</li>
+          <li>вещь получена и списание подтверждено;</li>
+          <li>надетость подтверждена;</li>
+          <li>только здесь меняются данные.</li>
+        </ul>
+      </div>
+      <div class="rule-card">
+        <h3>Отказ <span class="tag">refused</span></h3>
+        <ul>
+          <li>недостаточно средств — вещь не выдана, деньги не списаны;</li>
+          <li>Flux недоступен — предпросмотр не создан, факт не подменяется;</li>
+          <li>игрок остаётся там же, где был;</li>
+          <li>повтор — явное действие.</li>
+        </ul>
+      </div>
+    </div>
+    <div class="note note-success" style="margin-top:12px">
+      <strong>Пример приёмки.</strong> Дано: 1 000 ₽, куртка 880 ₽. Когда игрок покупает, тогда после
+      подтверждения баланс 120 ₽, вещь в инвентаре. Когда денег 500 ₽, тогда отказ: баланс прежний,
+      вещи нет. Когда Flux недоступен, тогда предпросмотр не создан, но надеть уже полученную вещь можно
+      только по подтверждению мира.
+    </div>
+  </section>
+
+  <section class="section" id="steps-table">
+    <div class="section-head">
+      <h2>Пять шагов</h2>
+      <p>Только существующие типы мест: дом, магазин, улица/мир.</p>
+    </div>
+    <table>
+      <thead><tr><th>Шаг</th><th>Место</th><th>Действие</th><th>Подтверждение</th></tr></thead>
+      <tbody>
+        <tr><td>1 · Дом</td><td>дом</td><td>запрос перемещения</td><td>прибытие к магазину, не мгновенно</td></tr>
+        <tr><td>2 · Магазин</td><td>магазин</td><td>осмотр, выбор вещи (локально)</td><td>фактическое присутствие</td></tr>
+        <tr><td>3 · Покупка</td><td>магазин</td><td>оплата 880 ₽</td><td>вещь получена, баланс обновлён</td></tr>
+        <tr><td>4 · Одежда</td><td>магазин / дом</td><td>надеть вещь</td><td>надетость после ответа</td></tr>
+        <tr><td>5 · Мир</td><td>улица → дом</td><td>возврат</td><td>«в пути», затем прибытие</td></tr>
+      </tbody>
+    </table>
+  </section>
+
+  <footer class="footer">
+    <span><strong>#355 · Путь за курткой.</strong> Предварительный концепт, не утверждённый production-ассет. Приёмка владельцем — отдельный шаг.</span>
+    <span>Источники: docs/VISUAL-BIBLE.md §27, §27.1; #363; #364; #366; 355-journey.svg. Связанные: #365 пилот, #372 Образ.</span>
+  </footer>
+</main>
+
+<script>
+(function () {
+  "use strict";
+
+  var stage = document.getElementById("viewport-stage");
+  var viewButtons = Array.prototype.slice.call(document.querySelectorAll("button[data-view]"));
+
+  function fitFrames() {
+    var view = stage.getAttribute("data-view") || "desktop";
+    var available = Math.max(240, stage.clientWidth - 4);
+    var total = view === "desktop" ? 1440 : view === "mobile" ? 390 : 1440 + 390 + 20;
+    stage.style.setProperty("--scale", String(Math.max(0.2, Math.min(1, available / total))));
+  }
+  function setView(view) {
+    stage.setAttribute("data-view", view);
+    viewButtons.forEach(function (b) {
+      b.setAttribute("aria-pressed", b.getAttribute("data-view") === view ? "true" : "false");
+    });
+    fitFrames();
+  }
+  viewButtons.forEach(function (b) {
+    b.addEventListener("click", function () { setView(b.getAttribute("data-view")); });
+  });
+
+  var STEPS = [
+    { id: "home", num: "1", title: "Дом", sub: "Запрос MOVE → прибытие", place: "дом", action: "Выйти к магазину" },
+    { id: "shop", num: "2", title: "Магазин", sub: "Фактическое присутствие", place: "магазин", action: "Выбрать куртку" },
+    { id: "buy", num: "3", title: "Покупка", sub: "Ответ подтверждает вещь", place: "магазин", action: "Оплатить 880 ₽" },
+    { id: "wear", num: "4", title: "Одежда", sub: "Надето только по ответу", place: "магазин", action: "Надеть куртку" },
+    { id: "world", num: "5", title: "Мир", sub: "Возврат без телепортации", place: "улица", action: "Вернуться домой" }
+  ];
+
+  var STATUS_LABEL = {
+    idle: "не начато",
+    request: "request · запрос отправлен",
+    accepted: "accepted · мир принял",
+    active: "active · выполняется",
+    completed: "completed · завершено",
+    refused: "refused · отказ"
+  };
+  var STATUS_CLASS = {
+    idle: "", request: "live", accepted: "live", active: "live", completed: "ok", refused: "bad"
+  };
+
+  var S = {
+    step: "home",
+    stepStatus: { home: "idle", shop: "idle", buy: "idle", wear: "idle", world: "idle" },
+    balance: 1000,
+    hasJacket: false,
+    worn: false,
+    atShop: false,
+    atHome: true,
+    fundsLow: false,
+    fluxDown: false,
+    busy: false,
+    log: [],
+    gen: 0,
+    toast: "Демонстрационные данные. Реальная симуляция не подключена.",
+    localViews: 0,
+    worldCalls: 0
+  };
+
+  function esc(v) {
+    return String(v == null ? "" : v).replace(/[&<>"']/g, function (c) {
+      return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c];
+    });
+  }
+  function money(v) { return String(v).replace(/\B(?=(\d{3})+(?!\d))/g, " ") + " ₽"; }
+  function stepById(id) { return STEPS.filter(function (s) { return s.id === id; })[0]; }
+  function log(text) {
+    S.log.unshift(text);
+    if (S.log.length > 8) S.log.length = 8;
+  }
+  function setStatus(id, st, note) {
+    S.stepStatus[id] = st;
+    if (note) S.toast = note;
+  }
+
+  function statusCard(id) {
+    var st = S.stepStatus[id];
+    var cls = STATUS_CLASS[st] || "";
+    var text = {
+      idle: "Действие не выполнялось. Показаны исходные данные.",
+      request: "Запрос отправлен. Показанные данные прежние; второй запрос не создаётся.",
+      accepted: "Мир принял запрос. Это подтверждение приёма, а не результата.",
+      active: "Действие выполняется. Промежуточное состояние; успех не заявлен.",
+      completed: "Результат подтверждён сервером. Только теперь меняются данные.",
+      refused: "Отказ мира. Данные не изменены; игрок остаётся в контексте."
+    }[st];
+    var note = "";
+    if (id === "buy" && st === "refused" && S.fundsLow) note = " Причина: недостаточно средств (500 ₽ на балансе).";
+    if (id === "wear" && st === "refused" && S.fluxDown) note = " Причина: предпросмотр Flux недоступен; вещь не меняется изображением.";
+    return '<div class="status ' + cls + '"><b>' + esc(STATUS_LABEL[st]) + "</b><br>" + esc(text + note) + "</div>";
+  }
+
+  function stageHtml(step) {
+    var shop = step.place === "магазин";
+    var travel = "";
+    if (S.stepStatus.home === "active" || S.stepStatus.home === "accepted") travel = "В пути: дом → магазин";
+    if (S.stepStatus.home === "completed") travel = "Прибытие подтверждено";
+    if (S.stepStatus.world === "active") travel = "В пути: магазин → дом";
+    if (S.stepStatus.world === "completed") travel = "Дома, прибытие подтверждено";
+    var travelCls = (S.stepStatus.home === "completed" || S.stepStatus.world === "completed") ? " ok" : "";
+    return '<div class="stage">' +
+      '<div class="tagline"><span>' + esc(step.title) + "</span><span>" + esc(step.place) + "</span></div>" +
+      '<div class="place"><div class="box' + (shop ? " shop" : "") + '"></div><span>' + (shop ? "Магазин · фактическое присутствие" : "Дом / улица · условная сцена") + "</span></div>" +
+      (travel ? '<div class="travel' + travelCls + '">' + esc(travel) + "</div>" : "") +
+      "</div>";
+  }
+
+  function actionPanel(step) {
+    var st = S.stepStatus[step.id];
+    var canAct = !S.busy && st !== "completed";
+    var btnLabel = S.busy && st === "request" ? "…" : step.action;
+
+    if (step.id === "shop") {
+      var seen = S.stepStatus.shop === "completed";
+      return '<div class="panel"><h4>Шаг 2 · магазин</h4>' + stageHtml(step) +
+        '<div class="money"><span>Баланс</span><b>' + money(S.balance) + "</b></div>" +
+        '<div class="money"><span>Куртка · object_type jacket_work</span><b>880 ₽</b></div>' +
+        statusCard("shop") +
+        '<div class="row"><button type="button" data-act="shop-pick"' + (S.busy ? " disabled" : "") + ">" + (seen ? "Куртка выбрана" : "Выбрать куртку") + "</button>" +
+        '<button type="button" data-act="go" data-step="buy">Перейти к покупке</button>' +
+        '<span class="chip">выбор — локально, 0 запросов</span></div>' +
+        '<div class="counters"><span>Локальные действия: <b>' + S.localViews + "</b></span><span>Запросы к миру: <b>" + S.worldCalls + "</b></span></div></div>";
+    }
+
+    if (step.id === "wear") {
+      return '<div class="panel"><h4>Шаг 4 · одежда</h4>' + stageHtml(step) +
+        '<div class="money"><span>Куртка в инвентаре</span><b>' + (S.hasJacket ? "да" : "нет") + "</b></div>" +
+        '<div class="money"><span>Фактическая надетость</span><b>' + (S.worn ? "надета" : "не надета") + "</b></div>" +
+        statusCard("wear") +
+        (S.fluxDown ? '<div class="flux"><b>Flux недоступен.</b> Предпросмотр не создан. Это не подтверждает и не отменяет надетость.</div>' : "") +
+        '<div class="row"><button type="button" data-act="wear-action"' + (canAct ? "" : " disabled") + ">" + (S.busy && st === "request" ? "…" : S.worn ? "Снять куртку" : "Надеть куртку") + "</button>" +
+        '<button type="button" data-act="go" data-step="world">К возвращению</button></div>' +
+        '<div class="counters"><span>Запросы к миру: <b>' + S.worldCalls + "</b></span></div></div>";
+    }
+
+    return '<div class="panel"><h4>Шаг ' + step.num + " · " + esc(step.title.toLowerCase()) + "</h4>" + stageHtml(step) +
+      '<div class="money"><span>Баланс</span><b>' + money(S.balance) + "</b></div>" +
+      statusCard(step.id) +
+      '<div class="row"><button type="button" data-act="run" data-step="' + step.id + '"' + (canAct ? "" : " disabled") + ">" + btnLabel + "</button>" +
+      '<button type="button" data-act="noop">Отмена</button></div>' +
+      (step.id === "buy" && S.stepStatus.buy === "refused" && S.fundsLow ? '<div class="refusal">Отказ: 500 ₽ < 880 ₽. Вещь не выдана, списание не выполнено. Повтор возможен после явного пополнения — здесь не моделируется.</div>' : "") +
+      '<div class="counters"><span>Запросы к миру: <b>' + S.worldCalls + "</b></span><span>Статус: <b>" + esc(S.stepStatus[step.id]) + "</b></span></div></div>";
+  }
+
+  function stepsPanel() {
+    return '<div class="steps" role="group" aria-label="Шаги маршрута">' + STEPS.map(function (s) {
+      var st = S.stepStatus[s.id];
+      var cls = STATUS_CLASS[st] || "";
+      var badge = st === "idle" ? "" : '<span class="st ' + cls + '">' + esc(st) + "</span>";
+      return '<button type="button" class="step" data-act="go" data-step="' + s.id + '" aria-pressed="' + (S.step === s.id ? "true" : "false") + '">' +
+        '<span class="num">' + s.num + "</span>" +
+        "<span><b>" + esc(s.title) + badge + "</b><small>" + esc(s.sub) + "</small></span></button>";
+    }).join("") + "</div>";
+  }
+
+  function logPanel() {
+    var lines = S.log.length ? S.log.map(function (l) { return "<li>" + esc(l) + "</li>"; }).join("") : "<li>Журнал пуст. Выполните шаг — записи появятся только по ответу мира.</li>";
+    return '<div class="logwrap"><h4>Журнал подтверждений</h4><ul class="log">' + lines + "</ul>" +
+      '<div class="toast" aria-live="polite" style="color:var(--dim);font-size:11px;min-height:16px">' + esc(S.toast) + "</div></div>";
+  }
+
+  function content(mobile) {
+    var step = stepById(S.step) || STEPS[0];
+    if (mobile) {
+      return '<div class="bar"><div class="t"><b>Из дома в магазин</b><span>#355 · условные данные · шаг ' + step.num + " из 5</span></div></div>" +
+        '<div class="body">' + stepsPanel() +
+        '<div class="detail">' + actionPanel(step) + "</div>" + logPanel() + "</div>";
+    }
+    return '<div class="bar"><div class="t"><b>Из дома в магазин за курткой</b><span>#355 · один маршрут, пять кадров · навигация не выполняет действие</span></div>' +
+      '<div class="chips"><span>Баланс: ' + money(S.balance) + "</span><span>" + (S.atShop ? "в магазине" : S.atHome ? "дома" : "в пути") + "</span><span>" + (S.hasJacket ? "куртка получена" : "куртки нет") + "</span></div></div>" +
+      '<div class="body">' + stepsPanel() +
+      '<div class="detail"><div class="scene">' + actionPanel(step) + '<div class="panel"><h4>Состояния шага</h4>' +
+      '<div class="states">' + ["request", "accepted", "active", "completed", "refused"].map(function (k) {
+        return '<span class="chip ' + (S.stepStatus[step.id] === k ? "on " : "") + (k === "completed" ? "ok" : k === "refused" ? "bad" : "") + '">' + k + "</span>";
+      }).join("") + "</div>" +
+      statusCard(step.id) +
+      '<div class="empty"><p style="color:var(--dim);font-size:12px">Статусы не выбираются вручную: они появляются только как ответ мира. Переключатель состояния — демонстрационный, реальный поток идёт через действие.</p></div></div></div></div>' +
+      logPanel() + "</div>";
+  }
+
+  function render() {
+    var d = document.querySelector('[data-frame="desktop"]');
+    var m = document.querySelector('[data-frame="mobile"]');
+    if (d) d.innerHTML = '<div class="japp">' + content(false) + "</div>";
+    if (m) m.innerHTML = '<div class="japp m">' + content(true) + "</div>";
+  }
+
+  function runSequence(stepId, sequence) {
+    if (S.busy) return;
+    S.busy = true;
+    S.worldCalls += 1;
+    S.gen += 1;
+    var gen = S.gen;
+    setStatus(stepId, "request", "Запрос отправлен. Данные прежние.");
+    render();
+    var index = 0;
+    function next() {
+      if (S.gen !== gen) return;
+      index += 1;
+      if (index >= sequence.length) { S.busy = false; render(); return; }
+      var item = sequence[index];
+      window.setTimeout(function () {
+        if (S.gen !== gen) return;
+        if (item.apply) item.apply();
+        setStatus(stepId, item.status, item.note);
+        log(item.log);
+        if (item.status === "completed" || item.status === "refused") S.busy = false;
+        render();
+        next();
+      }, 420);
+    }
+    next();
+  }
+
+  var SEQUENCES = {
+    home: [
+      { status: "request" },
+      { status: "accepted", log: "MOVE: запрос принят миром." },
+      { status: "active", log: "MOVE: в пути, дом → магазин." },
+      { status: "completed", log: "MOVE: прибытие подтверждено · магазин.", apply: function () { S.atShop = true; S.atHome = false; } }
+    ],
+    buy: [
+      { status: "request" },
+      { status: "accepted", log: "Покупка: запрос принят." },
+      { status: "active", log: "Покупка: обработка." },
+      {
+        status: "completed", log: "Покупка: подтверждено · куртка получена, −880 ₽.",
+        apply: function () { S.balance -= 880; S.hasJacket = true; }
+      }
+    ],
+    wear: [
+      { status: "request" },
+      { status: "accepted", log: "Надеть: запрос принят." },
+      { status: "completed", log: "Надеть: подтверждено · worn = true.", apply: function () { S.worn = true; } }
+    ],
+    world: [
+      { status: "request" },
+      { status: "accepted", log: "MOVE: возврат принят." },
+      { status: "active", log: "MOVE: в пути, магазин → дом." },
+      { status: "completed", log: "MOVE: прибытие подтверждено · дом.", apply: function () { S.atHome = true; S.atShop = false; } }
+    ]
+  };
+
+  function begin(stepId) {
+    if (!stepById(stepId) || S.busy) return;
+    if (stepId === "home") {
+      if (S.stepStatus.home === "completed") { S.toast = "Прибытие уже подтверждено."; render(); return; }
+      runSequence("home", SEQUENCES.home);
+      return;
+    }
+    if (stepId === "buy") {
+      if (S.fundsLow) {
+        S.worldCalls += 1;
+        setStatus("buy", "refused", "Отказ: недостаточно средств.");
+        log("Покупка: refused · недостаточно средств, 500 ₽ < 880 ₽. Списания нет.");
+        render();
+        return;
+      }
+      if (S.stepStatus.buy === "completed") { S.toast = "Покупка уже подтверждена."; render(); return; }
+      if (!S.atShop) {
+        setStatus("buy", "refused", "Отказ: игрок не в магазине.");
+        log("Покупка: refused · фактическое присутствие не подтверждено.");
+        render();
+        return;
+      }
+      runSequence("buy", SEQUENCES.buy);
+      return;
+    }
+    if (stepId === "wear") {
+      if (S.fluxDown) {
+        S.worldCalls += 1;
+        setStatus("wear", "refused", "Flux недоступен: предпросмотр не создан.");
+        log("Одежда: refused · Flux недоступен. Надетость не подтверждена.");
+        render();
+        return;
+      }
+      if (!S.hasJacket) {
+        setStatus("wear", "refused", "Отказ: вещь не получена.");
+        log("Одежда: refused · куртки нет в инвентаре.");
+        render();
+        return;
+      }
+      if (S.stepStatus.wear === "completed") { S.toast = "Надетость уже подтверждена."; render(); return; }
+      runSequence("wear", SEQUENCES.wear);
+      return;
+    }
+    if (stepId === "world") {
+      if (!S.atShop) { setStatus("world", "refused", "Отказ: игрок не в магазине."); render(); return; }
+      if (S.stepStatus.world === "completed") { S.toast = "Прибытие домой уже подтверждено."; render(); return; }
+      runSequence("world", SEQUENCES.world);
+    }
+  }
+
+  document.addEventListener("click", function (ev) {
+    var btn = ev.target.closest ? ev.target.closest("[data-act]") : null;
+    if (!btn) return;
+    var act = btn.getAttribute("data-act");
+    if (act === "go") {
+      var target = btn.getAttribute("data-step");
+      if (target && target !== S.step) {
+        S.step = target;
+        S.localViews += 1;
+        S.toast = "Шаг " + stepById(target).num + ": " + stepById(target).title + ".";
+        render();
+      }
+      return;
+    }
+    if (act === "run") { begin(btn.getAttribute("data-step")); return; }
+    if (act === "shop-pick") {
+      S.localViews += 1;
+      setStatus("shop", "completed", "Куртка выбрана — локально, без запроса к миру.");
+      log("Магазин: выбор куртки · 0 запросов (локальный вид).");
+      render();
+      return;
+    }
+    if (act === "wear-action") { begin("wear"); return; }
+    if (act === "noop") { S.toast = "Отмена — демонстрационная кнопка, мир не меняется."; render(); }
+  });
+
+  document.getElementById("scenario-funds").addEventListener("click", function () {
+    S.fundsLow = !S.fundsLow;
+    S.balance = S.fundsLow ? 500 : 1000;
+    S.stepStatus.buy = "idle";
+    S.hasJacket = false; S.worn = false;
+    this.setAttribute("aria-pressed", S.fundsLow ? "true" : "false");
+    S.toast = S.fundsLow ? "Сценарий: 500 ₽ — покупка за 880 ₽ будет отклонена." : "Обычный баланс 1 000 ₽.";
+    render();
+  });
+
+  document.getElementById("scenario-flux").addEventListener("click", function () {
+    S.fluxDown = !S.fluxDown;
+    this.setAttribute("aria-pressed", S.fluxDown ? "true" : "false");
+    S.toast = S.fluxDown ? "Сценарий: Flux недоступен — предпросмотр не создаётся." : "Flux доступен.";
+    render();
+  });
+
+  document.getElementById("journey-reset").addEventListener("click", function () {
+    S.step = "home";
+    S.stepStatus = { home: "idle", shop: "idle", buy: "idle", wear: "idle", world: "idle" };
+    S.balance = 1000; S.hasJacket = false; S.worn = false;
+    S.atShop = false; S.atHome = true; S.fundsLow = false; S.fluxDown = false; S.busy = false;
+    S.log = []; S.gen += 1; S.localViews = 0; S.worldCalls = 0;
+    S.toast = "Демо сброшено к исходным данным.";
+    document.getElementById("scenario-funds").setAttribute("aria-pressed", "false");
+    document.getElementById("scenario-flux").setAttribute("aria-pressed", "false");
+    render();
+  });
+
+  fitFrames();
+  window.addEventListener("resize", fitFrames);
+  render();
+})();
+</script>
+</body>
+</html>
