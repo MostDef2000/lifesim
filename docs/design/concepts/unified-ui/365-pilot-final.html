@@ -181,8 +181,24 @@
   .app .item b { font-size: 13px; }
   .app .item small { color: var(--dim); font-size: 11px; display: block; }
   .app .stale { padding: 6px 10px; border: 1px solid rgba(128, 83, 22, 0.4); border-radius: 8px; background: rgba(128, 83, 22, 0.06); color: var(--warning); font-size: 11px; }
-  .app .toast { position: absolute; left: 24px; right: 400px; bottom: 18px; z-index: 20; padding: 8px 12px; border: 1px solid var(--border); border-radius: 10px; background: var(--panel); box-shadow: var(--shadow-soft); font-size: 12px; color: var(--dim); }
+  .app .toast { position: absolute; left: 24px; right: 400px; bottom: 2px; z-index: 20; padding: 6px 12px; border: 1px solid var(--border); border-radius: 10px; background: var(--panel); box-shadow: var(--shadow-soft); font-size: 12px; color: var(--dim); }
   .app .toast b { color: var(--ink); }
+  .app .wishes { display: grid; gap: 4px; padding: 8px 10px; border: 1px dashed var(--border); border-radius: 8px; background: rgba(243, 236, 223, 0.55); }
+  .app .wishes h4 { font-size: 11px; }
+  .app .wish-row { display: flex; justify-content: space-between; gap: 8px; font-size: 11px; color: var(--dim); }
+  .app .wish-row b { color: var(--ink); font-weight: 600; }
+  .app .wish-note { color: var(--dim); font-size: 10px; line-height: 1.4; }
+  .app .wish-bubble {
+    position: absolute; z-index: 10; left: 28%; top: 52%; transform: translate(-20%, -100%);
+    width: min(210px, 52%); display: grid; gap: 4px; padding: 7px 8px; border: 1px solid var(--border);
+    border-radius: 10px; background: rgba(255, 249, 239, 0.97); box-shadow: var(--shadow-soft);
+    font-size: 10px; line-height: 1.35; color: var(--dim);
+  }
+  .app .wish-bubble b { display: block; color: var(--accent); letter-spacing: 0.04em; text-transform: uppercase; }
+  .app .wish-bubble .wb-actions { display: flex; flex-wrap: wrap; gap: 4px; }
+  .app .wish-bubble button { min-height: 44px; padding: 6px 10px; border-radius: 6px; font-size: 11px; }
+  .app .wish-bubble button:first-child { background: var(--accent); border-color: var(--accent); color: var(--panel); }
+  .app.m .wish-bubble { left: 26%; width: min(180px, 44%); }
 
   .app.m { grid-template-columns: 1fr; grid-template-rows: 92px 1fr 78px; }
   .app.m .brand { display: none; }
@@ -217,12 +233,14 @@
     <p class="lede">
       Кликабельная финальная версия пилота: один непрерывный сценарий с честными отказами.
       Выбор POI не двигает героя; перемещение — только явным действием; покупка и надетость —
-      только после ответа мира; возврат — обратным путём, без телепортации.
+      только после ответа мира; возврат — обратным путём, без телепортации. Сессия активна по
+      умолчанию: герой под управлением игрока, ИИ лишь предлагает пожелание — принять, отложить
+      или проигнорировать, без штрафов и блокировки команд.
     </p>
     <div class="meta-row">
       <span class="pill"><strong>Канон:</strong> §27, §27.1</span>
       <span class="pill"><strong>Основа:</strong> #363, #364, #366</span>
-      <span class="pill"><strong>Сценарии:</strong> happy · отказ · Flux off · автономно · stale</span>
+      <span class="pill"><strong>Сценарии:</strong> happy · отказ · Flux off · пожелание ИИ · stale</span>
       <span class="pill"><strong>Part 1/3:</strong> #364 · #366 · #365</span>
     </div>
     <div class="note">
@@ -243,13 +261,6 @@
         <select id="scenario">
           <option value="normal">Обычный · 240 ₽</option>
           <option value="poor">Мало денег · 1 200 ₽</option>
-        </select>
-      </label>
-      <label>Режим:
-        <select id="mode">
-          <option value="guided">С подсказками</option>
-          <option value="direct">Прямое управление</option>
-          <option value="autonomous">Автономно</option>
         </select>
       </label>
       <label><input type="checkbox" id="flux"> Flux-иллюстрации</label>
@@ -285,7 +296,9 @@
       <strong>Проверяемые правила:</strong> клик по магазину не двигает героя; «Идти» — отдельное
       подтверждённое действие; отказ не меняет баланс и вещи; при Flux off текстовый контекст и
       действия остаются; уход во время ожидания делает поздний ответ устаревшим; возврат — обратный
-      путь, а не телепорт.
+      путь, а не телепорт. Пожелание ИИ — только предложение: игнорирование не блокирует команды и
+      не снижает показатели; пока сессия активна, новых действий без согласия игрока нет, а после
+      её завершения герой продолжает жить самостоятельно.
     </div>
   </section>
 
@@ -295,7 +308,7 @@
       <li><b>Happy path</b> — выбор магазина, явное перемещение, покупка куртки, надевание, возврат домой.</li>
       <li><b>Отказ</b> — сценарий «Мало денег»: цена выше баланса, мир отказывает, инвентарь и баланс не меняются.</li>
       <li><b>Flux unavailable</b> — иллюстрация заменяется текстовым контекстом, действия доступны.</li>
-      <li><b>Автономный режим</b> — ручная команда недоступна; отдельная кнопка показывает, как действует мир.</li>
+      <li><b>Пожелание ИИ</b> — ненавязчивый пузырь над героем; «Принять» ставит обычную проверяемую команду, «Отложить» и «Действую сам» скрывают пожелание без штрафа; ручные команды не блокируются.</li>
       <li><b>Stale-ответ</b> — уход во время ожидания: поздний ответ игнорируется и не мутирует состояние.</li>
       <li><b>Без телепортации</b> — возврат идёт обратным путём, герой оказывается там, откуда вышел.</li>
     </div>
@@ -329,7 +342,7 @@
     step: "world",
     selected: null,
     heroAt: "home",
-    mode: "guided",
+    wishState: "suggested",
     flux: false,
     price: 240,
     money: 1000,
@@ -373,6 +386,7 @@
     S.gen += 1;
     S.step = "world"; S.selected = null; S.heroAt = "home"; S.jacket = false; S.worn = false;
     S.busy = false; S.money = 1000; S.price = S.scenario === "poor" ? 1200 : 240;
+    S.wishState = "suggested";
     S.log = []; S.stale = 0; S.calls = 0;
     S.toast = S.scenario === "poor"
       ? "Сценарий «Мало денег»: цена куртки 1 200 ₽ при балансе 1 000 ₽."
@@ -405,7 +419,7 @@
     render();
   }
 
-  function startTravel(manual, returnTrip) {
+  function startTravel(returnTrip) {
     if (S.busy) return;
     S.busy = true;
     S.calls += 1;
@@ -415,10 +429,8 @@
     S.step = returnTrip ? "returning" : "travel";
     S.toast = returnTrip
       ? "Обратный путь домой. Герой не телепортируется: идёт по тому же маршруту."
-      : manual
-        ? "Явное перемещение: «Идти». Ожидаем прибытия, позиция ещё прежняя."
-        : "Автономный режим: герой идёт сам.";
-    addLog("info", (returnTrip ? "Обратный путь" : manual ? "Команда «Идти»" : "Автономное действие") + " начат. Позиция до прибытия: " + (from === "home" ? "Дом" : "Магазин") + ".");
+      : "Явное перемещение: «Идти». Ожидаем прибытия, позиция ещё прежняя.";
+    addLog("info", (returnTrip ? "Обратный путь" : "Команда «Идти»") + " начат. Позиция до прибытия: " + (from === "home" ? "Дом" : "Магазин") + ".");
     render();
     setTimeout(function () {
       if (gen !== S.gen) {
@@ -552,7 +564,7 @@
       return '<button type="button" class="marker" style="left:' + x + "%;top:" + y + '%" data-act="poi" data-poi="' + id + '" aria-pressed="' + (S.selected === id ? "true" : "false") + '"><i aria-hidden="true">' + glyph + "</i><span>" + label + "</span></button>";
     };
     var hero = '<div class="hero-dot" style="left:' + (S.heroAt === "shop" ? 66 : 28) + "%;top:" + (S.heroAt === "shop" ? 42 : 62) + '%"><span></span>герой</div>';
-    return '<div class="map">' + mapSvg() + mk("home", "Дом", 28, 58, "⌂") + mk("shop", "Магазин", 66, 38, "▤") + mk("workshop", "Мастерская", 82, 70, "✦") + hero + "</div>";
+    return '<div class="map">' + mapSvg() + mk("home", "Дом", 28, 58, "⌂") + mk("shop", "Магазин", 66, 38, "▤") + mk("workshop", "Мастерская", 82, 70, "✦") + hero + wishBubble() + "</div>";
   }
 
   function art(what) {
@@ -565,11 +577,46 @@
     return '<div class="art" role="img" aria-label="Условная иллюстрация"><svg viewBox="0 0 320 150" width="100%" height="100%" aria-hidden="true"><rect width="320" height="150" fill="#D9D3C0"/><rect x="110" y="70" width="100" height="80" rx="6" fill="#917E61"/><path d="M96 72 L160 30 L224 72Z" fill="#6E5B48"/></svg></div>';
   }
 
+  var WISH_LABEL = { suggested: "предложено", accepted: "принято", deferred: "отложено", self: "игрок действует сам" };
+
+  function wishPanel() {
+    if (S.heroAt !== "home") return "";
+    return '<div class="wishes"><h4>Пожелания ИИ</h4>' +
+      '<div class="wish-row"><span>Сходить в магазин «У причала»</span><b>' + WISH_LABEL[S.wishState] + "</b></div>" +
+      '<div class="wish-row"><span>Проверить мастерскую к вечеру</span><b>в очереди</b></div>' +
+      '<div class="wish-note">Пожелание — подсказка, а не действие. Ручные команды не блокируются, штрафа за игнорирование нет.</div></div>';
+  }
+
+  function wishBubble() {
+    if (S.heroAt !== "home" || S.busy || S.wishState !== "suggested") return "";
+    return '<div class="wish-bubble"><b>Пожелание ИИ</b><div>Сходить в магазин «У причала»</div>' +
+      '<div class="wb-actions"><button type="button" data-act="wish-accept">Принять</button>' +
+      '<button type="button" data-act="wish-defer">Отложить</button>' +
+      '<button type="button" data-act="wish-self">Действую сам</button></div></div>';
+  }
+
+  function acceptWish() {
+    if (S.wishState !== "suggested" || S.busy || S.heroAt !== "home") return;
+    S.wishState = "accepted";
+    S.toast = "Пожелание принято: команда «Идти в магазин» — та же, что и при ручном действии, с подтверждением прибытия.";
+    addLog("info", "Пожелание ИИ принято — это согласие игрока; команда идёт обычным путём с подтверждением мира.");
+    startTravel(false);
+  }
+
+  function dismissWish(kind) {
+    S.wishState = kind;
+    S.toast = kind === "self"
+      ? "Действуете сами: пожелание скрыто, ручные команды доступны без ограничений."
+      : "Пожелание отложено — без штрафов и искусственных показателей.";
+    addLog("info", kind === "self" ? "Игрок действует сам; пожелание скрыто." : "Пожелание отложено. Ручные команды не блокируются.");
+    render();
+  }
+
   function contextPanel() {
     var balance = '<div class="kv"><span>Баланс</span><span class="money">' + money(S.money) + "</span></div>";
     if (S.step === "world") {
       if (!S.selected) {
-        return '<aside class="panel"><h4>Контекст</h4><div class="title">Мир</div><p class="sub">Выберите POI на карте. Выбор не перемещает героя.</p>' + balance + '<div class="status">Герой: Дом. Позиция не меняется от выбора.</div></aside>';
+        return '<aside class="panel"><h4>Контекст</h4><div class="title">Мир</div><p class="sub">Выберите POI на карте. Выбор не перемещает героя.</p>' + balance + '<div class="status">Герой: Дом. Позиция не меняется от выбора.</div>' + wishPanel() + "</aside>";
       }
       return '<aside class="panel"><h4>Выбранный POI</h4><div class="title">Магазин «У причала»</div><p class="sub">Условная точка на карте · демо-данные</p>' +
         '<div class="kv"><span>Тип</span><span>рынок</span></div><div class="kv"><span>Открыт</span><span>да</span></div><div class="kv"><span>Расстояние</span><span>~120 м</span></div>' + balance +
@@ -577,18 +624,16 @@
         '<div class="status">' + (S.heroAt === "shop" ? "Выбор не двигает героя. Он уже здесь — после подтверждённого пути. Возврат домой — отдельное действие." : "Выбор не изменил позицию героя: он остался дома.") + "</div>" +
         '<div class="actions"><button type="button" class="primary" data-act="open-place">Открыть место</button>' +
         (S.heroAt === "shop" ? '<button type="button" data-act="return-home">Идти домой</button>' : '<button type="button" data-act="clear-poi">Снять выбор</button>') +
-        "</div></aside>";
+        "</div>" + wishPanel() + "</aside>";
     }
     if (S.step === "place") {
-      var auto = S.mode === "autonomous";
       var here = S.heroAt === "shop";
       return '<aside class="panel"><h4>Место</h4><div class="title">Магазин «У причала»</div><p class="sub">Сцена и панель действий</p>' + art("shop") +
         '<div class="kv"><span>Продавец</span><span>Марта (демо)</span></div><div class="kv"><span>Герой</span><span>' + (here ? "в магазине" : "дома") + "</span></div>" +
-        '<div class="status ' + (auto && !here ? "warn" : "") + '">' + (here ? "Герой уже здесь — перемещение не требуется. Открытие места не телепортирует." : auto ? "Автономно: ручная команда «Идти» недоступна. Герой действует по миру." : "Перемещение — только явным действием «Идти» и после подтверждения.") + "</div>" +
+        '<div class="status">' + (here ? "Герой уже здесь — перемещение не требуется. Открытие места не телепортирует." : "Перемещение — только явным действием «Идти» и после подтверждения.") + "</div>" +
         '<div class="actions">' +
-        (here ? '<button type="button" class="primary" data-act="enter-shop">Войти в магазин</button>' : '<button type="button" class="primary" data-act="move"' + (auto ? " disabled" : "") + ">Идти в магазин</button>") +
-        (auto && !here ? '<button type="button" data-act="auto-move">Позволить миру действовать</button>' : "") +
-        '<button type="button" data-act="back-world">Назад в Мир</button></div></aside>';
+        (here ? '<button type="button" class="primary" data-act="enter-shop">Войти в магазин</button>' : '<button type="button" class="primary" data-act="move">Идти в магазин</button>') +
+        '<button type="button" data-act="back-world">Назад в Мир</button></div>' + wishPanel() + "</aside>";
     }
     if (S.step === "travel" || S.step === "returning") {
       var back = S.step === "returning";
@@ -654,9 +699,9 @@
     return '<div class="app ' + (variant === "mobile" ? "m" : "") + '">' +
       '<div class="brand"><b>ВЛ1: Рейнеке</b><span>Северный остров · Тёплый вечер</span></div>' +
       '<header class="top"><div class="ctx"><span class="avatar" aria-hidden="true">АМ</span><span class="who"><b>Алиса Морозова</b><span>Фермер · ' + (S.heroAt === "home" ? "Дом" : "Магазин") + ' · День 17</span></span></div>' +
-      '<div class="meta"><span><b>18:40</b></span><span>+12°C · дождь</span><span>' + (S.mode === "autonomous" ? "Автономно" : S.mode === "guided" ? "С подсказками" : "Прямое управление") + '</span><span class="money"><b>' + money(S.money) + "</b></span></div></header>" +
+      '<div class="meta"><span><b>18:40</b></span><span>+12°C · дождь</span><span>Сессия активна</span><span class="money"><b>' + money(S.money) + "</b></span></div></header>" +
       (variant === "mobile" ? "" : '<nav class="rail" aria-label="Основная навигация">' + nav + "</nav>") +
-      '<div class="content"><div class="crumbs">' + esc(crumbs) + " · демо-сценарий, данные условны</div>" +
+      '<div class="content"><div class="crumbs">' + esc(crumbs) + " · сессия активна · ИИ не действует без согласия · демо-сценарий, данные условны</div>" +
       '<div class="stage"><section class="scene">' + sceneInner +
       '<div class="scene-note"><span>Условная иллюстрация · не канонический арт</span><span>Flux: ' + (S.flux ? "вкл" : "выкл") + "</span></div></section>" +
       contextPanel() + "</div></div>" +
@@ -672,7 +717,6 @@
     renderLog();
     renderStrip();
     document.getElementById("scenario").value = S.scenario;
-    document.getElementById("mode").value = S.mode;
     document.getElementById("flux").checked = S.flux;
   }
 
@@ -700,14 +744,18 @@
     } else if (act === "clear-poi") {
       clearPoi();
     } else if (act === "move") {
-      startTravel(true, false);
+      startTravel(false);
     } else if (act === "enter-shop") {
       S.step = "arrived";
       S.toast = "Герой уже в магазине. Перемещение не выполнялось — открыт экран покупки.";
       addLog("info", "Вход в магазин без перемещения: герой уже здесь.");
       render();
-    } else if (act === "auto-move") {
-      startTravel(false, false);
+    } else if (act === "wish-accept") {
+      acceptWish();
+    } else if (act === "wish-defer") {
+      dismissWish("deferred");
+    } else if (act === "wish-self") {
+      dismissWish("self");
     } else if (act === "cancel-travel") {
       cancelTravel();
     } else if (act === "buy") {
@@ -725,12 +773,11 @@
       render();
     } else if (act === "back-world") {
       S.step = "world";
-      S.heroAt = (S.step === "world" && S.heroAt === "shop") ? "shop" : S.heroAt;
       S.toast = "Назад в Мир. Состояние сохранено; выбранный POI не сброшен.";
       addLog("info", "Возврат в Мир. ПОЗИЦИЯ героя не менялась.");
       render();
     } else if (act === "return-home") {
-      startTravel(true, true);
+      startTravel(true);
     } else if (act === "reset") {
       resetPilot(false);
     } else if (act === "nav") {
@@ -766,12 +813,6 @@
     resetPilot(false);
     addLog("info", "Сценарий: " + (S.scenario === "poor" ? "«Мало денег» — цена 1 200 ₽." : "обычный — цена 240 ₽."));
   });
-  document.getElementById("mode").addEventListener("change", function (e) {
-    S.mode = e.target.value;
-    S.toast = S.mode === "autonomous" ? "Автономно: ручная команда «Идти» недоступна; герой действует по миру." : "Ручные действия доступны.";
-    addLog("info", "Режим: " + (S.mode === "autonomous" ? "автономно" : S.mode === "guided" ? "с подсказками" : "прямое управление") + ".");
-    render();
-  });
   document.getElementById("flux").addEventListener("change", function (e) {
     S.flux = e.target.checked;
     S.toast = S.flux ? "Flux-иллюстрации включены (условная заглушка)." : "Flux недоступен: текстовый контекст и действия сохранены.";
@@ -781,6 +822,7 @@
   document.getElementById("pilot-reset").addEventListener("click", function () { resetPilot(false); });
 
   addLog("info", "Пилот запущен. Выберите магазин на карте; герой стоит дома.");
+  addLog("info", "Сессия активна: герой по умолчанию под управлением игрока; пожелание ИИ — только предложение.");
   addLog("info", "Данные и иллюстрации условны, не канон и не игровой факт.");
   render();
   fitFrames();
