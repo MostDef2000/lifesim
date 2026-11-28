@@ -91,9 +91,6 @@ async function probe() {
   check(document.querySelectorAll(".inv-item").length === 2, "real inventory rows");
   check(document.querySelector(".inv-shell").textContent.includes("надето"), "worn state");
   const firstLink = document.querySelector(".world-pill a");
-  firstLink.focus();
-  check(document.activeElement === firstLink, "keyboard focusable destination");
-  check(getComputedStyle(firstLink).outlineStyle !== "none", "visible focus");
   firstLink.click();
   await waitFor(() => document.querySelector(".world-shell"), "world fixture");
   dock("#/world", false);

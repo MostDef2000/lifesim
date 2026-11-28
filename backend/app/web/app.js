@@ -7293,11 +7293,8 @@ function inventoryContextText() {
   const name = ch.name || [ch.first_name, ch.last_name].filter(Boolean).join(" ")
     || "Персонаж";
   const loc = (S.mapLocations || []).find(l => String(l.id) === String(ch.location_id));
-  const modes = { AUTONOMOUS: "Автономно", GUIDED: "Под руководством", DIRECT: "Вручную" };
-  const mode = Object.prototype.hasOwnProperty.call(modes, ch.control_mode)
-    ? modes[ch.control_mode] : "Режим не уточнён";
   const money = ch.money ?? ch.balance;
-  return [name, loc && loc.name ? loc.name : "Место не уточнено", mode,
+  return [name, loc && loc.name ? loc.name : "Место не уточнено",
     money != null ? money + " ₽" : null].filter(Boolean).join(" · ");
 }
 
