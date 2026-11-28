@@ -1,5 +1,8 @@
 # Задачи: 005-player
 
+> **Historical / target supersession (#397):** этот файл сохраняет исходный контракт M5 и evidence старой реализации. Целевая механика управления определена в [026 — Living Personality](../026-living-personality/spec.md); прежние mode enums, selector и режимные проверки не являются требованиями новой версии. До согласованного cutover существующий runtime и его проверки сохраняются.
+
+
 ## Chunk A — Фундамент: deps, схема, auth, фабрика
 
 - [x] T1: pyproject + lock: fastapi>=0.115, uvicorn>=0.30, httpx>=0.27; uv sync; gate зелёный (ruff/fast).

@@ -1,5 +1,8 @@
 # План имплементации: 005-player
 
+> **Historical / target supersession (#397):** этот файл сохраняет исходный контракт M5 и evidence старой реализации. Целевая механика управления определена в [026 — Living Personality](../026-living-personality/spec.md); прежние mode enums, selector и режимные проверки не являются требованиями новой версии. До согласованного cutover существующий runtime и его проверки сохраняются.
+
+
 ## Архитектура
 
 - **Слой API**: `backend/app/api/` — отдельный пакет: `app.py` (фабрика `create_app(settings, session_factory)`), `auth.py` (хэш/токен/зависимость `current_user`), `routes/` (auth, characters, actions, goals, dialogue, world, ws). FastAPI + Pydantic v2 схемы в `schemas.py`. Тесты — starlette TestClient (через httpx), без поднятия сервера.
