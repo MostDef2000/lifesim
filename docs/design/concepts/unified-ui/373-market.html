@@ -1,0 +1,822 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>#373 · Рынок — предложения, баланс, явное подтверждение — предварительный концепт</title>
+<style>
+  :root {
+    --bg: #F3ECDF;
+    --panel: #FFF9EF;
+    --ink: #30271F;
+    --dim: #69594C;
+    --accent: #86551E;
+    --accent-hover: #6E4519;
+    --success: #42613E;
+    --warning: #805316;
+    --critical: #A13D32;
+    --border: rgba(48, 39, 31, 0.14);
+    --line: rgba(48, 39, 31, 0.12);
+    --focus: rgba(134, 85, 30, 0.45);
+    --warm: rgba(134, 85, 30, 0.12);
+    --shadow-panel: 0 12px 32px rgba(48, 39, 31, 0.16), 0 2px 8px rgba(48, 39, 31, 0.10);
+    --shadow-soft: 0 2px 8px rgba(48, 39, 31, 0.14);
+    --r-panel: 12px;
+    --r-control: 8px;
+    --font-body: system-ui, -apple-system, "Segoe UI", sans-serif;
+    --font-head: Georgia, "Times New Roman", serif;
+  }
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  body { margin: 0; background: var(--bg); color: var(--ink); font: 16px/1.55 var(--font-body); }
+  h1, h2, h3, h4 { margin: 0; font-family: var(--font-head); font-weight: 400; line-height: 1.18; }
+  h1 { font-size: clamp(30px, 4vw, 44px); }
+  h2 { font-size: 30px; }
+  h3 { font-size: 22px; }
+  h4 { font-size: 17px; font-family: var(--font-body); font-weight: 700; }
+  p { margin: 0; }
+  a { color: var(--accent); }
+  code { padding: 1px 5px; border: 1px solid var(--border); border-radius: 5px; background: var(--warm); font: 0.92em/1.4 ui-monospace, SFMono-Regular, Menlo, monospace; }
+  button {
+    min-height: 44px; padding: 10px 16px; border: 1px solid var(--border); border-radius: var(--r-control);
+    background: var(--panel); color: var(--ink); font: inherit; cursor: pointer;
+  }
+  button:hover { border-color: var(--accent); background: var(--warm); }
+  button:focus-visible, [tabindex]:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+  button:disabled { opacity: 0.55; cursor: default; }
+  button[aria-pressed="true"] { background: var(--accent); border-color: var(--accent); color: var(--panel); }
+  button[aria-pressed="true"]:hover { background: var(--accent-hover); border-color: var(--accent-hover); }
+
+  .concept-flag {
+    position: sticky; top: 0; z-index: 50; display: flex; flex-wrap: wrap; gap: 8px 12px;
+    align-items: center; justify-content: center; padding: 8px 16px;
+    border-bottom: 1px solid rgba(161, 61, 50, 0.32); background: #F8E8DC; color: #6B2A22;
+    font-size: 13px; line-height: 1.35; text-align: center;
+  }
+  .concept-flag strong { letter-spacing: 0.02em; }
+
+  .sheet { width: min(1320px, calc(100% - 32px)); margin: 0 auto; padding: 28px 0 72px; }
+  .sheet-header { display: grid; gap: 20px; padding: 28px 0 24px; border-bottom: 1px solid var(--line); }
+  .eyebrow { color: var(--accent); font-size: 13px; font-weight: 700; letter-spacing: 0.14em; text-transform: uppercase; }
+  .lede { max-width: 84ch; color: var(--dim); font-size: 18px; }
+  .meta-row { display: flex; flex-wrap: wrap; gap: 8px; }
+  .pill { display: inline-flex; gap: 6px; align-items: center; min-height: 32px; padding: 4px 10px; border: 1px solid var(--border); border-radius: 999px; background: var(--panel); color: var(--dim); font-size: 13px; }
+  .pill strong { color: var(--ink); font-weight: 600; }
+  .note { padding: 10px 14px; border-left: 3px solid var(--accent); background: var(--warm); color: var(--dim); font-size: 14px; }
+  .note strong { color: var(--ink); }
+  .note-critical { border-left-color: var(--critical); background: rgba(161, 61, 50, 0.08); }
+  .note-success { border-left-color: var(--success); background: rgba(66, 97, 62, 0.08); }
+  .note-warning { border-left-color: var(--warning); background: rgba(128, 83, 22, 0.08); }
+
+  .toolbar {
+    position: sticky; top: 40px; z-index: 40; display: flex; flex-wrap: wrap; gap: 8px;
+    align-items: center; justify-content: space-between; margin: 20px 0; padding: 12px;
+    border: 1px solid var(--border); border-radius: var(--r-panel);
+    background: rgba(255, 249, 239, 0.96); box-shadow: var(--shadow-soft);
+  }
+  .toolbar-group { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+  .toolbar-label { color: var(--dim); font-size: 13px; }
+  .toolbar button { padding: 8px 14px; font-size: 14px; }
+
+  .section { display: grid; gap: 12px; margin-top: 44px; padding-top: 8px; border-top: 1px solid var(--line); }
+  .section-head { display: grid; gap: 8px; max-width: 88ch; }
+  .section-head p { color: var(--dim); }
+
+  .viewport-stage { display: flex; gap: 20px; align-items: flex-start; width: 100%; overflow: auto; padding: 4px 0 8px; --scale: 1; }
+  .viewport-stage[data-view="desktop"] .frame-mobile,
+  .viewport-stage[data-view="mobile"] .frame-desktop { display: none; }
+  .viewport-stage[data-view="mobile"] { justify-content: center; }
+  .frame-wrap {
+    position: relative; flex: 0 0 auto; width: calc(var(--fw) * var(--scale)); height: calc(var(--fh) * var(--scale) + 22px);
+    overflow: hidden; border: 1px solid var(--border); border-radius: var(--r-panel); background: var(--bg); box-shadow: var(--shadow-panel);
+  }
+  .frame-wrap.frame-desktop { --fw: 1440px; --fh: 900px; }
+  .frame-wrap.frame-mobile { --fw: 390px; --fh: 844px; }
+  .frame { width: var(--fw); height: var(--fh); overflow: hidden; transform: scale(var(--scale)); transform-origin: top left; background: var(--bg); }
+  .frame-label { position: static; display: block; height: 22px; line-height: 22px; padding: 0 8px; border: 1px solid var(--border); border-radius: 6px; background: rgba(255, 249, 239, 0.94); color: var(--dim); font-size: 11px; pointer-events: none; }
+
+  .rule-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 12px; }
+  .rule-card { display: grid; gap: 8px; align-content: start; padding: 12px; border: 1px solid var(--border); border-radius: var(--r-panel); background: var(--panel); }
+  .rule-card ul { margin: 0; padding-left: 18px; color: var(--dim); font-size: 14px; display: grid; gap: 4px; }
+  .tag { padding: 2px 8px; border-radius: 999px; font-size: 11px; font-weight: 700; letter-spacing: 0.04em; border: 1px solid var(--border); color: var(--dim); background: var(--bg); }
+  .tag-ok { color: var(--success); border-color: rgba(66, 97, 62, 0.35); background: rgba(66, 97, 62, 0.1); }
+  .tag-bad { color: var(--critical); border-color: rgba(161, 61, 50, 0.35); background: rgba(161, 61, 50, 0.08); }
+  .tag-warn { color: var(--warning); border-color: rgba(128, 83, 22, 0.35); background: rgba(128, 83, 22, 0.08); }
+
+  table { width: 100%; border-collapse: collapse; font-size: 14px; background: var(--panel); border-radius: var(--r-panel); overflow: hidden; }
+  th, td { padding: 9px 12px; border-bottom: 1px solid var(--line); text-align: left; vertical-align: top; }
+  th { font-size: 12px; letter-spacing: 0.05em; text-transform: uppercase; color: var(--dim); background: var(--bg); }
+  tr:last-child td { border-bottom: 0; }
+
+  .footer { display: grid; gap: 6px; margin-top: 48px; padding-top: 16px; border-top: 1px solid var(--line); color: var(--dim); font-size: 13px; }
+  .footer strong { color: var(--ink); }
+
+  /* simulated app shell */
+  .app { width: 100%; height: 100%; display: grid; grid-template-columns: 270px 1fr; grid-template-rows: 88px 1fr; background: var(--bg); }
+  .app .brand { grid-column: 1; grid-row: 1; display: grid; align-content: center; gap: 2px; padding: 0 20px; border-right: 1px solid var(--line); border-bottom: 1px solid var(--line); background: var(--panel); }
+  .app .brand b { font-family: var(--font-head); font-size: 24px; font-weight: 400; }
+  .app .brand span { color: var(--dim); font-size: 12px; }
+  .app .top { grid-column: 2; grid-row: 1; display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 0 24px; border-bottom: 1px solid var(--line); background: var(--panel); }
+  .app .ctx { display: flex; align-items: center; gap: 12px; }
+  .app .avatar { display: grid; place-items: center; width: 44px; height: 44px; border-radius: 50%; background: var(--warm); color: var(--accent); font-size: 13px; font-weight: 700; }
+  .app .who { display: grid; line-height: 1.25; }
+  .app .who b { font-size: 15px; }
+  .app .who span { color: var(--dim); font-size: 12px; }
+  .app .meta { display: flex; flex-wrap: wrap; gap: 8px; }
+  .app .meta span { padding: 4px 9px; border: 1px solid var(--border); border-radius: 999px; font-size: 12px; color: var(--dim); }
+  .app .meta .money { color: var(--ink); font-variant-numeric: tabular-nums; }
+  .app .rail { grid-column: 1; grid-row: 2; display: grid; align-content: start; gap: 2px; padding: 10px; border-right: 1px solid var(--line); background: var(--panel); }
+  .app .rail button { display: flex; align-items: center; gap: 10px; min-height: 46px; padding: 8px 12px; border: 0; border-radius: 8px; background: transparent; font-size: 14px; color: var(--dim); text-align: left; }
+  .app .rail button:hover { background: var(--warm); }
+  .app .rail button[aria-current="page"] { background: var(--warm); color: var(--accent); font-weight: 700; box-shadow: inset 3px 0 0 var(--accent); }
+  .app .rail .ico { width: 22px; text-align: center; font-size: 16px; }
+  .app .content { grid-column: 2; grid-row: 2; overflow: hidden; padding: 22px 26px; display: grid; align-content: start; gap: 14px; }
+  .app .route-head { display: grid; gap: 4px; }
+  .app .route-head .eyebrow { font-size: 11px; }
+  .app .route-head h3 { font-size: 30px; }
+  .app .route-head p { color: var(--dim); font-size: 14px; max-width: 70ch; }
+  .app .cols { display: grid; grid-template-columns: 1.18fr 1fr; gap: 16px; align-items: start; }
+  .app .panel { padding: 14px; border: 1px solid var(--border); border-radius: 12px; background: var(--panel); display: grid; gap: 10px; align-content: start; }
+  .app .panel h4 { font-size: 13px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--dim); font-family: var(--font-body); }
+  .app .kv { display: flex; justify-content: space-between; gap: 12px; font-size: 13px; }
+  .app .kv span:first-child { color: var(--dim); }
+  .app .row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+  .app .toast { color: var(--dim); font-size: 12px; min-height: 18px; }
+
+  .app .tabs { display: flex; gap: 4px; padding: 3px; border: 1px solid var(--border); border-radius: 10px; background: var(--bg); align-self: start; justify-self: start; }
+  .app .tabs button { min-height: 38px; padding: 6px 16px; border: 0; border-radius: 8px; background: transparent; font-size: 13px; color: var(--dim); }
+  .app .tabs button[aria-selected="true"] { background: var(--panel); color: var(--ink); font-weight: 700; box-shadow: var(--shadow-soft); }
+
+  .app .filters { display: flex; flex-wrap: wrap; gap: 6px; }
+  .app .filters button { min-height: 36px; padding: 5px 12px; font-size: 12px; }
+  .app .filters button[aria-pressed="true"] { background: var(--warm); border-color: var(--accent); color: var(--accent); font-weight: 700; }
+
+  .app .offers { display: grid; gap: 8px; }
+  .app .offer {
+    display: grid; grid-template-columns: 44px 1fr auto; gap: 10px; align-items: center;
+    padding: 8px 10px; border: 1px solid var(--border); border-radius: 10px; background: var(--bg);
+  }
+  .app .offer.is-selected { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
+  .app .offer.unavailable { border-style: dashed; }
+  .app .offer .thumb { display: grid; place-items: center; width: 44px; height: 44px; border-radius: 8px; background: var(--panel); border: 1px solid var(--border); color: var(--accent); }
+  .app .offer .thumb svg { width: 26px; height: 26px; }
+  .app .offer b { font-size: 14px; display: block; }
+  .app .offer small { color: var(--dim); font-size: 12px; display: block; }
+  .app .offer .price { text-align: right; display: grid; gap: 2px; justify-items: end; }
+  .app .offer .price b { font-variant-numeric: tabular-nums; font-size: 15px; }
+  .app .offer .price .avail { font-size: 11px; color: var(--dim); }
+  .app .offer .price .avail.none { color: var(--critical); }
+  .app .offer .buy { grid-column: 1 / -1; display: flex; gap: 8px; align-items: center; justify-content: space-between; flex-wrap: wrap; }
+  .app .offer .buy button { min-height: 36px; padding: 4px 12px; font-size: 12px; }
+
+  .app .life { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; font-size: 10px; color: var(--dim); }
+  .app .life span { padding: 2px 6px; border: 1px solid var(--border); border-radius: 999px; background: var(--panel); }
+  .app .life span.done { border-color: rgba(66, 97, 62, 0.4); background: rgba(66, 97, 62, 0.1); color: var(--success); }
+  .app .life span.now { border-color: var(--warning); background: rgba(128, 83, 22, 0.1); color: var(--warning); font-weight: 700; }
+  .app .life span.bad { border-color: rgba(161, 61, 50, 0.4); background: rgba(161, 61, 50, 0.09); color: var(--critical); font-weight: 700; }
+
+  .app .status { display: grid; gap: 2px; padding: 8px 10px; border: 1px dashed var(--border); border-radius: 8px; font-size: 12px; color: var(--dim); }
+  .app .status.ok { border-style: solid; border-color: rgba(66, 97, 62, 0.35); background: rgba(66, 97, 62, 0.08); }
+  .app .status.bad { border-style: solid; border-color: rgba(161, 61, 50, 0.35); background: rgba(161, 61, 50, 0.07); }
+  .app .status.pending { border-style: solid; border-color: rgba(128, 83, 22, 0.35); background: rgba(128, 83, 22, 0.07); }
+  .app .status b { color: var(--ink); }
+
+  .app .sellform { display: grid; gap: 8px; }
+  .app .sellform label { display: grid; gap: 4px; font-size: 12px; color: var(--dim); }
+  .app .sellform input, .app .sellform select { width: 100%; min-height: 40px; padding: 7px 10px; border: 1px solid var(--border); border-radius: 8px; background: var(--panel); color: var(--ink); font: inherit; font-size: 13px; }
+
+  .app .skeleton { height: 12px; border-radius: 999px; background: linear-gradient(90deg, rgba(48,39,31,0.08), rgba(48,39,31,0.16), rgba(48,39,31,0.08)); }
+  .app .skeleton-card { display: grid; gap: 6px; padding: 10px; border: 1px solid var(--border); border-radius: 10px; background: var(--bg); }
+
+  .app .herostrip { display: flex; flex-wrap: wrap; gap: 10px 16px; align-items: center; padding: 8px 12px; border: 1px solid var(--border); border-radius: 10px; background: var(--panel); font-size: 12px; color: var(--dim); }
+  .app .herostrip .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--success); }
+  .app .herostrip b { color: var(--ink); }
+  .app .counters { display: flex; flex-wrap: wrap; gap: 8px 16px; padding-top: 6px; border-top: 1px solid var(--line); color: var(--dim); font-size: 12px; }
+  .app .counters b { color: var(--ink); font-variant-numeric: tabular-nums; }
+
+  .app .worldstage { position: relative; min-height: 340px; border: 1px solid var(--border); border-radius: 10px; background: #B7CBD0; overflow: hidden; }
+  .app .worldstage .marker { position: absolute; transform: translate(-50%, -50%); display: grid; place-items: center; width: 46px; height: 46px; border: 1px solid var(--border); border-radius: 50%; background: var(--panel); color: var(--accent); font-size: 11px; font-weight: 700; }
+  .app .worldstage .marker.here { background: var(--accent); color: var(--panel); }
+
+  .app.m { grid-template-columns: 1fr; grid-template-rows: 96px 1fr 78px; }
+  .app.m .brand { display: none; }
+  .app.m .top { grid-column: 1; grid-row: 1; display: grid; align-content: center; gap: 2px; padding: 10px 14px; border-right: 0; }
+  .app.m .top .ctx { gap: 10px; }
+  .app.m .avatar { width: 40px; height: 40px; font-size: 12px; }
+  .app.m .who b { font-size: 14px; }
+  .app.m .meta { display: none; }
+  .app.m .content { grid-column: 1; grid-row: 2; padding: 12px 14px; gap: 10px; overflow: auto; }
+  .app.m .route-head h3 { font-size: 24px; }
+  .app.m .cols { grid-template-columns: 1fr; gap: 10px; }
+  .app.m .offer { grid-template-columns: 38px 1fr auto; }
+  .app.m .offer .thumb { width: 38px; height: 38px; }
+  .app.m .offer .thumb svg { width: 22px; height: 22px; }
+  .app.m .dock { grid-column: 1; grid-row: 3; display: grid; grid-template-columns: repeat(9, 1fr); align-items: center; gap: 0; padding: 6px 4px; border-top: 1px solid var(--line); background: var(--panel); }
+  .app.m .dock button { display: grid; justify-items: center; gap: 2px; min-height: 44px; padding: 2px; border: 0; background: transparent; color: var(--dim); font-size: 9px; }
+  .app.m .dock button[aria-current="page"] { color: var(--accent); font-weight: 700; }
+  .app.m .dock .ico { font-size: 15px; }
+  .app .dock { display: none; }
+  .app.m .rail { display: none; }
+
+  [hidden] { display: none !important; }
+  @media (prefers-reduced-motion: reduce) {
+    html { scroll-behavior: auto; }
+    *, *::before, *::after { animation-duration: 0.001ms !important; transition-duration: 0.001ms !important; }
+  }
+</style>
+</head>
+<body>
+<div class="concept-flag" role="note">
+  <strong>ПРЕДВАРИТЕЛЬНЫЙ КОНЦЕПТ, НЕ УТВЕРЖДЁННЫЙ PRODUCTION-АССЕТ</strong>
+  <span>Issue #373 · экран «Рынок» · §27/§27.1 · design handoff, не код и не игровой факт</span>
+</div>
+
+<main class="sheet">
+  <header class="sheet-header">
+    <div class="eyebrow">#373 · Рынок · волна 2, часть 3</div>
+    <h1>Рынок — это витрина с явным подтверждением</h1>
+    <p class="lede">
+      Предложения жителей с ценой, остатком и доступностью; покупка проходит стадии
+      «запрос → принят → идёт → готово» либо честный отказ. Ни вещь, ни деньги не меняются,
+      пока мир не подтвердил результат. Черновик продажи сохраняется, но ничего не публикует.
+    </p>
+    <div class="meta-row">
+      <span class="pill"><strong>Канон:</strong> §27, §27.1</span>
+      <span class="pill"><strong>Основа:</strong> #363 component sheet, #366 Инвентарь</span>
+      <span class="pill"><strong>Экран:</strong> Рынок (<code>market</code>)</span>
+      <span class="pill"><strong>Борд:</strong> 373-market.svg</span>
+    </div>
+    <div class="note">
+      <strong>Граница артефакта.</strong> Это design handoff, а не изменение <code>backend/**</code> и не
+      игровой факт. Цены, остатки, баланс и имена — условные демонстрационные данные. Сделки не
+      выполняются, сеть не вызывается.
+    </div>
+  </header>
+
+  <div class="toolbar" role="toolbar" aria-label="Управление просмотром макета">
+    <div class="toolbar-group">
+      <span class="toolbar-label">Композиция:</span>
+      <button type="button" data-view="desktop" aria-pressed="true">Desktop 1440×900</button>
+      <button type="button" data-view="mobile" aria-pressed="false">Mobile 390×844</button>
+      <button type="button" data-view="both" aria-pressed="false">Оба рядом</button>
+    </div>
+    <div class="toolbar-group">
+      <span class="toolbar-label">Состояние:</span>
+      <button type="button" data-state="normal" aria-pressed="true">Обычное</button>
+      <button type="button" data-state="loading" aria-pressed="false">Загрузка предложений</button>
+      <button type="button" data-state="refused" aria-pressed="false">Отказ: нет средств</button>
+      <button type="button" data-state="completed" aria-pressed="false">Завершённая покупка</button>
+      <button type="button" id="mkt-reset">Сбросить демо</button>
+    </div>
+  </div>
+
+  <section class="section" id="screen">
+    <div class="section-head">
+      <h2>Экран</h2>
+      <p>
+        Нажмите «Купить» у любого товара: карточка проходит стадии запроса, а баланс и остаток
+        меняются только на «готово». У «Плаща штормового» цена выше баланса — это честный отказ без
+        списания. Вкладка «Продать» хранит черновик при переключении и переходе в Инвентарь.
+      </p>
+    </div>
+    <div class="viewport-stage" data-view="desktop" id="viewport-stage">
+      <div class="frame-wrap frame-desktop">
+        <span class="frame-label">DESKTOP · 1440×900 · логический размер</span>
+        <div class="frame"><div class="frame-slot" data-frame="desktop"></div></div>
+      </div>
+      <div class="frame-wrap frame-mobile">
+        <span class="frame-label">MOBILE · 390×844</span>
+        <div class="frame"><div class="frame-slot" data-frame="mobile"></div></div>
+      </div>
+    </div>
+    <div class="note note-critical">
+      <strong>Главное правило.</strong> Ни предмет, ни деньги не меняются до авторитетного
+      подтверждения мира. Ожидание показывает прежние данные, отказ оставляет баланс и инвентарь
+      нетронутыми, а «готово» означает ответ, а не нажатие кнопки.
+    </div>
+  </section>
+
+  <section class="section" id="rules">
+    <div class="section-head">
+      <h2>Правила, которым следует макет</h2>
+      <p>Стадии взяты из семантики транзакции: <code>request</code> → <code>accepted</code> → <code>active</code> → <code>completed</code> либо <code>refused</code>.</p>
+    </div>
+    <div class="rule-grid">
+      <div class="rule-card">
+        <h3>Покупка <span class="tag">request → completed</span></h3>
+        <ul>
+          <li>до «готово» цена и остаток — только чтение;</li>
+          <li>баланс уменьшается один раз, в момент подтверждения;</li>
+          <li>повторный клик не создаёт второй запрос;</li>
+          <li>каждый этап подписан, а не заменён спиннером.</li>
+        </ul>
+      </div>
+      <div class="rule-card">
+        <h3>Отказ <span class="tag tag-bad">refused</span></h3>
+        <ul>
+          <li>недостаточно средств — причина и обе суммы;</li>
+          <li>баланс, остаток и инвентарь не меняются;</li>
+          <li>пустой остаток — «нет у продавца», не «ошибка»;</li>
+          <li>повтор — явная кнопка после отказа.</li>
+        </ul>
+      </div>
+      <div class="rule-card">
+        <h3>Неизвестное <span class="tag tag-warn">unknown</span></h3>
+        <ul>
+          <li>загрузка — скелетоны, а не выдуманные цены;</li>
+          <li>«цена по данным» вместо догадки;</li>
+          <li>«доступность уточняется» — честный статус;</li>
+          <li>неизвестное не превращается в «0 ₽».</li>
+        </ul>
+      </div>
+      <div class="rule-card">
+        <h3>Продажа <span class="tag">draft</span></h3>
+        <ul>
+          <li>черновик переживает смену вкладки и экрана;</li>
+          <li>публикация в макете недоступна;</li>
+          <li>черновик не создаёт объявление и не двигает вещи;</li>
+          <li>подтверждённая продажа была бы отдельным действием.</li>
+        </ul>
+      </div>
+    </div>
+    <div class="note note-success" style="margin-top:12px">
+      <strong>Пример приёмки.</strong> Дано: баланс 1 000 ₽, куртка 320 ₽. Когда игрок нажимает
+      «Купить», тогда карточка показывает запрос, а баланс остаётся 1 000 ₽. Когда приходит
+      подтверждение, тогда баланс становится 680 ₽, остаток уменьшается, а вещь появляется в
+      Инвентаре. Когда игрок выбирает плащ за 1 200 ₽, тогда отказ сообщает причину, а баланс
+      остаётся прежним.
+    </div>
+  </section>
+
+  <section class="section" id="map">
+    <div class="section-head">
+      <h2>Что где лежит</h2>
+      <p>Короткая карта поведения, чтобы проверяющий не искал элементы наугад.</p>
+    </div>
+    <table>
+      <thead><tr><th>Элемент</th><th>Поведение</th><th>Изменения данных</th></tr></thead>
+      <tbody>
+        <tr><td>Фильтр «Все вещи / Одежда / Еда и вода»</td><td>локальная фильтрация списка</td><td>0</td></tr>
+        <tr><td>«Купить»</td><td>request → accepted → active → completed</td><td>только на completed: деньги, остаток, инвентарь</td></tr>
+        <tr><td>«Купить» дороже баланса</td><td>refused с причиной</td><td>0</td></tr>
+        <tr><td>«Купить» при остатке 0</td><td>refused «нет у продавца»</td><td>0</td></tr>
+        <tr><td>Черновик продажи</td><td>локальное хранение при переходах</td><td>0</td></tr>
+        <tr><td>«В инвентарь» / пункт навигации</td><td>локальный переход</td><td>0</td></tr>
+      </tbody>
+    </table>
+  </section>
+
+  <footer class="footer">
+    <span><strong>#373 · Рынок.</strong> Предварительный концепт, не утверждённый production-ассет. Приёмка владельцем — отдельный шаг.</span>
+    <span>Источники: docs/VISUAL-BIBLE.md §27, §27.1; #363 component sheet; #364 навигация; 373-market.svg. Связанные: #366 Инвентарь, #358 lifecycle покупки.</span>
+  </footer>
+</main>
+
+<script>
+(function () {
+  "use strict";
+
+  var stage = document.getElementById("viewport-stage");
+  var viewButtons = Array.prototype.slice.call(document.querySelectorAll("button[data-view]"));
+  var stateButtons = Array.prototype.slice.call(document.querySelectorAll("button[data-state]"));
+
+  function fitFrames() {
+    var view = stage.getAttribute("data-view") || "desktop";
+    var available = Math.max(240, stage.clientWidth - 4);
+    var total = view === "desktop" ? 1440 : view === "mobile" ? 390 : 1440 + 390 + 20;
+    stage.style.setProperty("--scale", String(Math.max(0.2, Math.min(1, available / total))));
+  }
+  function setView(view) {
+    stage.setAttribute("data-view", view);
+    viewButtons.forEach(function (b) {
+      b.setAttribute("aria-pressed", b.getAttribute("data-view") === view ? "true" : "false");
+    });
+    fitFrames();
+  }
+  viewButtons.forEach(function (b) {
+    b.addEventListener("click", function () { setView(b.getAttribute("data-view")); });
+  });
+
+  var NAV = ["Мир", "Чат", "Люди", "Инвентарь", "Рынок", "Дела", "Цель", "Профиль", "Образ"];
+  var ICON = { "Мир": "◎", "Чат": "✉", "Люди": "☺", "Инвентарь": "▣", "Рынок": "◇", "Дела": "✎", "Цель": "⚑", "Профиль": "☰", "Образ": "◧" };
+  var HERO = { name: "Алиса Морозова", role: "Фермер · дома", day: "День 17 · 08:03", weather: "+18 °C · ясно" };
+
+  function iconSvg(kind) {
+    var paths = {
+      jacket: '<path d="M9 3.5 5 5.5v6.5h2V21h10v-9h2V5.5l-4-2-3 3z"/>',
+      boots: '<path d="M7.5 3.5h4V13h4.5l1 4.5h-10z"/><path d="M7 17.5h10"/>',
+      hat: '<path d="M7.5 12c0-5 1.8-8 4.5-8s4.5 3 4.5 8"/><path d="M4 12.5h16"/><path d="M5.5 16h13"/>',
+      bread: '<path d="M4 13.5c0-4 3.6-6.5 8-6.5s8 2.5 8 6.5-3.6 5-8 5-8-1-8-5z"/><path d="M9 9v8M13 8.5v8.5"/>',
+      water: '<path d="M10 3.5h4v2.5l1.5 2v11h-7v-11l1.5-2z"/><path d="M9 13.5h6"/>',
+      coat: '<path d="M9.5 3.5h5L20 6v13H4V6z"/><path d="M12 3.5V19"/><circle cx="14" cy="11" r="0.8"/>'
+    };
+    return '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' + (paths[kind] || "") + "</svg>";
+  }
+
+  var OFFERS = [
+    { id: "jacket", name: "Куртка «Плотная»", kind: "Одежда", icon: "jacket", price: 320, qty: 1 },
+    { id: "boots", name: "Сапоги рабочие", kind: "Одежда", icon: "boots", price: 260, qty: 2 },
+    { id: "hat", name: "Шапка вязаная", kind: "Одежда", icon: "hat", price: 90, qty: 3 },
+    { id: "bread", name: "Хлеб", kind: "Еда", icon: "bread", price: 14, qty: 0 },
+    { id: "water", name: "Вода", kind: "Вода", icon: "water", price: 10, qty: 5 },
+    { id: "coat", name: "Плащ штормовой", kind: "Одежда", icon: "coat", price: 1200, qty: 1 }
+  ];
+
+  var S = {
+    route: "market",
+    tab: "buy",
+    filter: "all",
+    loading: false,
+    money: 1000,
+    orders: {},
+    inventory: [],
+    selected: "jacket",
+    sell: { item: "Куртка «Плотная»", qty: "1", price: "300" },
+    localViews: 0,
+    worldCalls: 0,
+    toast: "Демонстрационные данные. Сделки не выполняются.",
+    generation: 0
+  };
+
+  function esc(v) {
+    return String(v == null ? "" : v).replace(/[&<>"']/g, function (c) {
+      return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c];
+    });
+  }
+  function rub(n) { return String(n).replace(/\B(?=(\d{3})+(?!\d))/g, " ") + " ₽"; }
+  function offerById(id) {
+    for (var i = 0; i < OFFERS.length; i++) { if (OFFERS[i].id === id) return OFFERS[i]; }
+    return null;
+  }
+  function orderOf(id) { return S.orders[id] || null; }
+  function isBusy(o) { return o && (o.stage === "request" || o.stage === "accepted" || o.stage === "active"); }
+
+  var LABEL = { market: "Рынок", inventory: "Инвентарь", world: "Мир" };
+  var EYEBROW = { market: "РЫНОК · #373", inventory: "ИНВЕНТАРЬ · #366", world: "МИР · карта" };
+  var H3 = { market: "Рынок", inventory: "Инвентарь", world: "Мир" };
+  var SUB = {
+    market: "Предложения жителей с ценой и остатком. Покупка меняет данные только после подтверждения.",
+    inventory: "Подтверждённые покупки и текущий баланс. Отсюда можно вернуться на Рынок.",
+    world: "Карта острова. Возврат на Рынок сохраняет героя, время и черновик продажи."
+  };
+
+  function routeFor(name) {
+    if (name === "Инвентарь") return "inventory";
+    if (name === "Мир") return "world";
+    if (name === "Рынок") return "market";
+    return null;
+  }
+  function rail(current) {
+    return NAV.map(function (n) {
+      var r = routeFor(n);
+      var active = n === current ? ' aria-current="page"' : "";
+      return '<button type="button" data-act="nav" data-route="' + (r || "") + '"' + active + '><span class="ico" aria-hidden="true">' + ICON[n] + "</span>" + n + "</button>";
+    }).join("");
+  }
+  function topBar() {
+    return '<div class="top"><div class="ctx"><span class="avatar" aria-hidden="true">АМ</span>' +
+      '<span class="who"><b>' + HERO.name + "</b><span>" + HERO.role + "</span></span></div>" +
+      '<div class="meta"><span>' + HERO.day + "</span><span>" + HERO.weather + "</span>" +
+      '<span class="money">' + rub(S.money) + "</span></div></div>";
+  }
+  function heroStrip() {
+    return '<div class="herostrip"><span class="dot" aria-hidden="true"></span><span>Герой: <b>' + HERO.name + "</b></span>" +
+      "<span>" + HERO.role + "</span><span>" + HERO.day + "</span><span>Баланс: <b>" + rub(S.money) + "</b></span>" +
+      "<span>Экран: <b>" + LABEL[S.route] + "</b></span></div>";
+  }
+  function counters() {
+    return '<div class="counters"><span>Локальные переходы: <b>' + S.localViews + "</b></span>" +
+      "<span>Запросы к миру: <b>" + S.worldCalls + "</b></span>" +
+      "<span>Подтверждённых покупок: <b>" + S.inventory.length + "</b></span>" +
+      "<span>Экран: <b>" + LABEL[S.route] + "</b></span></div>";
+  }
+
+  function offersEmpty() {
+    if (S.loading) {
+      var sk = "";
+      for (var i = 0; i < 4; i++) {
+        sk += '<div class="skeleton-card"><div class="skeleton" style="width:52%"></div>' +
+          '<div class="skeleton" style="width:78%"></div><div class="skeleton" style="width:38%"></div></div>';
+      }
+      return '<div class="offers">' + sk + '</div><div class="status"><b>Загрузка предложений.</b> Цены и остатки не показываются, пока мир их не прислал. Пустой список — не «нет товаров».</div>';
+    }
+    return "";
+  }
+
+  function availability(o) {
+    if (S.loading) return { text: "уточняется", cls: "" };
+    if (o.qty <= 0) return { text: "нет у продавца", cls: "none" };
+    return { text: "в наличии · " + o.qty + " шт.", cls: "" };
+  }
+
+  function lifeStrip(o) {
+    var ord = orderOf(o.id);
+    if (ord && ord.stage === "refused") {
+      return '<div class="life" aria-label="Стадии покупки"><span>запрос</span><span class="bad">отказ</span></div>';
+    }
+    var stages = [
+      { key: "request", label: "запрос" },
+      { key: "accepted", label: "принят" },
+      { key: "active", label: "идёт" },
+      { key: "completed", label: "готово" }
+    ];
+    var order = ["request", "accepted", "active", "completed"];
+    var at = ord ? order.indexOf(ord.stage) : -1;
+    var html = stages.map(function (s, i) {
+      var cls = i < at ? "done" : i === at ? "now" : "";
+      return '<span class="' + cls + '">' + s.label + "</span>";
+    }).join("");
+    return '<div class="life" aria-label="Стадии покупки">' + html + "</div>";
+  }
+
+  function buyButton(o) {
+    var ord = orderOf(o.id);
+    if (S.loading) return '<button type="button" disabled>Недоступно</button>';
+    if (o.qty <= 0) return '<button type="button" data-act="buy" data-id="' + o.id + '">Попробовать</button>';
+    if (isBusy(ord)) return '<button type="button" disabled>Обрабатывается…</button>';
+    return '<button type="button" data-act="buy" data-id="' + o.id + '">Купить за ' + rub(o.price) + "</button>";
+  }
+
+  function offerCard(o) {
+    var av = availability(o);
+    var ord = orderOf(o.id);
+    var cls = "offer" + (o.id === S.selected ? " is-selected" : "") + (o.qty <= 0 && !S.loading ? " unavailable" : "");
+    return '<div class="' + cls + '" data-act="select" data-id="' + o.id + '" role="button" tabindex="0" aria-pressed="' + (o.id === S.selected) + '">' +
+      '<span class="thumb">' + iconSvg(o.icon) + "</span>" +
+      "<span><b>" + esc(o.name) + "</b><small>" + esc(o.kind) + " · " + esc(o.id) + "</small></span>" +
+      '<span class="price"><b>' + (S.loading ? "—" : rub(o.price)) + '</b><span class="avail ' + av.cls + '">' + av.text + "</span></span>" +
+      '<div class="buy">' + lifeStrip(o) + buyButton(o) + "</div>" +
+      (ord && ord.stage === "refused" ? '<div class="buy"><span class="avail none" style="color:var(--critical);font-size:11px">' + esc(ord.reason) + "</span></div>" : "") +
+      "</div>";
+  }
+
+  function offersPanel() {
+    var list = OFFERS.filter(function (o) {
+      if (S.filter === "clothes") return o.kind === "Одежда";
+      if (S.filter === "food") return o.kind === "Еда" || o.kind === "Вода";
+      return true;
+    });
+    var chips = [["all", "Все вещи"], ["clothes", "Одежда"], ["food", "Еда и вода"]].map(function (c) {
+      return '<button type="button" data-act="filter" data-filter="' + c[0] + '" aria-pressed="' + (S.filter === c[0]) + '">' + c[1] + "</button>";
+    }).join("");
+    var body = S.loading ? offersEmpty() : '<div class="offers">' + list.map(offerCard).join("") + "</div>";
+    return '<section class="panel"><h4>Предложения жителей</h4><div class="filters">' + chips + "</div>" + body + "</section>";
+  }
+
+  function contextPanel() {
+    var o = offerById(S.selected);
+    if (!o) return "";
+    var ord = orderOf(o.id);
+    var av = availability(o);
+    var status;
+    if (!ord) {
+      status = '<div class="status"><b>Предложение выбрано.</b> Покупка не начата. Остаток и баланс — как в данных.</div>';
+    } else if (ord.stage === "refused") {
+      status = '<div class="status bad"><b>refused</b><br>' + esc(ord.reason) + "</div>";
+    } else if (ord.stage === "completed") {
+      status = '<div class="status ok"><b>completed · подтверждено</b><br>Списано ' + rub(o.price) + ". Вещь добавлена в инвентарь. Баланс: " + rub(S.money) + ".</div>";
+    } else if (ord.stage === "request") {
+      status = '<div class="status pending"><b>request</b><br>Запрос отправлен. Цена, остаток и баланс прежние.</div>';
+    } else if (ord.stage === "accepted") {
+      status = '<div class="status pending"><b>accepted</b><br>Мир принял запрос. Данные ещё не изменены.</div>';
+    } else {
+      status = '<div class="status pending"><b>active</b><br>Сделка выполняется. Ожидайте подтверждения.</div>';
+    }
+    return '<section class="panel"><h4>Контекст предложения</h4>' +
+      '<div class="row"><span class="thumb" style="display:grid;place-items:center;width:48px;height:48px;border:1px solid var(--border);border-radius:8px;background:var(--bg);color:var(--accent)">' + iconSvg(o.icon) + "</span>" +
+      "<span><b>" + esc(o.name) + "</b><br><small style=\"color:var(--dim)\">" + esc(o.kind) + " · " + esc(o.id) + "</small></span></div>" +
+      '<div class="kv"><span>Цена</span><span>' + (S.loading ? "цена по данным" : rub(o.price)) + "</span></div>" +
+      '<div class="kv"><span>Наличие</span><span>' + av.text + "</span></div>" +
+      '<div class="kv"><span>Ваш баланс</span><span style="font-variant-numeric:tabular-nums">' + rub(S.money) + "</span></div>" +
+      status +
+      '<div class="row">' + buyButton(o) +
+      (ord && ord.stage === "completed" ? '<button type="button" data-act="nav" data-route="inventory">В инвентарь</button>' : "") +
+      "</div>" +
+      '<div class="toast" aria-live="polite">' + esc(S.toast) + "</div></section>";
+  }
+
+  function sellPanel() {
+    var options = ['Куртка «Плотная»', "Сапоги рабочие", "Шапка вязаная", "Хлеб", "Вода"].map(function (n) {
+      return '<option' + (S.sell.item === n ? " selected" : "") + ">" + n + "</option>";
+    }).join("");
+    return '<section class="panel"><h4>Черновик продажи</h4>' +
+      '<div class="sellform"><label>Вещь<select data-sell="item" aria-label="Вещь для продажи">' + options + "</select></label>" +
+      '<div class="row" style="align-items:flex-start"><label style="flex:1">Количество<input type="text" inputmode="numeric" data-sell="qty" value="' + esc(S.sell.qty) + '" aria-label="Количество"></label>' +
+      '<label style="flex:1">Цена, ₽<input type="text" inputmode="numeric" data-sell="price" value="' + esc(S.sell.price) + '" aria-label="Цена продажи"></label></div>' +
+      '<div class="row"><button type="button" data-act="publish">Опубликовать</button><button type="button" data-act="tab" data-tab="buy">К покупке</button></div></div>' +
+      '<div class="toast" aria-live="polite">' + esc(S.toast) + "</div></section>" +
+      '<section class="panel"><h4>Что делает черновик</h4><p class="toast">Черновик хранится локально и переживает смену вкладки, экрана и Инвентаря. Публикация в макете недоступна: объявление не создаётся, вещь не перемещается, деньги не начисляются.</p><div class="status"><b>Ничего не опубликовано.</b> Это макет, а не подключённый рынок.</div></section>';
+  }
+
+  function inventoryPanel() {
+    var rows = S.inventory.length
+      ? S.inventory.map(function (it) {
+          return '<div class="offer"><span class="thumb">' + iconSvg(it.icon) + "</span><span><b>" + esc(it.name) + "</b><small>подтверждено миром</small></span><span class=\"price\"><b>" + it.qty + " шт.</b></span></div>";
+        }).join("")
+      : '<div class="status"><b>Пока пусто.</b> Здесь появятся только подтверждённые покупки; ожидающие и отклонённые сюда не попадают.</div>';
+    return '<section class="panel"><h4>Инвентарь · подтверждённые покупки</h4><div class="offers">' + rows + "</div></section>" +
+      '<section class="panel"><h4>Баланс</h4><div class="kv"><span>Сейчас</span><span style="font-variant-numeric:tabular-nums">' + rub(S.money) + "</span></div>" +
+      '<p class="toast">Отклонённые и ожидающие покупки не списывают деньги.</p>' +
+      '<div class="row"><button type="button" data-act="nav" data-route="market">Вернуться на Рынок</button></div></section>';
+  }
+
+  function worldPanel() {
+    return '<section class="panel"><h4>Мир · карта</h4><div class="worldstage">' +
+      '<span class="marker here" style="left:50%;top:62%">Дом</span>' +
+      '<span class="marker" style="left:24%;top:30%">Магазин</span>' +
+      '<span class="marker" style="left:74%;top:38%">Причал</span></div>' +
+      '<p class="toast">Демонстрационная заглушка карты. Возврат на Рынок не меняет героя и данные сделок.</p></section>' +
+      '<section class="panel"><h4>Контекст сохраняется</h4><div class="kv"><span>Время</span><span>' + HERO.day + "</span></div>" +
+      '<div class="kv"><span>Погода</span><span>' + HERO.weather + "</span></div>" +
+      '<div class="kv"><span>Баланс</span><span>' + rub(S.money) + "</span></div>" +
+      '<div class="row"><button type="button" data-act="nav" data-route="market">Вернуться на Рынок</button></div></section>';
+  }
+
+  function content() {
+    var head = '<div class="route-head"><div class="eyebrow">' + EYEBROW[S.route] + "</div><h3>" + H3[S.route] + "</h3><p>" + SUB[S.route] + "</p></div>";
+    if (S.route === "inventory") return head + heroStrip() + '<div class="cols">' + inventoryPanel() + "</div>" + counters();
+    if (S.route === "world") return head + heroStrip() + '<div class="cols">' + worldPanel() + "</div>" + counters();
+    var tabs = '<div class="tabs" role="tablist" aria-label="Режим рынка">' +
+      '<button type="button" role="tab" data-act="tab" data-tab="buy" aria-selected="' + (S.tab === "buy") + '">Купить</button>' +
+      '<button type="button" role="tab" data-act="tab" data-tab="sell" aria-selected="' + (S.tab === "sell") + '">Продать</button></div>';
+    var body = S.tab === "sell"
+      ? '<div class="cols">' + sellPanel() + "</div>"
+      : '<div class="cols">' + offersPanel() + contextPanel() + "</div>";
+    return head + heroStrip() + tabs + body + counters();
+  }
+
+  function appHtml(mobile) {
+    return '<div class="app' + (mobile ? " m" : "") + '">' +
+      '<div class="brand"><b>ВЛ1: Рейнеке</b><span>Северный остров · Тёплый вечер</span></div>' +
+      topBar() +
+      '<nav class="rail" aria-label="Разделы">' + rail(LABEL[S.route]) + "</nav>" +
+      '<div class="content">' + content() + "</div>" +
+      '<nav class="dock" aria-label="Разделы">' + rail(LABEL[S.route]) + "</nav>" +
+      "</div>";
+  }
+  function render() {
+    var d = document.querySelector('[data-frame="desktop"]');
+    var m = document.querySelector('[data-frame="mobile"]');
+    if (d) d.innerHTML = appHtml(false);
+    if (m) m.innerHTML = appHtml(true);
+  }
+  function toast(text) { S.toast = text; render(); }
+
+  function buy(id) {
+    var o = offerById(id);
+    if (!o) return;
+    S.selected = id;
+    if (S.loading) { toast("Предложения ещё загружаются: покупка недоступна."); return; }
+    if (isBusy(orderOf(id))) return;
+    if (S.money < o.price) {
+      S.orders[id] = { stage: "refused", reason: "Недостаточно средств: баланс " + rub(S.money) + ", цена " + rub(o.price) + ". Ничего не списано." };
+      toast("Отказ: недостаточно средств. Баланс и инвентарь не изменены.");
+      return;
+    }
+    if (o.qty <= 0) {
+      S.orders[id] = { stage: "refused", reason: "Нет у продавца: остаток 0. Ничего не списано." };
+      toast("Отказ: товара нет у продавца. Данные не изменены.");
+      return;
+    }
+    S.worldCalls += 1;
+    var gen = ++S.generation;
+    S.orders[id] = { stage: "request", reason: "", gen: gen };
+    toast("Запрос отправлен. До подтверждения цена, остаток и баланс прежние.");
+    window.setTimeout(function () {
+      if (S.generation !== gen) return;
+      S.orders[id] = { stage: "accepted", reason: "", gen: gen };
+      S.toast = "Мир принял запрос. Данные ещё не изменены.";
+      render();
+      window.setTimeout(function () {
+        if (S.generation !== gen) return;
+        S.orders[id] = { stage: "active", reason: "", gen: gen };
+        S.toast = "Сделка выполняется. Ожидайте подтверждения.";
+        render();
+        window.setTimeout(function () {
+          if (S.generation !== gen) return;
+          if (S.money < o.price || o.qty <= 0) {
+            S.orders[id] = { stage: "refused", reason: "Мир отказал на финальном шаге. Ничего не списано." };
+            S.toast = "Отказ мира. Баланс и инвентарь не изменены.";
+            render();
+            return;
+          }
+          S.money -= o.price;
+          o.qty -= 1;
+          S.inventory.push({ name: o.name, qty: 1, icon: o.icon });
+          S.orders[id] = { stage: "completed", reason: "", gen: gen };
+          S.toast = "Подтверждено: списано " + rub(o.price) + ". Вещь в инвентаре.";
+          render();
+        }, 600);
+      }, 450);
+    }, 550);
+  }
+
+  document.addEventListener("click", function (ev) {
+    var el = ev.target.closest ? ev.target.closest("[data-act]") : null;
+    if (!el) return;
+    var act = el.getAttribute("data-act");
+    if (act === "buy") { buy(el.getAttribute("data-id")); }
+    else if (act === "select") {
+      S.selected = el.getAttribute("data-id");
+      S.toast = "Предложение выбрано. Покупка не начата.";
+      render();
+    }
+    else if (act === "filter") { S.filter = el.getAttribute("data-filter"); render(); }
+    else if (act === "tab") {
+      S.tab = el.getAttribute("data-tab");
+      S.toast = S.tab === "sell" ? "Черновик продажи сохранён локально." : "Вкладка покупки. Черновик продажи сохранён.";
+      render();
+    }
+    else if (act === "publish") {
+      toast("Черновик сохранён. Публикация в макете недоступна — объявление не создано.");
+    }
+    else if (act === "nav") {
+      var route = el.getAttribute("data-route");
+      if (!route) { toast("Раздел вне этого макета."); return; }
+      if (route === S.route) { toast("Вы уже на экране «" + LABEL[route] + "»."); return; }
+      S.route = route;
+      S.localViews += 1;
+      S.toast = "Переход на «" + LABEL[route] + "» — локально, герой и черновик сохраняются.";
+      render();
+    }
+  });
+
+  document.addEventListener("keydown", function (ev) {
+    if ((ev.key === "Enter" || ev.key === " ") && ev.target && ev.target.getAttribute && ev.target.getAttribute("data-act") === "select") {
+      ev.preventDefault();
+      S.selected = ev.target.getAttribute("data-id");
+      S.toast = "Предложение выбрано. Покупка не начата.";
+      render();
+    }
+  });
+
+  document.addEventListener("input", function (ev) {
+    var t = ev.target;
+    if (!t || !t.getAttribute) return;
+    var key = t.getAttribute("data-sell");
+    if (key) { S.sell[key] = t.value; }
+  });
+  document.addEventListener("change", function (ev) {
+    var t = ev.target;
+    if (!t || !t.getAttribute) return;
+    var key = t.getAttribute("data-sell");
+    if (key) { S.sell[key] = t.value; }
+  });
+
+  stateButtons.forEach(function (b) {
+    b.addEventListener("click", function () {
+      var st = b.getAttribute("data-state");
+      stateButtons.forEach(function (x) { x.setAttribute("aria-pressed", x === b ? "true" : "false"); });
+      S.route = "market";
+      S.tab = "buy";
+      var jacket = offerById("jacket");
+      if (st === "loading") {
+        S.loading = true;
+        S.orders = {};
+        S.toast = "Загрузка предложений: цены и остатки ещё неизвестны.";
+      } else if (st === "refused") {
+        S.loading = false;
+        S.selected = "coat";
+        S.orders = { coat: { stage: "refused", reason: "Недостаточно средств: баланс " + rub(S.money) + ", цена " + rub(1200) + ". Ничего не списано." } };
+        S.toast = "Отказ: недостаточно средств. Баланс не изменён.";
+      } else if (st === "completed") {
+        S.loading = false;
+        S.orders = { jacket: { stage: "completed", reason: "" } };
+        S.selected = "jacket";
+        S.toast = "Завершённая покупка: подтверждённый пример, данные демонстрационные.";
+      } else {
+        S.loading = false;
+        S.orders = {};
+        S.selected = "jacket";
+        S.toast = "Обычное состояние: предложения доступны.";
+      }
+      render();
+    });
+  });
+
+  document.getElementById("mkt-reset").addEventListener("click", function () {
+    S.loading = false;
+    S.route = "market";
+    S.tab = "buy";
+    S.filter = "all";
+    S.money = 1000;
+    S.orders = {};
+    S.inventory = [];
+    S.selected = "jacket";
+    S.sell = { item: "Куртка «Плотная»", qty: "1", price: "300" };
+    S.localViews = 0;
+    S.worldCalls = 0;
+    S.generation += 1;
+    S.toast = "Демо сброшено к исходным данным.";
+    OFFERS[0].qty = 1; OFFERS[1].qty = 2; OFFERS[2].qty = 3; OFFERS[3].qty = 0; OFFERS[4].qty = 5; OFFERS[5].qty = 1;
+    stateButtons.forEach(function (x) { x.setAttribute("aria-pressed", x.getAttribute("data-state") === "normal" ? "true" : "false"); });
+    render();
+  });
+
+  fitFrames();
+  window.addEventListener("resize", fitFrames);
+  render();
+})();
+</script>
+</body>
+</html>

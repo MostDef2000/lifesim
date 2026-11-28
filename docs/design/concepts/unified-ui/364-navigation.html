@@ -1,0 +1,821 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>#364 · Информационная архитектура и навигация — предварительный концепт</title>
+<style>
+  :root {
+    --bg: #F3ECDF;
+    --panel: #FFF9EF;
+    --ink: #30271F;
+    --dim: #69594C;
+    --accent: #86551E;
+    --accent-hover: #6E4519;
+    --success: #42613E;
+    --warning: #805316;
+    --critical: #A13D32;
+    --border: rgba(48, 39, 31, 0.14);
+    --line: rgba(48, 39, 31, 0.12);
+    --focus: rgba(134, 85, 30, 0.45);
+    --warm: rgba(134, 85, 30, 0.12);
+    --shadow-panel: 0 12px 32px rgba(48, 39, 31, 0.16), 0 2px 8px rgba(48, 39, 31, 0.10);
+    --shadow-soft: 0 2px 8px rgba(48, 39, 31, 0.14);
+    --r-panel: 12px;
+    --r-control: 8px;
+    --s1: 4px;
+    --s2: 8px;
+    --s3: 12px;
+    --s4: 20px;
+    --s5: 28px;
+    --font-body: system-ui, -apple-system, "Segoe UI", sans-serif;
+    --font-head: Georgia, "Times New Roman", serif;
+  }
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  body { margin: 0; background: var(--bg); color: var(--ink); font: 16px/1.55 var(--font-body); }
+  h1, h2, h3 { margin: 0; font-family: var(--font-head); font-weight: 400; line-height: 1.18; }
+  h1 { font-size: clamp(30px, 4vw, 46px); }
+  h2 { font-size: 30px; }
+  h3 { font-size: 19px; }
+  p { margin: 0; }
+  a { color: var(--accent); }
+  code { padding: 1px 5px; border: 1px solid var(--border); border-radius: 5px; background: var(--warm); font: 0.92em/1.4 ui-monospace, SFMono-Regular, Menlo, monospace; }
+  button, .btn {
+    min-height: 44px; padding: 10px 16px; border: 1px solid var(--border); border-radius: var(--r-control);
+    background: var(--panel); color: var(--ink); font: inherit; cursor: pointer;
+  }
+  button:hover, .btn:hover { border-color: var(--accent); background: var(--warm); }
+  button:focus-visible, [tabindex]:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+  button:disabled { opacity: 0.55; cursor: default; }
+  button[aria-pressed="true"], button.is-active { background: var(--accent); border-color: var(--accent); color: var(--panel); }
+  button[aria-pressed="true"]:hover, button.is-active:hover { background: var(--accent-hover); border-color: var(--accent-hover); }
+
+  .concept-flag {
+    position: sticky; top: 0; z-index: 50; display: flex; flex-wrap: wrap; gap: var(--s2) var(--s3);
+    align-items: center; justify-content: center; padding: 8px 16px;
+    border-bottom: 1px solid rgba(161, 61, 50, 0.32); background: #F8E8DC; color: #6B2A22;
+    font-size: 13px; line-height: 1.35; text-align: center;
+  }
+  .concept-flag strong { letter-spacing: 0.02em; }
+
+  .sheet { width: min(1320px, calc(100% - 32px)); margin: 0 auto; padding: 28px 0 72px; }
+  .sheet-header { display: grid; gap: var(--s4); padding: 28px 0 24px; border-bottom: 1px solid var(--line); }
+  .eyebrow { color: var(--accent); font-size: 13px; font-weight: 700; letter-spacing: 0.14em; text-transform: uppercase; }
+  .lede { max-width: 84ch; color: var(--dim); font-size: 18px; }
+  .meta-row { display: flex; flex-wrap: wrap; gap: var(--s2); }
+  .pill {
+    display: inline-flex; gap: 6px; align-items: center; min-height: 32px; padding: 4px 10px;
+    border: 1px solid var(--border); border-radius: 999px; background: var(--panel); color: var(--dim); font-size: 13px;
+  }
+  .pill strong { color: var(--ink); font-weight: 600; }
+  .note { padding: 10px 14px; border-left: 3px solid var(--accent); background: var(--warm); color: var(--dim); font-size: 14px; }
+  .note strong { color: var(--ink); }
+  .note-critical { border-left-color: var(--critical); background: rgba(161, 61, 50, 0.08); }
+  .note-success { border-left-color: var(--success); background: rgba(66, 97, 62, 0.08); }
+  .note-warning { border-left-color: var(--warning); background: rgba(128, 83, 22, 0.08); }
+
+  .toolbar {
+    position: sticky; top: 40px; z-index: 40; display: flex; flex-wrap: wrap; gap: var(--s2);
+    align-items: center; justify-content: space-between; margin: 20px 0; padding: 12px;
+    border: 1px solid var(--border); border-radius: var(--r-panel);
+    background: rgba(255, 249, 239, 0.96); box-shadow: var(--shadow-soft);
+  }
+  .toolbar-group { display: flex; flex-wrap: wrap; gap: var(--s2); align-items: center; }
+  .toolbar-label { color: var(--dim); font-size: 13px; }
+  .toolbar button { padding: 8px 14px; }
+
+  .section { display: grid; gap: var(--s3); margin-top: 44px; padding-top: 8px; border-top: 1px solid var(--line); }
+  .section-head { display: grid; gap: var(--s2); max-width: 88ch; }
+  .section-head p { color: var(--dim); }
+
+  .viewport-stage { display: flex; gap: 20px; align-items: flex-start; width: 100%; overflow: auto; padding: 4px 0 8px; --scale: 1; }
+  .viewport-stage[data-view="desktop"] .frame-mobile, .viewport-stage[data-view="mobile"] .frame-desktop { display: none; }
+  .viewport-stage[data-view="mobile"] { justify-content: center; }
+  .frame-wrap {
+    position: relative; flex: 0 0 auto; width: calc(var(--fw) * var(--scale)); height: calc(var(--fh) * var(--scale) + 22px);
+    overflow: hidden; border: 1px solid var(--border); border-radius: var(--r-panel); background: var(--bg); box-shadow: var(--shadow-panel);
+  }
+  .frame-wrap.frame-desktop { --fw: 1440px; --fh: 900px; }
+  .frame-wrap.frame-mobile { --fw: 390px; --fh: 844px; }
+  .frame { width: var(--fw); height: var(--fh); overflow: hidden; transform: scale(var(--scale)); transform-origin: top left; background: var(--bg); }
+  .frame-label {
+    position: static; display: block; height: 22px; line-height: 22px; padding: 0 8px; border: 1px solid var(--border);
+    border-radius: 6px; background: rgba(255, 249, 239, 0.94); color: var(--dim); font-size: 11px; pointer-events: none;
+  }
+
+  .map-layout { display: grid; grid-template-columns: 300px minmax(0, 1fr); gap: var(--s4); align-items: start; }
+  .route-list { display: grid; gap: var(--s2); max-height: 760px; overflow: auto; padding-right: 4px; }
+  .route-group-title { color: var(--dim); font-size: 12px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; margin-top: var(--s2); }
+  .route-btn {
+    display: grid; gap: 2px; width: 100%; padding: 8px 10px; text-align: left; border-radius: 8px; min-height: 44px;
+  }
+  .route-btn small { color: var(--dim); font-size: 12px; }
+  .route-btn[aria-pressed="true"] small { color: rgba(255, 249, 239, 0.8); }
+
+  .rule-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: var(--s3); }
+  .rule-card { display: grid; gap: var(--s2); align-content: start; padding: var(--s3); border: 1px solid var(--border); border-radius: var(--r-panel); background: var(--panel); }
+  .rule-card h3 { display: flex; align-items: center; gap: 8px; }
+  .tag { padding: 2px 8px; border-radius: 999px; font-size: 11px; font-weight: 700; letter-spacing: 0.04em; border: 1px solid var(--border); color: var(--dim); background: var(--bg); }
+  .tag-panel { color: var(--accent); border-color: rgba(134, 85, 30, 0.35); background: var(--warm); }
+  .tag-modal { color: var(--critical); border-color: rgba(161, 61, 50, 0.35); background: rgba(161, 61, 50, 0.08); }
+  .tag-full { color: var(--success); border-color: rgba(66, 97, 62, 0.35); background: rgba(66, 97, 62, 0.1); }
+  .rule-card ul { margin: 0; padding-left: 18px; color: var(--dim); font-size: 14px; display: grid; gap: 4px; }
+
+  .tabs { display: flex; flex-wrap: wrap; gap: var(--s2); }
+  .tabs button { padding: 8px 14px; }
+  .flow-body { display: grid; grid-template-columns: minmax(0, 1fr) 320px; gap: var(--s4); align-items: start; }
+  .flow-steps { display: flex; flex-wrap: wrap; gap: var(--s1); margin: 0; padding: 0; list-style: none; }
+  .flow-steps li { padding: 4px 10px; border: 1px solid var(--border); border-radius: 999px; background: var(--panel); color: var(--dim); font-size: 12px; }
+  .flow-steps li.is-done { border-color: rgba(66, 97, 62, 0.4); background: rgba(66, 97, 62, 0.1); color: var(--success); }
+  .flow-steps li.is-current { border-color: var(--accent); background: var(--accent); color: var(--panel); }
+  .step-card { display: grid; gap: var(--s3); padding: var(--s4); border: 1px solid var(--border); border-radius: var(--r-panel); background: var(--panel); }
+  .step-card .route-pill { justify-self: start; }
+  .field-row { display: flex; flex-wrap: wrap; gap: var(--s2) var(--s3); }
+  .field { display: grid; gap: 2px; min-width: 140px; }
+  .field dt { color: var(--dim); font-size: 12px; text-transform: uppercase; letter-spacing: 0.06em; }
+  .field dd { margin: 0; font-size: 14px; }
+  .flow-nav { display: flex; gap: var(--s2); }
+
+  .preserve { display: grid; grid-template-columns: minmax(0, 1fr) 330px; gap: var(--s4); align-items: start; }
+  .mini-shell { border: 1px solid var(--border); border-radius: var(--r-panel); background: var(--panel); overflow: hidden; }
+  .mini-top { display: flex; flex-wrap: wrap; gap: var(--s2); justify-content: space-between; padding: 10px 12px; border-bottom: 1px solid var(--line); background: var(--bg); font-size: 13px; color: var(--dim); }
+  .mini-top strong { color: var(--ink); }
+  .mini-body { display: grid; gap: var(--s3); padding: var(--s3); }
+  .mini-controls { display: flex; flex-wrap: wrap; gap: var(--s2); align-items: end; }
+  .mini-controls label { display: grid; gap: 4px; font-size: 12px; color: var(--dim); }
+  .mini-controls select, .mini-controls input {
+    min-height: 44px; padding: 8px 10px; border: 1px solid var(--border); border-radius: var(--r-control); background: var(--panel); color: var(--ink); font: inherit;
+  }
+  .mini-controls input { min-width: 200px; }
+  .chip-row { display: flex; flex-wrap: wrap; gap: 6px; }
+  .chip { display: inline-flex; align-items: center; gap: 6px; padding: 3px 9px; border-radius: 999px; border: 1px solid var(--border); background: var(--bg); font-size: 12px; color: var(--dim); }
+  .chip b { color: var(--ink); font-weight: 600; }
+  .log { display: grid; gap: 4px; margin: 0; padding: 10px 12px; list-style: none; border: 1px dashed var(--border); border-radius: 8px; background: rgba(243, 236, 223, 0.5); font-size: 13px; color: var(--dim); min-height: 92px; }
+  .log li b { color: var(--ink); }
+
+  .hero-demo { position: relative; height: 150px; border: 1px solid var(--border); border-radius: var(--r-panel); background: #DCE3D6; overflow: hidden; }
+  .hero-demo .poi { position: absolute; transform: translate(-50%, -50%); display: grid; justify-items: center; gap: 2px; font-size: 11px; color: var(--ink); }
+  .hero-demo .poi button { width: 44px; height: 44px; padding: 0; border-radius: 50%; background: var(--panel); border: 2px solid var(--dim); font-size: 15px; line-height: 1; }
+  .hero-demo .poi button[aria-pressed="true"] { border-color: var(--accent); background: var(--warm); box-shadow: 0 0 0 4px rgba(134, 85, 30, 0.18); }
+  .hero-demo .hero { position: absolute; transform: translate(-50%, -50%); display: grid; justify-items: center; font-size: 10px; font-weight: 700; color: var(--success); }
+  .hero-demo .hero span { width: 16px; height: 16px; border-radius: 50%; background: var(--success); border: 2px solid var(--panel); }
+
+  table { width: 100%; border-collapse: collapse; font-size: 14px; background: var(--panel); border-radius: var(--r-panel); overflow: hidden; }
+  th, td { padding: 9px 12px; border-bottom: 1px solid var(--line); text-align: left; vertical-align: top; }
+  th { font-size: 12px; letter-spacing: 0.05em; text-transform: uppercase; color: var(--dim); background: var(--bg); }
+  tr:last-child td { border-bottom: 0; }
+
+  .footer { display: grid; gap: 6px; margin-top: 48px; padding-top: 16px; border-top: 1px solid var(--line); color: var(--dim); font-size: 13px; }
+  .footer strong { color: var(--ink); }
+
+  /* simulated app shell inside frames */
+  .app { width: 100%; height: 100%; display: grid; grid-template-columns: 270px 1fr; grid-template-rows: 88px 1fr; background: var(--bg); }
+  .app .brand { grid-column: 1; grid-row: 1; display: grid; align-content: center; gap: 2px; padding: 0 20px; border-right: 1px solid var(--line); border-bottom: 1px solid var(--line); background: var(--panel); }
+  .app .brand b { font-family: var(--font-head); font-size: 24px; font-weight: 400; }
+  .app .brand span { color: var(--dim); font-size: 12px; }
+  .app .top { grid-column: 2; grid-row: 1; display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 0 24px; border-bottom: 1px solid var(--line); background: var(--panel); }
+  .app .top .ctx { display: flex; align-items: center; gap: 12px; }
+  .app .avatar { display: grid; place-items: center; width: 44px; height: 44px; border-radius: 50%; background: var(--warm); color: var(--accent); font-size: 13px; font-weight: 700; }
+  .app .who { display: grid; line-height: 1.25; }
+  .app .who b { font-size: 15px; }
+  .app .who span { color: var(--dim); font-size: 12px; }
+  .app .meta { display: flex; flex-wrap: wrap; gap: 8px; }
+  .app .meta span { padding: 4px 9px; border: 1px solid var(--border); border-radius: 999px; font-size: 12px; color: var(--dim); }
+  .app .rail { grid-column: 1; grid-row: 2; display: grid; align-content: start; gap: 2px; padding: 10px; border-right: 1px solid var(--line); background: var(--panel); }
+  .app .rail button { display: flex; align-items: center; gap: 10px; min-height: 46px; padding: 8px 12px; border: 0; border-radius: 8px; background: transparent; font-size: 14px; color: var(--dim); }
+  .app .rail button:hover { background: var(--warm); }
+  .app .rail button[aria-current="page"] { background: var(--warm); color: var(--accent); font-weight: 700; box-shadow: inset 3px 0 0 var(--accent); }
+  .app .rail .ico { width: 22px; text-align: center; font-size: 16px; }
+  .app .content { grid-column: 2; grid-row: 2; overflow: hidden; padding: 24px 28px; display: grid; align-content: start; gap: 16px; }
+  .app .route-head { display: grid; gap: 6px; }
+  .app .route-head .eyebrow { font-size: 11px; }
+  .app .route-head h3 { font-size: 30px; }
+  .app .route-head p { color: var(--dim); font-size: 14px; max-width: 60ch; }
+  .app .grid2 { display: grid; grid-template-columns: 1.2fr 1fr; gap: 14px; }
+  .app .panel { padding: 14px; border: 1px solid var(--border); border-radius: 12px; background: var(--panel); display: grid; gap: 8px; align-content: start; }
+  .app .panel h4 { margin: 0; font-size: 13px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--dim); }
+  .app .kv { display: flex; justify-content: space-between; gap: 12px; font-size: 13px; }
+  .app .kv span:first-child { color: var(--dim); }
+  .app .lod { display: flex; gap: 6px; }
+  .app .lod button { min-height: 36px; padding: 4px 10px; font-size: 12px; }
+  .app .lod-note { color: var(--dim); font-size: 12px; min-height: 18px; }
+  .app .crumbs { color: var(--dim); font-size: 12px; }
+  .app .state { display: flex; align-items: center; gap: 8px; padding: 8px 10px; border: 1px dashed var(--border); border-radius: 8px; font-size: 12px; color: var(--dim); }
+  .app .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--success); }
+
+  .app.m { grid-template-columns: 1fr; grid-template-rows: 96px 1fr 78px; }
+  .app.m .brand { display: none; }
+  .app.m .top { grid-column: 1; grid-row: 1; display: grid; align-content: center; gap: 4px; padding: 10px 14px; border-right: 0; }
+  .app.m .top .ctx { gap: 10px; }
+  .app.m .avatar { width: 40px; height: 40px; font-size: 12px; }
+  .app.m .who b { font-size: 14px; }
+  .app.m .meta { display: none; }
+  .app.m .content { grid-column: 1; grid-row: 2; padding: 14px; gap: 10px; }
+  .app.m .route-head h3 { font-size: 24px; }
+  .app.m .grid2 { grid-template-columns: 1fr; gap: 10px; }
+  .app.m .dock { grid-column: 1; grid-row: 3; display: grid; grid-template-columns: repeat(9, 1fr); align-items: center; gap: 0; padding: 6px 4px; border-top: 1px solid var(--line); background: var(--panel); }
+  .app.m .dock button { display: grid; justify-items: center; gap: 2px; min-height: 44px; padding: 2px; border: 0; background: transparent; color: var(--dim); font-size: 9px; }
+  .app.m .dock button[aria-current="page"] { color: var(--accent); font-weight: 700; }
+  .app.m .dock .ico { font-size: 15px; }
+  .app .dock { display: none; }
+  .app.m .rail { display: none; }
+
+  .legend { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: var(--s2); margin: 0; padding: 0; list-style: none; }
+  .legend li { padding: 8px 10px; border: 1px solid var(--border); border-radius: 8px; background: var(--panel); color: var(--dim); font-size: 13px; }
+  .legend b { color: var(--ink); }
+  [hidden] { display: none !important; }
+  @media (max-width: 720px) {
+    .map-layout { grid-template-columns: minmax(0, 1fr); }
+    .route-list { max-height: 320px; }
+    table { table-layout: fixed; }
+    th, td { overflow-wrap: break-word; }
+  }
+</style>
+</head>
+<body>
+<a class="skip-link" href="#map" style="position:absolute;left:-999px" onfocus="this.style.left='8px';this.style.top='8px';this.style.zIndex='99';this.style.background='#FFF9EF';this.style.padding='8px'" onblur="this.style.left='-999px'">Перейти к карте экранов</a>
+<div class="concept-flag" role="note">
+  <strong>ПРЕДВАРИТЕЛЬНЫЙ КОНЦЕПТ, НЕ УТВЕРЖДЁННЫЙ PRODUCTION-АССЕТ</strong>
+  <span>Issue #364 · информационная архитектура · §27/§27.1 · не production-код и не игровой факт</span>
+</div>
+
+<main class="sheet">
+  <header class="sheet-header">
+    <div class="eyebrow">#364 · навигация и карта экранов · волна 2</div>
+    <h1>Шестнадцать экранов, девять пунктов, одна карта</h1>
+    <p class="lede">
+      Предварительная информационная архитектура игрока: все 16 статических экранов, динамическое Место,
+      три уровня детализации внутри Мира и правила панель / модальное окно / полный экран. Интерактивная
+      карта показывает родителя, слой и поведение «Назад» для каждого экрана.
+    </p>
+    <div class="meta-row">
+      <span class="pill"><strong>Канон:</strong> §27, §27.1</span>
+      <span class="pill"><strong>Основа:</strong> #363 component sheet</span>
+      <span class="pill"><strong>Маршруты:</strong> backend/app/web/app.js, реестр <code>routes</code></span>
+      <span class="pill"><strong>Part 1/3:</strong> #364 · #366 · #365</span>
+    </div>
+    <div class="note">
+      <strong>Граница артефакта.</strong> Это design handoff, а не изменение кода и не игровой факт.
+      Суммы, имена и адреса — условные демонстрационные данные. Палитра, типографика, радиусы и spacing
+      взяты из §27; новых визуальных направлений не вводится. Админ-экран <code>#/admin</code> намеренно
+      не входит в карту игрока (16 экранов без него).
+    </div>
+  </header>
+
+  <div class="toolbar" role="toolbar" aria-label="Управление просмотром макета">
+    <div class="toolbar-group">
+      <span class="toolbar-label">Композиция:</span>
+      <button type="button" data-view="desktop" aria-pressed="true">Desktop 1440×900</button>
+      <button type="button" data-view="mobile" aria-pressed="false">Mobile 390×844</button>
+      <button type="button" data-view="both" aria-pressed="false">Оба рядом</button>
+    </div>
+    <div class="toolbar-group">
+      <span class="toolbar-label">Выбор экрана — локальный просмотр, маршрут и герой не меняются.</span>
+    </div>
+  </div>
+
+  <section class="section" id="map">
+    <div class="section-head">
+      <h2>Карта экранов</h2>
+      <p>
+        Слева — полный список игрока. Выбор карточки показывает, к какому пункту навигации относится
+        экран, каким слоем он открывается и что сохраняется при возврате. Внутри Мира переключаются
+        три LOD; выбор LOD не является перемещением героя.
+      </p>
+    </div>
+    <div class="map-layout">
+      <div>
+        <div class="route-list" id="route-list" role="group" aria-label="Список экранов"></div>
+      </div>
+      <div>
+        <div class="viewport-stage" data-view="desktop" id="viewport-stage">
+          <div class="frame-wrap frame-desktop">
+            <span class="frame-label">DESKTOP · 1440×900 · логический размер</span>
+            <div class="frame"><div class="frame-slot" data-frame="desktop"></div></div>
+          </div>
+          <div class="frame-wrap frame-mobile">
+            <span class="frame-label">MOBILE · 390×844</span>
+            <div class="frame"><div class="frame-slot" data-frame="mobile"></div></div>
+          </div>
+        </div>
+        <div class="note" style="margin-top:8px">
+          <strong>Родитель и «Назад».</strong> Подчинённые экраны (Дом, Карьера, Журнал, Настройки,
+          Внешние сервисы) не занимают отдельный пункт навигации: они открываются из родителя и
+          возвращают туда же, подсвечивая родительский пункт.
+        </div>
+      </div>
+    </div>
+    <ul class="legend">
+      <li><b>9 пунктов</b> — Мир, Чат, Люди, Инвентарь, Рынок, Дела, Цель, Профиль, Образ.</li>
+      <li><b>16 экранов</b> — login, create, world, chat, people, inventory, shop, tasks, desire, profile, appearance, external, home, career, events, settings.</li>
+      <li><b>+1 динамический</b> — <code>#/location/:id</code>, Место внутри контекста Мира.</li>
+      <li><b>LOD 1–3</b> — три уровня детализации карты Мира, не отдельные маршруты.</li>
+    </ul>
+  </section>
+
+  <section class="section" id="layers">
+    <div class="section-head">
+      <h2>Панель, модальное окно, полный экран</h2>
+      <p>Три слоя решают разные задачи. Ни один из них не подтверждает игровое действие без ответа мира.</p>
+    </div>
+    <div class="rule-grid">
+      <div class="rule-card">
+        <h3>Панель <span class="tag tag-panel">panel</span></h3>
+        <p>Контекст выбранного объекта у края экрана: POI, предмет, человек, цель.</p>
+        <ul>
+          <li>не меняет маршрут; мир остаётся видимым;</li>
+          <li>закрывается Esc / кликом по миру, возвращает к тому же состоянию;</li>
+          <li>одна панель за раз; новая заменяет содержимое, не наслаивается;</li>
+          <li>сохраняет выбор, фильтр и черновик в родительском экране.</li>
+        </ul>
+      </div>
+      <div class="rule-card">
+        <h3>Модальное окно <span class="tag tag-modal">modal</span></h3>
+        <p>Блокирующее решение: подтвердить покупку, принять цель, завершить диалог.</p>
+        <ul>
+          <li>фокус-ловушка, Esc = отмена, один основной и один отменяющий выход;</li>
+          <li>не открывается поверх другого модального окна;</li>
+          <li>кнопка не выглядит выполненной; статус — только после ответа мира;</li>
+          <li>отмена не мутирует инвентарь, баланс и отношения.</li>
+        </ul>
+      </div>
+      <div class="rule-card">
+        <h3>Полный экран <span class="tag tag-full">full</span></h3>
+        <p>Маршрут или крупный экран: Мир, Место, системные экраны, вход и создание героя.</p>
+        <ul>
+          <li>только по явному переходу; не открывается случайно из панели;</li>
+          <li>адрес отражает экран; «Назад» возвращает на родителя;</li>
+          <li>контекст героя и времени остаётся видимым;</li>
+          <li>вход и создание героя — без рейла навигации.</li>
+        </ul>
+      </div>
+    </div>
+    <div class="note note-critical">
+      <strong>Запрет подмены факта.</strong> Смена экрана, выбор POI или нажатие кнопки не объявляют
+      покупку, перемещение или действие выполненными. Результат приходит из мира, а интерфейс лишь
+      показывает ожидание и затем подтверждение либо отказ.
+    </div>
+  </section>
+
+  <section class="section" id="flows">
+    <div class="section-head">
+      <h2>Три сквозных потока</h2>
+      <p>Пошаговый просмотр: какой экран, какой слой, что происходит и что сохраняется к возврату.</p>
+    </div>
+    <div class="tabs" role="tablist" aria-label="Потоки">
+      <button type="button" role="tab" data-flow="purchase" aria-selected="true" aria-pressed="true">Покупка</button>
+      <button type="button" role="tab" data-flow="dialogue" aria-selected="false" aria-pressed="false">Диалог</button>
+      <button type="button" role="tab" data-flow="goal" aria-selected="false" aria-pressed="false">Цель</button>
+    </div>
+    <div class="flow-body">
+      <div class="step-card" id="flow-card" aria-live="polite"></div>
+      <div class="step-card" style="align-content:start">
+        <div class="tabs" id="flow-tabs"></div>
+        <ol class="flow-steps" id="flow-steps"></ol>
+        <div class="flow-nav">
+          <button type="button" id="flow-prev">Назад</button>
+          <button type="button" id="flow-next">Далее</button>
+        </div>
+        <p style="color:var(--dim);font-size:13px">
+          Шаги демонстрируют порядок экранов и слоёв. Ни один шаг не выполняет серверное действие.
+        </p>
+      </div>
+    </div>
+  </section>
+
+  <section class="section" id="back">
+    <div class="section-head">
+      <h2>Возврат назад сохраняет состояние</h2>
+      <p>
+        Выбор POI, фильтр инвентаря, черновик чата и контекст героя не теряются при смене раздела.
+        Ниже — проверяемый мини-сценарий: задайте значения, уйдите в другой раздел и вернитесь.
+      </p>
+    </div>
+    <div class="preserve">
+      <div class="mini-shell">
+        <div class="mini-top">
+          <span>Мини-оболочка · <strong id="mini-route">Мир</strong></span>
+          <span id="mini-context">Алиса · Дом · День 17 · 18:40</span>
+        </div>
+        <div class="mini-body">
+          <div class="mini-controls">
+            <label>POI
+              <select id="preset-poi">
+                <option value="Дом">Дом</option>
+                <option value="Магазин">Магазин</option>
+                <option value="Мастерская">Мастерская</option>
+              </select>
+            </label>
+            <label>Фильтр инвентаря
+              <select id="preset-filter">
+                <option value="Всё">Всё</option>
+                <option value="Одежда">Одежда</option>
+                <option value="Инструменты">Инструменты</option>
+                <option value="Еда">Еда</option>
+              </select>
+            </label>
+            <label>Черновик чата
+              <input id="preset-draft" type="text" placeholder="Например: «Добрый вечер…»">
+            </label>
+          </div>
+          <div class="mini-controls">
+            <button type="button" data-goto="Мир">В Мир</button>
+            <button type="button" data-goto="Инвентарь">В Инвентарь</button>
+            <button type="button" data-goto="Чат">В Чат</button>
+            <button type="button" data-goto="Рынок">На Рынок</button>
+            <button type="button" id="preset-back">Назад</button>
+            <button type="button" id="preset-reset">Сбросить</button>
+          </div>
+          <div class="chip-row" id="preset-chips"></div>
+          <ul class="log" id="preset-log"></ul>
+        </div>
+      </div>
+      <div class="step-card" style="align-content:start">
+        <h3>Что именно сохраняется</h3>
+        <table>
+          <thead><tr><th>Состояние</th><th>Хранится</th><th>Сбрасывается</th></tr></thead>
+          <tbody>
+            <tr><td>Выбранный POI</td><td>Экран Мира, панель</td><td>При переходе на другой экран</td></tr>
+            <tr><td>Фильтр инвентаря</td><td>Экран Инвентаря</td><td>При сбросе фильтров</td></tr>
+            <tr><td>Черновик чата</td><td>Поле ввода диалога</td><td>После отправки или смены диалога</td></tr>
+            <tr><td>Контекст героя</td><td>Оболочка</td><td>Только по факту мира</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </section>
+
+  <section class="section" id="hero">
+    <div class="section-head">
+      <h2>Выбор места не перемещает героя</h2>
+      <p>Явное правило: клик по POI меняет только выбор и контекст панели. Позиция героя меняется лишь после подтверждённого перемещения.</p>
+    </div>
+    <div class="preserve">
+      <div class="step-card" style="align-content:start">
+        <div class="hero-demo" id="hero-demo">
+          <div class="poi" style="left:26%;top:36%"><button type="button" data-hero-poi="Дом" aria-pressed="true">⌂</button><span>Дом</span></div>
+          <div class="poi" style="left:62%;top:62%"><button type="button" data-hero-poi="Магазин" aria-pressed="false">▤</button><span>Магазин</span></div>
+          <div class="poi" style="left:82%;top:30%"><button type="button" data-hero-poi="Мастерская" aria-pressed="false">✦</button><span>Мастерская</span></div>
+          <div class="hero" style="left:26%;top:56%"><span></span>герой</div>
+        </div>
+        <div class="chip-row">
+          <span class="chip">Выбрано: <b id="hero-selected">Дом</b></span>
+          <span class="chip">Герой: <b id="hero-position">Дом · не перемещён</b></span>
+        </div>
+        <p style="color:var(--dim);font-size:13px">Перемещение героя возможно только действием «Идти» в экране Места и только после ответа мира.</p>
+      </div>
+      <div class="step-card" style="align-content:start">
+        <h3>Порядок слоёв</h3>
+        <ol class="flow-steps" style="display:grid">
+          <li style="border-radius:8px">Клик по POI → панель с выбором, герой стоит</li>
+          <li style="border-radius:8px">«Открыть место» → полный экран <code>#/location/:id</code></li>
+          <li style="border-radius:8px">«Идти» → модальное подтверждение → ожидание → прибытие</li>
+          <li style="border-radius:8px">«Назад» → Мир с прежним POI, но без телепортации</li>
+        </ol>
+        <div class="note note-warning"><strong>Честность.</strong> Если перемещение не подтверждено, герой остаётся на месте, а экран показывает отказ — не «успех».</div>
+      </div>
+    </div>
+  </section>
+
+  <footer class="footer">
+    <span><strong>#364 · Информационная архитектура Рейнеке.</strong> Предварительный концепт, не утверждённый production-ассет.</span>
+    <span>Источники: docs/VISUAL-BIBLE.md §27, §27.1; реестр маршрутов backend/app/web/app.js; #363 component sheet; SVG-борд 364-navigation.svg.</span>
+    <span>Связанные: #366 инвентарь, #365 пилот, #353 порядок волн. Данные демонстрационные; приёмка владельцем — отдельный шаг.</span>
+  </footer>
+</main>
+
+<script>
+(function () {
+  "use strict";
+
+  var stage = document.getElementById("viewport-stage");
+  var viewButtons = Array.prototype.slice.call(document.querySelectorAll("button[data-view]"));
+
+  /* ---------- viewport switch ---------- */
+  function fitFrames() {
+    if (!stage) return;
+    var view = stage.getAttribute("data-view") || "desktop";
+    var available = Math.max(240, stage.clientWidth - 4);
+    var total = view === "desktop" ? 1440 : view === "mobile" ? 390 : 1440 + 390 + 20;
+    var scale = Math.max(0.2, Math.min(1, available / total));
+    stage.style.setProperty("--scale", String(scale));
+  }
+  function setView(view) {
+    stage.setAttribute("data-view", view);
+    viewButtons.forEach(function (b) {
+      b.setAttribute("aria-pressed", b.getAttribute("data-view") === view ? "true" : "false");
+    });
+    fitFrames();
+  }
+  viewButtons.forEach(function (b) {
+    b.addEventListener("click", function () { setView(b.getAttribute("data-view")); });
+  });
+
+  /* ---------- route data ---------- */
+  var NAV = ["Мир", "Чат", "Люди", "Инвентарь", "Рынок", "Дела", "Цель", "Профиль", "Образ"];
+  var ICON = {
+    "Мир": "◎", "Чат": "✉", "Люди": "☺", "Инвентарь": "▣", "Рынок": "◇",
+    "Дела": "✎", "Цель": "⚑", "Профиль": "☰", "Образ": "◧"
+  };
+
+  var ROUTES = [
+    { id: "login", hash: "#/login", title: "Вход", group: "Вход и создание", nav: null, layer: "Полный экран", back: "После входа — Мир", purpose: "Вход в аккаунт. Без рейла навигации и без игровых данных до подтверждённой сессии.", saved: "Нет игрового контекста" },
+    { id: "create", hash: "#/create", title: "Создание героя", group: "Вход и создание", nav: null, layer: "Полный экран", back: "Назад — ко входу", purpose: "Пошаговое создание персонажа. Черновик шага сохраняется до подтверждения.", saved: "Черновик шага создания" },
+    { id: "world", hash: "#/world", title: "Мир", group: "Основные", nav: "Мир", layer: "Полный экран + панель", back: "Корневой экран", purpose: "Карта острова — визуально первичный экран. Три LOD, маркеры POI, контекстная панель выбора.", saved: "Выбранный POI до смены маршрута" },
+    { id: "chat", hash: "#/chat", title: "Чат", group: "Основные", nav: "Чат", layer: "Полный экран", back: "Корневой экран", purpose: "Список диалогов и открытая переписка. Черновик ввода переживает уход в другой раздел.", saved: "Черновик сообщения" },
+    { id: "people", hash: "#/people", title: "Люди", group: "Основные", nav: "Люди", layer: "Полный экран + панель", back: "Корневой экран", purpose: "Жители и отношения. Карточка человека открывается панелью, диалог — переходом в Чат.", saved: "Выбранный человек в панели" },
+    { id: "inventory", hash: "#/inventory", title: "Инвентарь", group: "Основные", nav: "Инвентарь", layer: "Полный экран + панель", back: "Корневой экран", purpose: "Эталонный системный экран: категории, карточки, контекст предмета. Подробно — в #366.", saved: "Фильтр категории, выбор предмета, черновик продажи" },
+    { id: "shop", hash: "#/shop", title: "Рынок", group: "Основные", nav: "Рынок", layer: "Полный экран + модальное окно", back: "Корневой экран", purpose: "Витрина и лоты. Покупка подтверждается модальным окном; баланс и вещи меняет только ответ мира.", saved: "Фильтр витрины, выбранный лот, черновик объявления" },
+    { id: "tasks", hash: "#/tasks", title: "Дела", group: "Основные", nav: "Дела", layer: "Полный экран + панель", back: "Корневой экран", purpose: "Список задач и детали выбранной задачи. Статусы меняются только по ответу мира.", saved: "Фильтр списка, выбранная задача" },
+    { id: "desire", hash: "#/desire", title: "Цель", group: "Основные", nav: "Цель", layer: "Полный экран + модальное окно", back: "Корневой экран", purpose: "Долгосрочная цель героя и шаги к ней. Принятие цели — модальное подтверждение.", saved: "Выбранная цель, черновик формулировки" },
+    { id: "profile", hash: "#/profile", title: "Профиль", group: "Основные", nav: "Профиль", layer: "Полный экран", back: "Корневой экран", purpose: "Сводка героя; отсюда открываются Дом, Карьера, Настройки и Внешние сервисы.", saved: "Позиция прокрутки профиля" },
+    { id: "appearance", hash: "#/appearance", title: "Образ", group: "Основные", nav: "Образ", layer: "Полный экран + панель", back: "Корневой экран", purpose: "Внешний вид и надетые вещи. Надевание/снятие подтверждается ответом мира.", saved: "Выбранный слот, открытая категория" },
+    { id: "home", hash: "#/home", title: "Дом", group: "Подчинённые", nav: "Профиль", layer: "Полный экран", back: "Назад — в Профиль (или в Цель)", purpose: "Жильё героя. Подчинённый экран без своего пункта навигации.", saved: "Контекст героя" },
+    { id: "career", hash: "#/career", title: "Карьера", group: "Подчинённые", nav: "Профиль", layer: "Полный экран", back: "Назад — в Профиль", purpose: "Роли и занятость. Подчинённый экран без своего пункта навигации.", saved: "Контекст героя" },
+    { id: "events", hash: "#/events", title: "Журнал событий", group: "Подчинённые", nav: "Мир", layer: "Полный экран", back: "Назад — в Мир (подсветка «Мир»)", purpose: "События мира. Подсвечивает пункт «Мир», не создаёт десятый пункт.", saved: "Фильтр событий" },
+    { id: "settings", hash: "#/settings", title: "Настройки", group: "Подчинённые", nav: "Профиль", layer: "Полный экран", back: "Назад — в Профиль (подсветка «Профиль»)", purpose: "Настройки игры и доступности. Подсвечивает родительский «Профиль».", saved: "Контекст героя" },
+    { id: "external", hash: "#/external", title: "Внешние сервисы", group: "Подчинённые", nav: "Профиль", layer: "Полный экран + панель", back: "Назад — в Профиль", purpose: "Подключения внешних сервисов. Открывается из Профиля.", saved: "Контекст героя" },
+    { id: "place", hash: "#/location/:id", title: "Место", group: "Динамические", nav: "Мир", layer: "Полный экран", back: "Назад — в Мир с прежним POI", purpose: "Динамический экран конкретного POI: сцена, панель действий, явное «Идти». Не перемещает героя при открытии.", saved: "Выбранный POI, контекст возврата" }
+  ];
+
+  var selectedRoute = "world";
+  var lod = 1;
+
+  function navFor(route) { return route.nav; }
+
+  function routeLabel(route) {
+    return route.group === "Основные" ? "Основной" : route.group === "Подчинённые" ? "Подчинённый" : route.group === "Динамические" ? "Динамический" : "Без рейла";
+  }
+
+  function renderList() {
+    var list = document.getElementById("route-list");
+    if (!list) return;
+    list.innerHTML = "";
+    var groups = ["Основные", "Подчинённые", "Динамические", "Вход и создание"];
+    groups.forEach(function (group) {
+      var heading = document.createElement("div");
+      heading.className = "route-group-title";
+      heading.textContent = group;
+      list.appendChild(heading);
+      ROUTES.filter(function (r) { return r.group === group; }).forEach(function (route) {
+        var b = document.createElement("button");
+        b.type = "button";
+        b.className = "route-btn";
+        b.setAttribute("data-route", route.id);
+        b.setAttribute("aria-pressed", route.id === selectedRoute ? "true" : "false");
+        b.innerHTML = "<span><b>" + route.title + "</b></span><small>" + route.hash + " · " + routeLabel(route) + "</small>";
+        b.addEventListener("click", function () { selectRoute(route.id); });
+        list.appendChild(b);
+      });
+    });
+  }
+
+  function shellMarkup(variant) {
+    var rail = "";
+    if (variant === "desktop") {
+      rail = '<nav class="rail" aria-label="Основная навигация">' + NAV.map(function (n) {
+        return '<button type="button" data-nav="' + n + '"><span class="ico" aria-hidden="true">' + ICON[n] + '</span><span>' + n + '</span></button>';
+      }).join("") + "</nav>";
+    }
+    var dock = "";
+    if (variant === "mobile") {
+      dock = '<nav class="dock" aria-label="Основная навигация">' + NAV.map(function (n) {
+        return '<button type="button" data-nav="' + n + '"><span class="ico" aria-hidden="true">' + ICON[n] + '</span><span>' + n + '</span></button>';
+      }).join("") + "</nav>";
+    }
+    return '<div class="app ' + (variant === "mobile" ? "m" : "") + '">' +
+      '<div class="brand"><b>ВЛ1: Рейнеке</b><span>Северный остров · Тёплый вечер</span></div>' +
+      '<header class="top"><div class="ctx"><span class="avatar" aria-hidden="true">АМ</span><span class="who"><b>Алиса Морозова</b><span>Фермер · Дом · День 17</span></span></div>' +
+      '<div class="meta"><span><b>18:40</b></span><span>+12°C · дождь</span><span>Автономно</span><span><b>1 000 ₽</b></span></div></header>' +
+      rail + dock +
+      '<div class="content"><div class="crumbs" data-crumbs></div>' +
+      '<div class="route-head"><span class="eyebrow" data-route-hash></span><h3 data-route-title></h3><p data-route-purpose></p></div>' +
+      '<div class="grid2"><div class="panel"><h4>Слой и возврат</h4>' +
+      '<div class="kv"><span>Слой</span><span data-route-layer></span></div>' +
+      '<div class="kv"><span>Пункт навигации</span><span data-route-nav></span></div>' +
+      '<div class="kv"><span>Назад</span><span data-route-back></span></div>' +
+      '<div class="kv"><span>Сохраняется</span><span data-route-saved></span></div>' +
+      '</div><div class="panel"><h4>Внутри Мира · LOD</h4>' +
+      '<div class="lod"><button type="button" data-lod="1">LOD 1</button><button type="button" data-lod="2">LOD 2</button><button type="button" data-lod="3">LOD 3</button></div>' +
+      '<p class="lod-note" data-lod-note></p>' +
+      '<div class="state"><span class="dot"></span><span data-hero-state>Герой не перемещён</span></div>' +
+      '</div></div></div></div>';
+  }
+
+  function mountShells() {
+    Array.prototype.forEach.call(document.querySelectorAll("[data-frame]"), function (slot) {
+      slot.innerHTML = shellMarkup(slot.getAttribute("data-frame"));
+    });
+  }
+
+  var LOD_COPY = {
+    "1": "LOD 1 — весь остров: районы, берег, крупные POI. Основной обзор.",
+    "2": "LOD 2 — район: улицы, дворы, ближайшие POI вокруг героя.",
+    "3": "LOD 3 — точка: фасад, вход, детали места. Без смены маршрута."
+  };
+
+  function updateShells() {
+    var route = ROUTES.filter(function (r) { return r.id === selectedRoute; })[0];
+    if (!route) return;
+    Array.prototype.forEach.call(document.querySelectorAll("[data-frame]"), function (slot) {
+      var app = slot.querySelector(".app");
+      if (!app) return;
+      var nav = navFor(route);
+      Array.prototype.forEach.call(app.querySelectorAll("[data-nav]"), function (b) {
+        if (b.getAttribute("data-nav") === nav) b.setAttribute("aria-current", "page");
+        else b.removeAttribute("aria-current");
+      });
+      var crumbs = app.querySelector("[data-crumbs]");
+      crumbs.textContent = route.group === "Подчинённые" ? "Профиль / " + route.title : route.group === "Динамические" ? "Мир / " + route.title : route.title;
+      app.querySelector("[data-route-hash]").textContent = route.hash + " · " + routeLabel(route);
+      app.querySelector("[data-route-title]").textContent = route.title;
+      app.querySelector("[data-route-purpose]").textContent = route.purpose;
+      app.querySelector("[data-route-layer]").textContent = route.layer;
+      app.querySelector("[data-route-nav]").textContent = route.nav || "без рейла";
+      app.querySelector("[data-route-back]").textContent = route.back;
+      app.querySelector("[data-route-saved]").textContent = route.saved;
+      app.querySelector("[data-hero-state]").textContent = "Герой не перемещён · " + (route.id === "world" ? "LOD " + lod : "позиция вне маршрута");
+      app.querySelector("[data-lod-note]").textContent = LOD_COPY[String(lod)];
+      Array.prototype.forEach.call(app.querySelectorAll("[data-lod]"), function (b) {
+        b.setAttribute("aria-pressed", b.getAttribute("data-lod") === String(lod) ? "true" : "false");
+      });
+      Array.prototype.forEach.call(app.querySelectorAll("[data-nav]"), function (b) {
+        b.onclick = function () {
+          var target = ROUTES.filter(function (r) { return r.id === (b.getAttribute("data-nav") === "Мир" ? "world" : b.getAttribute("data-nav") === "Чат" ? "chat" : b.getAttribute("data-nav") === "Люди" ? "people" : b.getAttribute("data-nav") === "Инвентарь" ? "inventory" : b.getAttribute("data-nav") === "Рынок" ? "shop" : b.getAttribute("data-nav") === "Дела" ? "tasks" : b.getAttribute("data-nav") === "Цель" ? "desire" : b.getAttribute("data-nav") === "Профиль" ? "profile" : "appearance"); })[0];
+          if (target) selectRoute(target.id);
+        };
+      });
+      Array.prototype.forEach.call(app.querySelectorAll("[data-lod]"), function (b) {
+        b.onclick = function () { lod = Number(b.getAttribute("data-lod")); updateShells(); };
+      });
+    });
+  }
+
+  function selectRoute(id) {
+    selectedRoute = id;
+    Array.prototype.forEach.call(document.querySelectorAll(".route-btn"), function (b) {
+      b.setAttribute("aria-pressed", b.getAttribute("data-route") === id ? "true" : "false");
+    });
+    updateShells();
+  }
+
+  /* ---------- flows ---------- */
+  var FLOWS = {
+    purchase: [
+      { route: "#/world", title: "Мир: выбор магазина", layer: "Панель", action: "Клик по POI «Магазин»", result: "Открыта панель выбора; герой стоит на месте.", saved: "POI «Магазин»" },
+      { route: "#/location/shop", title: "Место: магазин", layer: "Полный экран", action: "«Открыть место»", result: "Сцена магазина и панель действий; перемещения ещё не было.", saved: "Контекст возврата в Мир" },
+      { route: "#/location/shop", title: "Явное перемещение", layer: "Модальное окно", action: "«Идти» → подтверждение", result: "Ожидание ответа мира; кнопка не выглядит выполненной.", saved: "Позиция до действия" },
+      { route: "#/shop", title: "Рынок: выбран лот", layer: "Полный экран + модальное окно", action: "«Купить» → подтверждение", result: "После ответа мира: баланс и вещи меняются; при отказе — ничего.", saved: "Черновик объявления, фильтр" },
+      { route: "#/world", title: "Возврат в Мир", layer: "Полный экран", action: "«Назад»", result: "Прежний POI и контекст сохранены; телепортации нет.", saved: "Выбранный POI" }
+    ],
+    dialogue: [
+      { route: "#/people", title: "Люди: выбран человек", layer: "Панель", action: "Клик по карточке", result: "Панель отношений; список не теряет позицию.", saved: "Выбранный человек" },
+      { route: "#/chat", title: "Чат: открыт диалог", layer: "Полный экран", action: "«Написать»", result: "Переписка и поле ввода — одна связная группа.", saved: "Черновик сообщения" },
+      { route: "#/chat", title: "Черновик при уходе", layer: "Полный экран", action: "Переход в Инвентарь", result: "Черновик сохраняется в состоянии экрана.", saved: "Текст черновика" },
+      { route: "#/chat", title: "Возврат в Чат", layer: "Полный экран", action: "Возврат по навигации", result: "Черновик на месте, курсор в поле; отправка — только по действию.", saved: "Черновик, выбранный диалог" }
+    ],
+    goal: [
+      { route: "#/desire", title: "Цель: список", layer: "Полный экран + панель", action: "Клик по цели", result: "Панель деталей; герой и контекст не меняются.", saved: "Выбранная цель, фильтр" },
+      { route: "#/desire", title: "Принятие цели", layer: "Модальное окно", action: "«Принять цель» → подтверждение", result: "Ожидание ответа мира; прогресс не подменяется.", saved: "Черновик формулировки" },
+      { route: "#/desire", title: "Цель активна", layer: "Полный экран", action: "Ответ мира", result: "Статус «активна» только по подтверждению; шаги доступны.", saved: "Активная цель" },
+      { route: "#/world", title: "Возврат в Мир", layer: "Полный экран", action: "«Назад»", result: "Контекст и фильтр цели сохранены; выбранный POI не сброшен.", saved: "Фильтр, выбранная цель" }
+    ]
+  };
+  var currentFlow = "purchase";
+  var flowStep = 0;
+
+  function renderFlow() {
+    var steps = FLOWS[currentFlow];
+    var card = document.getElementById("flow-card");
+    var tabs = document.getElementById("flow-tabs");
+    var list = document.getElementById("flow-steps");
+    var step = steps[flowStep];
+    card.innerHTML = '<div class="chip-row"><span class="chip route-pill"><b>' + step.route + '</b></span><span class="chip">' + step.layer + '</span></div>' +
+      "<h3>" + step.title + "</h3>" +
+      '<div class="field-row">' +
+      '<div class="field"><dt>Действие</dt><dd>' + step.action + '</dd></div>' +
+      '<div class="field"><dt>Результат</dt><dd>' + step.result + '</dd></div>' +
+      '<div class="field"><dt>Сохраняется</dt><dd>' + step.saved + '</dd></div>' +
+      "</div>" +
+      '<div class="note note-success" style="margin-top:4px"><strong>Слои и факт.</strong> Пока мир не ответил, интерфейс показывает ожидание; статус не объявляет действие выполненным.</div>';
+    tabs.innerHTML = "";
+    Object.keys(FLOWS).forEach(function (key) {
+      var b = document.createElement("button");
+      b.type = "button";
+      b.textContent = key === "purchase" ? "Покупка" : key === "dialogue" ? "Диалог" : "Цель";
+      b.setAttribute("aria-pressed", key === currentFlow ? "true" : "false");
+      b.addEventListener("click", function () { currentFlow = key; flowStep = 0; renderFlow(); });
+      tabs.appendChild(b);
+    });
+    list.innerHTML = "";
+    steps.forEach(function (s, i) {
+      var li = document.createElement("li");
+      li.textContent = (i + 1) + " · " + s.title;
+      li.className = i < flowStep ? "is-done" : i === flowStep ? "is-current" : "";
+      list.appendChild(li);
+    });
+    document.getElementById("flow-prev").disabled = flowStep === 0;
+    document.getElementById("flow-next").disabled = flowStep === steps.length - 1;
+  }
+
+  /* ---------- preservation simulator ---------- */
+  var preserve = { route: "Мир", history: [], poi: "Дом", filter: "Всё", draft: "", hero: "Дом · не перемещён" };
+  var presetLog = [];
+
+  function log(msg) {
+    presetLog.unshift(msg);
+    if (presetLog.length > 6) presetLog.pop();
+    var el = document.getElementById("preset-log");
+    el.innerHTML = presetLog.map(function (m) { return "<li>" + m + "</li>"; }).join("");
+  }
+
+  function renderPreserve() {
+    document.getElementById("mini-route").textContent = preserve.route;
+    document.getElementById("preset-poi").value = preserve.poi;
+    document.getElementById("preset-filter").value = preserve.filter;
+    document.getElementById("preset-draft").value = preserve.draft;
+    var chips = [
+      "<span class=\"chip\">POI: <b>" + preserve.poi + "</b></span>",
+      "<span class=\"chip\">Фильтр: <b>" + preserve.filter + "</b></span>",
+      "<span class=\"chip\">Черновик: <b>" + (preserve.draft || "пусто") + "</b></span>",
+      "<span class=\"chip\">Герой: <b>" + preserve.hero + "</b></span>"
+    ];
+    document.getElementById("preset-chips").innerHTML = chips.join("");
+  }
+
+  function goto(route) {
+    preserve.history.push(preserve.route);
+    preserve.route = route;
+    renderPreserve();
+    log("Переход: <b>" + route + "</b>. Сохранено: POI «" + preserve.poi + "», фильтр «" + preserve.filter + "», черновик «" + (preserve.draft || "—") + "».");
+  }
+
+  /* ---------- hero demo ---------- */
+  function selectHeroPoi(name) {
+    Array.prototype.forEach.call(document.querySelectorAll("[data-hero-poi]"), function (b) {
+      b.setAttribute("aria-pressed", b.getAttribute("data-hero-poi") === name ? "true" : "false");
+    });
+    document.getElementById("hero-selected").textContent = name;
+    document.getElementById("hero-position").textContent = preserve.hero;
+    log("Выбран POI «" + name + "». Герой не перемещён: " + preserve.hero + ".");
+  }
+
+  /* ---------- init ---------- */
+  mountShells();
+  renderList();
+  updateShells();
+  renderFlow();
+  renderPreserve();
+  fitFrames();
+  window.addEventListener("resize", fitFrames);
+
+  document.getElementById("flow-prev").addEventListener("click", function () {
+    if (flowStep > 0) { flowStep -= 1; renderFlow(); }
+  });
+  document.getElementById("flow-next").addEventListener("click", function () {
+    if (flowStep < FLOWS[currentFlow].length - 1) { flowStep += 1; renderFlow(); }
+  });
+
+  document.getElementById("preset-poi").addEventListener("change", function (e) {
+    preserve.poi = e.target.value;
+    renderPreserve();
+    log("POI выбран: «" + preserve.poi + "». Позиция героя не изменилась.");
+  });
+  document.getElementById("preset-filter").addEventListener("change", function (e) {
+    preserve.filter = e.target.value;
+    renderPreserve();
+    log("Фильтр инвентаря: «" + preserve.filter + "».");
+  });
+  document.getElementById("preset-draft").addEventListener("input", function (e) {
+    preserve.draft = e.target.value;
+    renderPreserve();
+  });
+  document.getElementById("preset-back").addEventListener("click", function () {
+    if (!preserve.history.length) { log("История пуста — это корневой экран."); return; }
+    var prev = preserve.history.pop();
+    log("Назад в <b>" + prev + "</b>. Состояние не сброшено.");
+    preserve.route = prev;
+    renderPreserve();
+  });
+  document.getElementById("preset-reset").addEventListener("click", function () {
+    preserve = { route: "Мир", history: [], poi: "Дом", filter: "Всё", draft: "", hero: "Дом · не перемещён" };
+    presetLog = [];
+    document.getElementById("preset-log").innerHTML = "";
+    document.getElementById("hero-selected").textContent = "Дом";
+    Array.prototype.forEach.call(document.querySelectorAll("[data-hero-poi]"), function (b) {
+      b.setAttribute("aria-pressed", b.getAttribute("data-hero-poi") === "Дом" ? "true" : "false");
+    });
+    renderPreserve();
+    log("Состояние сброшено к исходному.");
+  });
+  Array.prototype.forEach.call(document.querySelectorAll("[data-goto]"), function (b) {
+    b.addEventListener("click", function () { goto(b.getAttribute("data-goto")); });
+  });
+  Array.prototype.forEach.call(document.querySelectorAll("[data-hero-poi]"), function (b) {
+    b.addEventListener("click", function () { selectHeroPoi(b.getAttribute("data-hero-poi")); });
+  });
+})();
+</script>
+</body>
+</html>

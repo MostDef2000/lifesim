@@ -1,0 +1,514 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>#357 · Идентичность жителя — одежда и состояние — предварительный концепт</title>
+<style>
+  :root {
+    --bg: #F3ECDF;
+    --panel: #FFF9EF;
+    --ink: #30271F;
+    --dim: #69594C;
+    --accent: #86551E;
+    --accent-hover: #6E4519;
+    --success: #42613E;
+    --warning: #805316;
+    --critical: #A13D32;
+    --border: rgba(48, 39, 31, 0.14);
+    --line: rgba(48, 39, 31, 0.12);
+    --focus: rgba(134, 85, 30, 0.45);
+    --warm: rgba(134, 85, 30, 0.12);
+    --shadow-panel: 0 12px 32px rgba(48, 39, 31, 0.16), 0 2px 8px rgba(48, 39, 31, 0.10);
+    --shadow-soft: 0 2px 8px rgba(48, 39, 31, 0.14);
+    --r-panel: 12px;
+    --r-control: 8px;
+    --font-body: system-ui, -apple-system, "Segoe UI", sans-serif;
+    --font-head: Georgia, "Times New Roman", serif;
+  }
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  body { margin: 0; background: var(--bg); color: var(--ink); font: 16px/1.55 var(--font-body); }
+  h1, h2, h3, h4 { margin: 0; font-family: var(--font-head); font-weight: 400; line-height: 1.18; }
+  h1 { font-size: clamp(30px, 4vw, 44px); }
+  h2 { font-size: 30px; }
+  h3 { font-size: 21px; }
+  h4 { font-size: 14px; font-family: var(--font-body); font-weight: 700; }
+  p { margin: 0; }
+  a { color: var(--accent); }
+  code { padding: 1px 5px; border: 1px solid var(--border); border-radius: 5px; background: var(--warm); font: 0.92em/1.4 ui-monospace, SFMono-Regular, Menlo, monospace; }
+  button {
+    min-height: 44px; padding: 10px 16px; border: 1px solid var(--border); border-radius: var(--r-control);
+    background: var(--panel); color: var(--ink); font: inherit; cursor: pointer;
+  }
+  button:hover { border-color: var(--accent); background: var(--warm); }
+  button:focus-visible, [tabindex]:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+  button:disabled { opacity: 0.55; cursor: default; }
+  button[aria-pressed="true"] { background: var(--accent); border-color: var(--accent); color: var(--panel); }
+  button[aria-pressed="true"]:hover { background: var(--accent-hover); border-color: var(--accent-hover); }
+
+  .concept-flag {
+    position: sticky; top: 0; z-index: 50; display: flex; flex-wrap: wrap; gap: 8px 12px;
+    align-items: center; justify-content: center; padding: 8px 16px;
+    border-bottom: 1px solid rgba(161, 61, 50, 0.32); background: #F8E8DC; color: #6B2A22;
+    font-size: 13px; line-height: 1.35; text-align: center;
+  }
+  .concept-flag strong { letter-spacing: 0.02em; }
+
+  .sheet { width: min(1320px, calc(100% - 32px)); margin: 0 auto; padding: 28px 0 72px; }
+  .sheet-header { display: grid; gap: 20px; padding: 28px 0 24px; border-bottom: 1px solid var(--line); }
+  .eyebrow { color: var(--accent); font-size: 13px; font-weight: 700; letter-spacing: 0.14em; text-transform: uppercase; }
+  .lede { max-width: 84ch; color: var(--dim); font-size: 18px; }
+  .meta-row { display: flex; flex-wrap: wrap; gap: 8px; }
+  .pill { display: inline-flex; gap: 6px; align-items: center; min-height: 32px; padding: 4px 10px; border: 1px solid var(--border); border-radius: 999px; background: var(--panel); color: var(--dim); font-size: 13px; }
+  .pill strong { color: var(--ink); font-weight: 600; }
+  .note { padding: 10px 14px; border-left: 3px solid var(--accent); background: var(--warm); color: var(--dim); font-size: 14px; }
+  .note strong { color: var(--ink); }
+  .note-critical { border-left-color: var(--critical); background: rgba(161, 61, 50, 0.08); }
+  .note-success { border-left-color: var(--success); background: rgba(66, 97, 62, 0.08); }
+  .note-warning { border-left-color: var(--warning); background: rgba(128, 83, 22, 0.08); }
+
+  .toolbar {
+    position: sticky; top: 40px; z-index: 40; display: flex; flex-wrap: wrap; gap: 8px;
+    align-items: center; justify-content: space-between; margin: 20px 0; padding: 12px;
+    border: 1px solid var(--border); border-radius: var(--r-panel);
+    background: rgba(255, 249, 239, 0.96); box-shadow: var(--shadow-soft);
+  }
+  .toolbar-group { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+  .toolbar-label { color: var(--dim); font-size: 13px; }
+  .toolbar button { padding: 8px 14px; font-size: 14px; }
+
+  .section { display: grid; gap: 12px; margin-top: 44px; padding-top: 8px; border-top: 1px solid var(--line); }
+  .section-head { display: grid; gap: 8px; max-width: 88ch; }
+  .section-head p { color: var(--dim); }
+
+  .viewport-stage { display: flex; gap: 20px; align-items: flex-start; width: 100%; overflow: auto; padding: 4px 0 8px; --scale: 1; }
+  .viewport-stage[data-view="desktop"] .frame-mobile,
+  .viewport-stage[data-view="mobile"] .frame-desktop { display: none; }
+  .viewport-stage[data-view="mobile"] { justify-content: center; }
+  .frame-wrap {
+    position: relative; flex: 0 0 auto; width: calc(var(--fw) * var(--scale)); height: calc(var(--fh) * var(--scale) + 22px);
+    overflow: hidden; border: 1px solid var(--border); border-radius: var(--r-panel); background: var(--bg); box-shadow: var(--shadow-panel);
+  }
+  .frame-wrap.frame-desktop { --fw: 1440px; --fh: 900px; }
+  .frame-wrap.frame-mobile { --fw: 390px; --fh: 844px; }
+  .frame { width: var(--fw); height: var(--fh); overflow: hidden; transform: scale(var(--scale)); transform-origin: top left; background: var(--bg); }
+  .frame-label { position: static; display: block; height: 22px; line-height: 22px; padding: 0 8px; border: 1px solid var(--border); border-radius: 6px; background: rgba(255, 249, 239, 0.94); color: var(--dim); font-size: 11px; pointer-events: none; }
+
+  .rule-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 12px; }
+  .rule-card { display: grid; gap: 8px; align-content: start; padding: 12px; border: 1px solid var(--border); border-radius: var(--r-panel); background: var(--panel); }
+  .rule-card ul { margin: 0; padding-left: 18px; color: var(--dim); font-size: 14px; display: grid; gap: 4px; }
+  .tag { display: inline-block; padding: 2px 8px; margin-left: 6px; border-radius: 999px; font-size: 11px; font-weight: 700; letter-spacing: 0.04em; border: 1px solid var(--border); color: var(--dim); background: var(--bg); }
+  .tag-ok { color: var(--success); border-color: rgba(66, 97, 62, 0.35); background: rgba(66, 97, 62, 0.1); }
+  .tag-bad { color: var(--critical); border-color: rgba(161, 61, 50, 0.35); background: rgba(161, 61, 50, 0.08); }
+
+  table { width: 100%; border-collapse: collapse; font-size: 14px; background: var(--panel); border-radius: var(--r-panel); overflow: hidden; }
+  th, td { padding: 9px 12px; border-bottom: 1px solid var(--line); text-align: left; vertical-align: top; }
+  th { font-size: 12px; letter-spacing: 0.05em; text-transform: uppercase; color: var(--dim); background: var(--bg); }
+  tr:last-child td { border-bottom: 0; }
+
+  .footer { display: grid; gap: 6px; margin-top: 48px; padding-top: 16px; border-top: 1px solid var(--line); color: var(--dim); font-size: 13px; }
+  .footer strong { color: var(--ink); }
+
+  /* identity sheet inside frames */
+  .idapp { width: 100%; height: 100%; display: grid; grid-template-rows: 76px 1fr 52px; background: var(--bg); }
+  .idapp .bar { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 0 28px; border-bottom: 1px solid var(--line); background: var(--panel); }
+  .idapp .bar .t { display: grid; gap: 1px; }
+  .idapp .bar b { font-family: var(--font-head); font-size: 22px; font-weight: 400; }
+  .idapp .bar span { color: var(--dim); font-size: 12px; }
+  .idapp .bar .chips { display: flex; flex-wrap: wrap; gap: 8px; }
+  .idapp .bar .chips span { padding: 4px 9px; border: 1px solid var(--border); border-radius: 999px; font-size: 12px; color: var(--dim); }
+  .idapp .body { display: grid; grid-template-columns: 390px minmax(0, 1fr); gap: 18px; padding: 20px 28px; overflow: hidden; }
+  .idapp .panel { padding: 14px; border: 1px solid var(--border); border-radius: 12px; background: var(--panel); display: grid; gap: 10px; align-content: start; min-height: 0; }
+  .idapp .panel h4 { font-size: 12px; text-transform: uppercase; letter-spacing: 0.07em; color: var(--dim); }
+  .idapp .portrait { position: relative; display: grid; place-items: center; min-height: 0; height: 100%; border-radius: 10px; background: linear-gradient(165deg, #E7E1D2, #D9D2BE); overflow: hidden; }
+  .idapp .nameplate { position: absolute; left: 12px; bottom: 12px; display: grid; gap: 1px; padding: 8px 10px; border: 1px solid var(--border); border-radius: 8px; background: rgba(255, 249, 239, 0.93); }
+  .idapp .nameplate b { font-size: 15px; }
+  .idapp .nameplate span { color: var(--dim); font-size: 11px; }
+  .idapp .marker { position: absolute; display: flex; align-items: center; gap: 6px; padding: 4px 8px; border: 1px solid rgba(66, 97, 62, 0.45); border-radius: 999px; background: rgba(255, 249, 239, 0.95); color: var(--success); font-size: 11px; font-weight: 700; white-space: nowrap; max-width: 46%; overflow: hidden; text-overflow: ellipsis; }
+  .idapp .marker .n { display: grid; place-items: center; width: 18px; height: 18px; border-radius: 50%; background: var(--success); color: var(--panel); font-size: 10px; }
+  .idapp .fig { position: relative; width: 132px; height: 250px; }
+  .idapp .fig .head { position: absolute; left: 50%; top: 0; transform: translateX(-50%); width: 58px; height: 68px; border-radius: 46% 46% 42% 42%; background: #D8BFA6; border: 1px solid rgba(48,39,31,0.18); }
+  .idapp .fig .head::before { content: ""; position: absolute; left: 8px; top: -4px; width: 42px; height: 26px; border-radius: 50% 50% 20% 20%; background: #6B5A48; }
+  .idapp .fig .neck { position: absolute; left: 50%; top: 62px; transform: translateX(-50%); width: 20px; height: 14px; background: #D8BFA6; }
+  .idapp .fig .torso { position: absolute; left: 50%; top: 74px; transform: translateX(-50%); width: 78px; height: 104px; border-radius: 24px 24px 10px 10px; background: var(--cloth, #8A7A66); }
+  .idapp .fig .torso.warm { background: linear-gradient(180deg, #8E5A2A, #86551E); }
+  .idapp .fig .torso.rain { background: linear-gradient(180deg, #4E5A63, #3E4850); }
+  .idapp .fig .torso.work { background: linear-gradient(180deg, #5C6650, #42613E); }
+  .idapp .fig .legs { position: absolute; left: 50%; top: 172px; transform: translateX(-50%); width: 64px; height: 74px; border-radius: 6px 6px 10px 10px; background: #4A443C; }
+  .idapp .fig .legs::after { content: ""; position: absolute; inset: 0 32px 0 auto; width: 2px; background: rgba(255,249,239,0.35); }
+  .idapp .fig.night .head { filter: brightness(0.82) saturate(0.85); }
+  .idapp .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; align-content: start; min-height: 0; }
+  .idapp .ctx-tile { display: grid; gap: 6px; padding: 10px; border: 1px solid var(--border); border-radius: 10px; background: var(--bg); cursor: pointer; text-align: left; }
+  .idapp .ctx-tile:hover { border-color: var(--accent); }
+  .idapp .ctx-tile[aria-pressed="true"] { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(134, 85, 30, 0.16); background: var(--panel); }
+  .idapp .ctx-tile .scene { display: grid; place-items: center; min-height: 118px; border-radius: 8px; border: 1px solid var(--line); background: #E4DDCD; position: relative; overflow: hidden; }
+  .idapp .ctx-tile .scene.evening { background: linear-gradient(180deg, #E3CBA8, #C9A87C); }
+  .idapp .ctx-tile .scene.rain { background: linear-gradient(180deg, #C9CDCB, #A8B0AE); }
+  .idapp .ctx-tile .scene.rain::after { content: ""; position: absolute; inset: 0; background: repeating-linear-gradient(105deg, transparent 0 10px, rgba(255,249,239,0.4) 10px 11px); opacity: 0.7; }
+  .idapp .ctx-tile .scene.night { background: linear-gradient(180deg, #4C5560, #333B44); }
+  .idapp .ctx-tile .scene .fig { transform: scale(0.52); transform-origin: center bottom; height: 250px; margin-top: -60px; }
+  .idapp .ctx-tile .cap { display: grid; gap: 1px; }
+  .idapp .ctx-tile .cap b { font-size: 13px; }
+  .idapp .ctx-tile .cap span { color: var(--dim); font-size: 11px; }
+  .idapp .split { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+  .idapp .kv { display: grid; gap: 1px; padding: 7px 9px; border: 1px solid var(--line); border-radius: 8px; background: var(--bg); }
+  .idapp .kv span { color: var(--dim); font-size: 11px; text-transform: uppercase; letter-spacing: 0.05em; }
+  .idapp .kv b { font-size: 13px; font-weight: 600; }
+  .idapp .kv.unknown b { color: var(--dim); font-weight: 400; font-style: italic; }
+  .idapp .foot { display: flex; flex-wrap: wrap; gap: 8px 16px; align-items: center; justify-content: space-between; padding: 0 28px; border-top: 1px solid var(--line); background: var(--panel); color: var(--dim); font-size: 12px; }
+  .idapp .foot b { color: var(--ink); }
+  .idapp .note-inline { padding: 8px 10px; border-left: 3px solid var(--accent); background: var(--warm); color: var(--dim); font-size: 12px; }
+
+  .idapp.m { grid-template-rows: 70px 1fr 52px; }
+  .idapp.m .bar { padding: 8px 14px; }
+  .idapp.m .bar b { font-size: 18px; }
+  .idapp.m .bar .chips { display: none; }
+  .idapp.m .body { grid-template-columns: 1fr; padding: 12px 14px; gap: 10px; overflow: hidden; }
+  .idapp.m .panel.portrait-panel { display: grid; grid-template-columns: 128px 1fr; padding: 8px; gap: 10px; }
+  .idapp.m .portrait { min-height: 190px; }
+  .idapp.m .marker { font-size: 9px; padding: 2px 6px; }
+  .idapp.m .marker .n { width: 14px; height: 14px; font-size: 9px; }
+  .idapp.m .grid2 { grid-template-columns: 1fr 1fr; gap: 8px; }
+  .idapp.m .ctx-tile .scene { min-height: 78px; }
+  .idapp.m .ctx-tile .scene .fig { transform: scale(0.36); margin-top: -78px; }
+  .idapp.m .ctx-tile .cap span { display: none; }
+  .idapp.m .foot { padding: 0 14px; font-size: 10px; }
+  .idapp.m .rulebox { display: none; }
+
+  [hidden] { display: none !important; }
+  @media (prefers-reduced-motion: reduce) {
+    html { scroll-behavior: auto; }
+    *, *::before, *::after { animation-duration: 0.001ms !important; transition-duration: 0.001ms !important; }
+  }
+  @media (max-width: 720px) {
+    table { table-layout: fixed; }
+    th, td { overflow-wrap: break-word; }
+  }
+</style>
+</head>
+<body>
+<div class="concept-flag" role="note">
+  <strong>ПРЕДВАРИТЕЛЬНЫЙ КОНЦЕПТ, НЕ УТВЕРЖДЁННЫЙ PRODUCTION-АССЕТ</strong>
+  <span>Issue #357 · идентичность жителя · §27/§27.1 · design handoff, не игровой факт</span>
+</div>
+
+<main class="sheet">
+  <header class="sheet-header">
+    <div class="eyebrow">#357 · идентичность и одежда · волна 2, часть 2</div>
+    <h1>Один житель, разные обстоятельства</h1>
+    <p class="lede">
+      Постоянные маркеры личности — лицо, тело, пропорции — не меняются от одежды, погоды, времени
+      суток и социальной роли. Меняются только подтверждённые данные: комплект одежды и состояние
+      сцены. Архитектура места не определяет национальность, внешность, статус или одежду.
+    </p>
+    <div class="meta-row">
+      <span class="pill"><strong>Канон:</strong> §27, §27.1</span>
+      <span class="pill"><strong>Связанные:</strong> #386 язык предметов, #387 архитектура</span>
+      <span class="pill"><strong>Основа:</strong> #363, #364</span>
+      <span class="pill"><strong>Борды:</strong> 357-identity.svg, 388-character-sheet.svg</span>
+    </div>
+    <div class="note">
+      <strong>Граница артефакта.</strong> Это design handoff, а не изменение кода и не игровой факт.
+      Персонаж вымышленный, схематичный; это не канонический портрет и не Flux-reference. Одежда и
+      погода — условные демонстрационные данные.
+    </div>
+  </header>
+
+  <div class="toolbar" role="toolbar" aria-label="Управление просмотром макета">
+    <div class="toolbar-group">
+      <span class="toolbar-label">Композиция:</span>
+      <button type="button" data-view="desktop" aria-pressed="true">Desktop 1440×900</button>
+      <button type="button" data-view="mobile" aria-pressed="false">Mobile 390×844</button>
+      <button type="button" data-view="both" aria-pressed="false">Оба рядом</button>
+    </div>
+    <div class="toolbar-group">
+      <span class="toolbar-label">Демо:</span>
+      <button type="button" id="toggle-markers" aria-pressed="true">Маркеры идентичности</button>
+      <button type="button" id="cycle-scene">Другое обстоятельство</button>
+    </div>
+  </div>
+
+  <section class="section" id="screen">
+    <div class="section-head">
+      <h2>Экран</h2>
+      <p>
+        Большой портрет показывает постоянные маркеры. Четыре плитки — один и тот же житель в разных
+        обстоятельствах: дома днём, в магазине вечером, на улице в дождь, на работе ночью. Клик по
+        плитке меняет разбор справа; клик по маркеру подсвечивает объяснение.
+      </p>
+    </div>
+    <div class="viewport-stage" data-view="desktop" id="viewport-stage">
+      <div class="frame-wrap frame-desktop">
+        <span class="frame-label">DESKTOP · 1440×900 · логический размер</span>
+        <div class="frame"><div class="frame-slot" data-frame="desktop"></div></div>
+      </div>
+      <div class="frame-wrap frame-mobile">
+        <span class="frame-label">MOBILE · 390×844</span>
+        <div class="frame"><div class="frame-slot" data-frame="mobile"></div></div>
+      </div>
+    </div>
+    <div class="note note-warning">
+      <strong>Проверяйте:</strong> лицо и пропорции во всех плитках одинаковы; смена одежды не меняет
+      идентичность; неизвестные факты помечены «нет данных», а не заполнены догадками; архитектура
+      магазина не перекрашивает персонажа и не назначает ему статус.
+    </div>
+  </section>
+
+  <section class="section" id="rules">
+    <div class="section-head">
+      <h2>Правила</h2>
+      <p>Отдельно постоянное, отдельно изменяемое, отдельно неизвестное.</p>
+    </div>
+    <div class="rule-grid">
+      <div class="rule-card">
+        <h3>Постоянно <span class="tag tag-ok">identity</span></h3>
+        <ul>
+          <li>лицо и черты;</li>
+          <li>тело и пропорции;</li>
+          <li>рост и осанка в кадре;</li>
+          <li>узнаваемость между сценами.</li>
+        </ul>
+      </div>
+      <div class="rule-card">
+        <h3>Меняется по данным <span class="tag">world data</span></h3>
+        <ul>
+          <li>комплект одежды — только после подтверждения;</li>
+          <li>погода и время суток — состояние сцены;</li>
+          <li>социальная роль — контекст разговора, не внешность;</li>
+          <li>мокрые волосы/куртка — эффект сцены, не новая личность.</li>
+        </ul>
+      </div>
+      <div class="rule-card">
+        <h3>Не выводится из архитектуры <span class="tag tag-bad">#387</span></h3>
+        <ul>
+          <li>национальность;</li>
+          <li>внешность;</li>
+          <li>социальный статус;</li>
+          <li>одежда.</li>
+        </ul>
+        <p style="color:var(--dim);font-size:13px">Фасад магазина — это место, а не биография жителя.</p>
+      </div>
+      <div class="rule-card">
+        <h3>Язык предметов <span class="tag">#386</span></h3>
+        <p style="color:var(--dim);font-size:14px">
+          Одежда называется теми же локализованными терминами, что и в инвентаре. Неизвестный
+          <code>object_type</code> не получает придуманного названия.
+        </p>
+      </div>
+    </div>
+    <div class="note note-critical" style="margin-top:12px">
+      <strong>Неизвестное не выдумывается.</strong> В данных нет возраста, национальности, дохода и
+      семейного положения — интерфейс пишет «нет данных» и не достраивает биографию по архитектуре
+      или одежде.
+    </div>
+  </section>
+
+  <section class="section" id="matrix">
+    <div class="section-head">
+      <h2>Матрица «что меняется»</h2>
+      <p>Одна и та же личность в четырёх обстоятельствах.</p>
+    </div>
+    <table>
+      <thead><tr><th>Обстоятельство</th><th>Одежда</th><th>Погода / время</th><th>Идентичность</th></tr></thead>
+      <tbody>
+        <tr><td>Дом, утро</td><td>повседневная куртка</td><td>ясно · день</td><td>не меняется</td></tr>
+        <tr><td>Магазин, вечер</td><td>та же куртка, сумка</td><td>сумерки · искусственный свет</td><td>не меняется</td></tr>
+        <tr><td>Улица, дождь</td><td>дождевик поверх</td><td>дождь · серый свет</td><td>не меняется</td></tr>
+        <tr><td>Работа, ночь</td><td>рабочий комплект</td><td>ночь · локальный свет</td><td>не меняется</td></tr>
+      </tbody>
+    </table>
+  </section>
+
+  <footer class="footer">
+    <span><strong>#357 · Идентичность жителя.</strong> Предварительный концепт, не утверждённый production-ассет. Приёмка владельцем — отдельный шаг.</span>
+    <span>Источники: docs/VISUAL-BIBLE.md §27, §27.1; #363; #364; 357-identity.svg; nordic-coastal/388-character-sheet.svg. Связанные: #386, #387.</span>
+  </footer>
+</main>
+
+<script>
+(function () {
+  "use strict";
+
+  var stage = document.getElementById("viewport-stage");
+  var viewButtons = Array.prototype.slice.call(document.querySelectorAll("button[data-view]"));
+  var markersBtn = document.getElementById("toggle-markers");
+
+  function fitFrames() {
+    var view = stage.getAttribute("data-view") || "desktop";
+    var available = Math.max(240, stage.clientWidth - 4);
+    var total = view === "desktop" ? 1440 : view === "mobile" ? 390 : 1440 + 390 + 20;
+    stage.style.setProperty("--scale", String(Math.max(0.2, Math.min(1, available / total))));
+  }
+  function setView(view) {
+    stage.setAttribute("data-view", view);
+    viewButtons.forEach(function (b) {
+      b.setAttribute("aria-pressed", b.getAttribute("data-view") === view ? "true" : "false");
+    });
+    fitFrames();
+  }
+  viewButtons.forEach(function (b) {
+    b.addEventListener("click", function () { setView(b.getAttribute("data-view")); });
+  });
+
+  var HERO = { name: "Алиса Морозова", note: "взрослый вымышленный житель" };
+  var SCENES = [
+    {
+      id: "home", title: "Дом · утро", sub: "Повседневный комплект",
+      cloth: "куртка_рабочая", clothClass: "", scene: "",
+      weather: "ясно · +18°C ", time: "08:03, день", role: "дома, обычный день",
+      changed: ["повседневная куртка", "без верхней одежды", "волосы сухие"],
+      constant: "лицо и пропорции те же"
+    },
+    {
+      id: "shop", title: "Магазин · вечер", sub: "Тот же комплект, городской свет",
+      cloth: "куртка_рабочая · сумка", clothClass: "warm", scene: "evening",
+      weather: "сухо · +15°C", time: "19:40, сумерки", role: "покупатель",
+      changed: ["та же куртка", "сумка через плечо", "тёплый свет витрины"],
+      constant: "лицо и пропорции те же"
+    },
+    {
+      id: "rain", title: "Улица · дождь", sub: "Дождевик поверх, не новая личность",
+      cloth: "дождевик_простой", clothClass: "rain", scene: "rain",
+      weather: "дождь · +11°C", time: "16:20, пасмурно", role: "прохожий",
+      changed: ["дождевик поверх", "мокрый край куртки", "лужи"],
+      constant: "лицо и пропорции те же"
+    },
+    {
+      id: "night", title: "Работа · ночь", sub: "Рабочий комплект по подтверждению",
+      cloth: "комплект_рабочий", clothClass: "work", scene: "night",
+      weather: "сухо · +9°C", time: "23:10, ночь", role: "на смене",
+      changed: ["рабочий комплект", "локальный свет", "усталость — состояние, не черты"],
+      constant: "лицо и пропорции те же"
+    }
+  ];
+
+  var S = {
+    scene: "home",
+    markers: true,
+    selectedMarker: null,
+    note: "Клик по плитке меняет обстоятельство; идентичность остаётся."
+  };
+
+  function esc(v) {
+    return String(v == null ? "" : v).replace(/[&<>"']/g, function (c) {
+      return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c];
+    });
+  }
+
+  function figure(scene, extraClass) {
+    return '<div class="fig ' + esc(extraClass || "") + '" aria-hidden="true">' +
+      '<div class="head"></div><div class="neck"></div>' +
+      '<div class="torso ' + esc(scene.clothClass) + '"></div>' +
+      '<div class="legs"></div></div>';
+  }
+
+  function markers(scene) {
+    if (!S.markers) return "";
+    var list = [
+      { key: "face", label: "лицо", top: "16%", left: "6%" },
+      { key: "body", label: "пропорции", top: "52%", left: "2%" },
+      { key: "clothes", label: "одежда: " + scene.cloth, top: "74%", left: "52%" }
+    ];
+    return list.map(function (m) {
+      var on = S.selectedMarker === m.key ? ";box-shadow:0 0 0 3px rgba(66,97,62,0.25)" : "";
+      return '<button type="button" class="marker" data-marker="' + m.key + '" style="top:' + m.top + ";left:" + m.left + on + '">' +
+        '<span class="n">' + (m.key === "face" ? "1" : m.key === "body" ? "2" : "3") + "</span>" + esc(m.label) + "</button>";
+    }).join("");
+  }
+
+  function tile(scene) {
+    var on = S.scene === scene.id;
+    return '<button type="button" class="ctx-tile" data-scene="' + scene.id + '" aria-pressed="' + (on ? "true" : "false") + '">' +
+      '<span class="scene ' + esc(scene.scene) + '">' + figure(scene) + "</span>" +
+      '<span class="cap"><b>' + esc(scene.title) + "</b><span>" + esc(scene.sub) + "</span></span></button>";
+  }
+
+  function detail(scene) {
+    var changed = scene.changed.map(function (c) { return "<li>" + esc(c) + "</li>"; }).join("");
+    return '<div class="panel"><h4>Разбор обстоятельства</h4>' +
+      '<div class="split">' +
+      '<div class="kv"><span>Одежда</span><b>' + esc(scene.cloth) + "</b></div>" +
+      '<div class="kv"><span>Роль в сцене</span><b>' + esc(scene.role) + "</b></div>" +
+      '<div class="kv"><span>Погода</span><b>' + esc(scene.weather) + "</b></div>" +
+      '<div class="kv"><span>Время</span><b>' + esc(scene.time) + "</b></div>" +
+      "</div>" +
+      '<div class="note-inline"><b>Меняется:</b><ul style="margin:4px 0 0;padding-left:16px">' + changed + "</ul></div>" +
+      '<div class="split">' +
+      '<div class="kv"><span>Лицо</span><b>постоянно</b></div>' +
+      '<div class="kv"><span>Пропорции</span><b>постоянно</b></div>' +
+      '<div class="kv unknown"><span>Национальность</span><b>нет данных · не выводится</b></div>' +
+      '<div class="kv unknown"><span>Статус</span><b>нет данных · не выводится</b></div>' +
+      "</div>" +
+      '<div class="note-inline">Одежда названа языком предметов #386. Фасад #387 не назначает статус, национальность или комплект.</div>' +
+      "</div>";
+  }
+
+  function content(mobile) {
+    var scene = SCENES.filter(function (s) { return s.id === S.scene; })[0] || SCENES[0];
+    var portrait = '<div class="portrait">' + figure(scene, scene.scene === "night" ? "night" : "") + markers(scene) +
+      '<div class="nameplate"><b>' + HERO.name + "</b><span>" + HERO.note + " · " + esc(scene.title) + "</span></div></div>";
+    if (mobile) {
+      return '<div class="bar"><div class="t"><b>Идентичность жителя</b><span>#357 · ' + esc(scene.title) + "</span></div></div>" +
+        '<div class="body">' +
+        '<div class="panel portrait-panel">' + portrait + detail(scene) + "</div>" +
+        '<div class="panel" style="display:none"></div>' +
+        '<div class="grid2">' + SCENES.map(tile).join("") + "</div>" +
+        "</div>" +
+        '<div class="foot"><span>Лицо и пропорции не меняются · одежда — по подтверждённым данным</span><span>#386 · #387</span></div>';
+    }
+    return '<div class="bar"><div class="t"><b>Идентичность жителя</b><span>#357 · один взрослый вымышленный персонаж · схематично</span></div>' +
+      '<div class="chips"><span>постоянно: лицо, тело, пропорции</span><span>меняется: одежда, погода, время, роль</span></div></div>' +
+      '<div class="body">' +
+      '<div class="panel"><h4>Постоянные маркеры</h4>' + portrait + '<div class="note-inline">Маркеры 1–2 постоянны во всех сценах. Маркер 3 показывает одежду, которая меняется только по подтверждению.</div></div>' +
+      '<div style="display:grid;grid-template-rows:auto 1fr;gap:12px;min-height:0">' +
+      detail(scene) +
+      '<div class="grid2">' + SCENES.map(tile).join("") + "</div>" +
+      "</div>" +
+      "</div>" +
+      '<div class="foot"><span>Одежда — язык предметов <b>#386</b>; архитектура <b>#387</b> не определяет национальность, внешность, статус или одежду.</span><span>Источник: §27.1</span></div>';
+  }
+
+  function render() {
+    var d = document.querySelector('[data-frame="desktop"]');
+    var m = document.querySelector('[data-frame="mobile"]');
+    if (d) d.innerHTML = '<div class="idapp">' + content(false) + "</div>";
+    if (m) m.innerHTML = '<div class="idapp m">' + content(true) + "</div>";
+  }
+
+  document.addEventListener("click", function (ev) {
+    var tileEl = ev.target.closest ? ev.target.closest("[data-scene]") : null;
+    if (tileEl) {
+      S.scene = tileEl.getAttribute("data-scene");
+      S.note = "Обстоятельство изменено; идентичность та же.";
+      render();
+      return;
+    }
+    var mk = ev.target.closest ? ev.target.closest("[data-marker]") : null;
+    if (mk) {
+      var key = mk.getAttribute("data-marker");
+      S.selectedMarker = S.selectedMarker === key ? null : key;
+      render();
+    }
+  });
+
+  markersBtn.addEventListener("click", function () {
+    S.markers = !S.markers;
+    S.selectedMarker = null;
+    markersBtn.setAttribute("aria-pressed", S.markers ? "true" : "false");
+    render();
+  });
+
+  document.getElementById("cycle-scene").addEventListener("click", function () {
+    var idx = SCENES.map(function (s) { return s.id; }).indexOf(S.scene);
+    S.scene = SCENES[(idx + 1) % SCENES.length].id;
+    render();
+  });
+
+  fitFrames();
+  window.addEventListener("resize", fitFrames);
+  render();
+})();
+</script>
+</body>
+</html>
