@@ -3904,6 +3904,78 @@ button.danger:hover { background: #93301f; }
   .inventory-game-shell .inv-search { max-width: none; }
 }
 
+/* ---------- #369: «Образ» adopts the shared game shell (#367 pattern).
+   Fixed two-row composition: one scrolling content column + the shared
+   dock; the §27 warm header is a read projection of authoritative state.
+   Scoped so the pinned legacy #65 block and the root tokens are untouched.
+   The content grid is remapped to the game tokens through the wrapper —
+   no new token definitions, no pinned selector changes. Inserted BEFORE
+   the #175 conn-banner block (the m175 tail pin keeps its .hidden rule
+   last in the file). */
+.appearance-game-shell {
+  --w-panel: var(--game-panel);
+  --w-dim: var(--game-dim);
+  --w-text: var(--game-ink);
+  --w-warm: var(--game-warm);
+  --w-accent: var(--game-accent);
+  position: fixed;
+  inset: 0;
+  display: grid;
+  grid-template-rows: minmax(0, 1fr) auto;
+}
+.appear-shell-scroll {
+  min-width: 0;
+  min-height: 0;
+  width: 100%;
+  max-width: 1100px;
+  margin: 0 auto;
+  padding: 16px;
+  overflow-y: auto;
+  overflow-wrap: anywhere;
+}
+/* The scrolling column's direct grid child keeps the pinned class literal;
+   remapping its warm tokens here (higher specificity than the single-class
+   rule) avoids touching that legacy selector or its occurrence census. */
+.appear-shell-scroll > .grid {
+  --w-panel: var(--game-panel);
+  --w-panel-deep: var(--game-bg);
+  --w-text: var(--game-ink);
+  --w-dim: var(--game-dim);
+  --w-accent: var(--game-accent);
+  --w-warm: var(--game-warm);
+  --w-warm-line: rgba(134, 85, 30, 0.45);
+  --w-warm-ink: var(--game-panel);
+}
+.appear-shell-scroll .panel { border-radius: 12px; }
+.appear-shell-header { margin-bottom: 12px; }
+.appear-shell-header h1 { margin: 0; font-size: 22px; }
+.appear-shell-header .game-header-meta { margin: 4px 0; }
+.appear-shell-meta, .appear-shell-now {
+  margin: 4px 0;
+  color: var(--game-dim);
+  font-size: 14px;
+}
+.appear-shell-admin, .appear-shell-back { color: var(--game-accent); }
+.appear-shell-back { display: inline-block; margin-top: 4px; }
+.appearance-game-shell .world-pill {
+  position: static;
+  left: auto;
+  bottom: auto;
+  transform: none;
+  min-width: 0;
+  max-width: calc(100% - 16px);
+  margin: 8px auto max(8px, env(safe-area-inset-bottom, 0px));
+}
+@media (max-width: 720px) {
+  .appear-shell-scroll { padding: 8px; }
+  .appear-shell-header { padding: 12px; }
+  .appearance-game-shell .world-pill {
+    width: calc(100% - 16px);
+    margin-bottom: 8px;
+  }
+  .appearance-game-shell .world-pill a { min-width: 0; }
+}
+
 /* #175: connection banner — persistent offline signal driven by consecutive
    pollEvents failures (WS close is routine on navigation, never drives it).
    Warm-warn family on the dark panel bg; fixed top-center, below nothing —

@@ -7657,6 +7657,11 @@ function renderInventory(items, listed) {
    keep the byte-pinned S initializer tail untouched. */
 const APPEARANCE_DRAFT = { prompt: "", hair: "", hair_color: "", build: "" };
 
+/* #369: a fresh screen load (or a newer preview request) invalidates every
+   in-flight preview result — the same generation discipline as the #368
+   inventory actions. Client-only counter, never persisted. */
+let appearancePreviewGen = 0;
+
 /* #65 (validator round 2, W118-RV1 F1 precedent): the draft is per-session
    private input — reset it on every auth transition (login, logout,
    account deletion) so the next user of the same browser never sees the
@@ -7679,20 +7684,69 @@ const APPEARANCE_OUTFIT_CHIPS = [
   ["Праздничный", "праздничный образ"],
 ];
 
+/* #369: «Образ» adopts the shared game shell (#367 pattern). The context is
+   a read projection of authoritative state — no fetch, no game action. The
+   legacy topbar call supplies only its live #clock/#weather nodes (the
+   ctxTopbar reuse, #313); the tab strip itself is replaced by the shared
+   destination dock. */
+function appearanceGameShell(content, tb) {
+  const privileged = S.user && ["admin", "developer", "moderator"].includes(S.user.role);
+  const clock = (tb && tb.querySelector("#clock"))
+    || el("span", { id: "clock" },
+      S.world ? dayTime(S.world.game_timestamp) : clockPendingLabel());
+  const weather = (tb && tb.querySelector("#weather"))
+    || el("span", { id: "weather", class: "muted" }, inventoryWeatherText());
+  const head = el("header", { class: "appear-shell-header game-panel" },
+    el("h1", {}, "ВЛ1: Рейнеке"),
+    el("p", { id: "appearance-character-context", class: "game-header-meta" },
+      inventoryContextText()),
+    el("div", { class: "appear-shell-meta" }, clock, weather),
+    el("p", { class: "appear-shell-now" }, "Сейчас: ",
+      el("span", { id: "appearance-now-task" }, placeTaskHostNode())),
+    privileged ? el("a", { class: "appear-shell-admin", href: "#/admin" },
+      "Админ") : null,
+    el("a", { class: "appear-shell-back", href: "#/world" }, "← На карту"));
+  return el("main", { class: "game-shell appearance-game-shell" },
+    el("div", { class: "appear-shell-scroll" }, head, content),
+    gameSectionNav("#/appearance"));
+}
+
 async function viewAppearance() {
   location.hash = "#/appearance";
+  const epoch = ++navEpoch;
+  appearancePreviewGen += 1;  // a fresh load voids in-flight preview results
+  const user = S.user;
+  const charId = S.character && S.character.id;
+  if (!user || charId == null) {
+    // #369: an unconfirmed session is NOT an empty wardrobe — stay in the
+    // shared shell with the honest unavailable state.
+    app.replaceChildren(appearanceGameShell(
+      el("div", { class: "appear-shell-unavailable game-state game-state-empty" },
+        el("h2", {}, "Образ недоступен"),
+        el("p", { class: "muted" },
+          "Данные о персонаже недоступны — просмотр закрыт до входа."))));
+    return;
+  }
+  const current = () => epoch === navEpoch && S.user === user && S.character
+    && S.character.id === charId && "#/appearance" === location.hash;
+  const tb = topbar("#/appearance");
   const loading = el("div", { class: "muted" }, "Загрузка…");
-  app.replaceChildren(topbar("#/appearance"), loading);
+  loading.className = "muted game-state game-state-loading";
+  loading.setAttribute("role", "status");
+  app.replaceChildren(appearanceGameShell(loading, tb));
   try {
     // Cold-load safety + stale-state guard: the by-user bootstrap omits
     // sex/age/outfit_mode, so every entry re-reads the authoritative
     // character (the profile selector may have changed the mode; the
     // /visual/preview contract requires sex+age) plus the inventory.
     const me = await api(`/characters/${S.character.id}`);
+    if (!current()) return;
     S.character = { ...S.character, ...me };
     const inv = await api(`/characters/${S.character.id}/inventory`);
+    if (!current()) return;
     renderAppearance(Array.isArray(inv) ? inv : (inv && inv.items) || []);
   } catch (e) {
+    if (!current()) return;
     // #93: transient failure — explicit retry instead of a dead «Загрузка…».
     loadRetryNode(loading, () => viewAppearance());
     toast(e.message, true);
@@ -7743,12 +7797,21 @@ function renderAppearance(items) {
   // never the garments. A refusal (e.g. nude without 18+ confirmation)
   // re-syncs both selectors from the authoritative stored mode.
   async function applyOutfitMode(mode) {
+    const epoch = navEpoch;
+    const user = S.user;
+    const charId = S.character.id;
+    const current = () => epoch === navEpoch && S.user === user && S.character
+      && S.character.id === charId && "#/appearance" === location.hash;
     try {
       const r = await api(`/characters/${S.character.id}/outfit`, {
         method: "PATCH", body: { outfit_mode: mode } });
+      if (!current()) return;  // late answer from a superseded session/screen
       S.character.outfit_mode = (r && r.outfit_mode) || mode;
       toast("Режим одежды обновлён — сохранён только режим, не вещи");
-    } catch (e) { toast(e.message, true); }
+    } catch (e) {
+      if (!current()) return;
+      toast(e.message, true);
+    }
     outfitSelCurrent.value = S.character.outfit_mode || "auto";
     outfitSelTry.value = S.character.outfit_mode || "auto";
   }
@@ -7790,6 +7853,16 @@ function renderAppearance(items) {
     if (previewBusy) return;  // no double-submit while in flight
     previewBusy = true;
     previewGo.disabled = true;
+    const gen = ++appearancePreviewGen;
+    const epoch = navEpoch;
+    const user = S.user;
+    const charId = S.character.id;
+    // #369: the answer belongs to THIS session, screen and request. A late
+    // answer after a session/navigation change is dropped — no stale image,
+    // no false appearance change, no ghost error.
+    const currentPreview = () => gen === appearancePreviewGen && epoch === navEpoch
+      && S.user === user && S.character && S.character.id === charId
+      && "#/appearance" === location.hash;
     previewErr.textContent = "";
     previewStatus.hidden = false;
     previewStatus.textContent = "Генерация…";
@@ -7806,11 +7879,13 @@ function renderAppearance(items) {
         appearance: Object.keys(appearance).length ? appearance : undefined,
         outfit_mode: outfitSelTry.value, mode: "full_body_outfit",
       } });
+      if (!currentPreview()) return;
       previewImg.src = `data:image/png;base64,${r.image_base64}`;
       previewImg.hidden = false;
       previewCaption.hidden = false;
       previewStatus.hidden = true;
     } catch (e) {
+      if (!currentPreview()) return;
       // the draft stays on screen; the shown image (if any) stays too
       previewStatus.hidden = true;
       previewErr.textContent =
@@ -7883,7 +7958,7 @@ function renderAppearance(items) {
   drawWorn();
   drawWardrobe();
 
-  app.replaceChildren(topbar("#/appearance"),
+  app.replaceChildren(appearanceGameShell(
     el("div", { class: "grid appearance-shell" },
       // Zone 1: title + one-line subtitle.
       el("div", { class: "panel appear-head" },
@@ -7942,7 +8017,8 @@ function renderAppearance(items) {
               onclick: () => applyOutfitMode(outfitSelTry.value) },
               "Применить режим одежды"),
             el("p", { class: "muted appear-note" },
-              "Сохраняется только режим одежды — не картинка и не предметы."))))));
+              "Сохраняется только режим одежды — не картинка и не предметы."))))),
+    topbar("#/appearance")));
 }
 
 
