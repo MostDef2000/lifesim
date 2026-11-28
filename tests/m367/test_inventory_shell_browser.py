@@ -6,7 +6,6 @@ the existing Node/pytest tests remain the baseline when it is not installed.
 import base64
 import json
 import shutil
-import socket
 import subprocess
 import time
 from pathlib import Path
@@ -25,20 +24,18 @@ def _between(source, start, end):
     return source[i:source.index(end, i + 1)]
 
 
-def _free_port():
-    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
-        sock.bind(("127.0.0.1", 0))
-        return sock.getsockname()[1]
-
-
-def _devtools_ready(port_file, port):
-    """DevTools is ready when the port file names a live port or the HTTP
-    endpoint answers. The port file can appear late in CI (flake), so the
-    HTTP /json/version probe is the authoritative fallback."""
-    if port_file.exists():
+def _devtools_ready(port_file):
+    """Chromium owns port allocation (`--remote-debugging-port=0`), so the real
+    port can only come from the DevToolsActivePort file it writes. The file can
+    appear late or partially written in CI, so it is only trusted once the HTTP
+    /json/version endpoint answers — otherwise None (never a guessed port)."""
+    try:
         lines = port_file.read_text().splitlines()
-        if lines and lines[0].strip().isdigit():
-            return int(lines[0].strip())
+    except OSError:
+        return None
+    if not lines or not lines[0].strip().isdigit():
+        return None
+    port = int(lines[0].strip())
     try:
         with urlopen(f"http://127.0.0.1:{port}/json/version", timeout=1) as response:
             if json.load(response).get("webSocketDebuggerUrl"):
@@ -48,12 +45,12 @@ def _devtools_ready(port_file, port):
     return None
 
 
-def _wait_for_port(port_file, process, port):
+def _wait_for_port(port_file, process):
     deadline = time.monotonic() + 30
     while time.monotonic() < deadline:
         if process.poll() is not None:
             raise AssertionError("Chromium exited before DevTools was ready")
-        ready = _devtools_ready(port_file, port)
+        ready = _devtools_ready(port_file)
         if ready is not None:
             return ready
         time.sleep(0.1)
@@ -103,19 +100,18 @@ def test_inventory_shell_in_chromium(tmp_path, width, height):
         encoding="utf-8",
     )
     profile = tmp_path / "chrome"
-    port = _free_port()
     process = subprocess.Popen(
         [
             chrome, "--headless=new", "--no-sandbox", "--disable-dev-shm-usage",
             "--disable-gpu", "--disable-background-networking", "--no-first-run",
-            "--no-default-browser-check", f"--remote-debugging-port={port}",
+            "--no-default-browser-check", "--remote-debugging-port=0",
             f"--user-data-dir={profile}", "about:blank",
         ],
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
     )
     try:
-        port = _wait_for_port(profile / "DevToolsActivePort", process, port)
+        port = _wait_for_port(profile / "DevToolsActivePort", process)
         with urlopen(f"http://127.0.0.1:{port}/json/list", timeout=5) as response:
             targets = json.load(response)
         target = next(t for t in targets if t["type"] == "page")
