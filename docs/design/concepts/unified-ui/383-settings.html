@@ -1,0 +1,805 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>#383 · Настройки — графика и доступность — предварительный концепт</title>
+<style>
+  :root {
+    --bg: #F3ECDF;
+    --panel: #FFF9EF;
+    --ink: #30271F;
+    --dim: #69594C;
+    --accent: #86551E;
+    --accent-hover: #6E4519;
+    --success: #42613E;
+    --warning: #805316;
+    --critical: #A13D32;
+    --border: rgba(48, 39, 31, 0.14);
+    --line: rgba(48, 39, 31, 0.12);
+    --focus: rgba(134, 85, 30, 0.45);
+    --warm: rgba(134, 85, 30, 0.12);
+    --shadow-panel: 0 12px 32px rgba(48, 39, 31, 0.16), 0 2px 8px rgba(48, 39, 31, 0.10);
+    --shadow-soft: 0 2px 8px rgba(48, 39, 31, 0.14);
+    --r-panel: 12px;
+    --r-control: 8px;
+    --font-body: system-ui, -apple-system, "Segoe UI", sans-serif;
+    --font-head: Georgia, "Times New Roman", serif;
+  }
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  body { margin: 0; background: var(--bg); color: var(--ink); font: 16px/1.55 var(--font-body); }
+  h1, h2, h3, h4 { margin: 0; font-family: var(--font-head); font-weight: 400; line-height: 1.18; }
+  h1 { font-size: clamp(30px, 4vw, 44px); }
+  h2 { font-size: 30px; }
+  h3 { font-size: 22px; }
+  h4 { font-size: 17px; font-family: var(--font-body); font-weight: 700; }
+  p { margin: 0; }
+  a { color: var(--accent); }
+  code { padding: 1px 5px; border: 1px solid var(--border); border-radius: 5px; background: var(--warm); font: 0.92em/1.4 ui-monospace, SFMono-Regular, Menlo, monospace; }
+  button {
+    min-height: 44px; padding: 10px 16px; border: 1px solid var(--border); border-radius: var(--r-control);
+    background: var(--panel); color: var(--ink); font: inherit; cursor: pointer;
+  }
+  button:hover { border-color: var(--accent); background: var(--warm); }
+  button:focus-visible, [tabindex]:focus-visible, input:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+  button:disabled { opacity: 0.55; cursor: default; }
+  button[aria-pressed="true"] { background: var(--accent); border-color: var(--accent); color: var(--panel); }
+  button[aria-pressed="true"]:hover { background: var(--accent-hover); border-color: var(--accent-hover); }
+
+  .concept-flag {
+    position: sticky; top: 0; z-index: 50; display: flex; flex-wrap: wrap; gap: 8px 12px;
+    align-items: center; justify-content: center; padding: 8px 16px;
+    border-bottom: 1px solid rgba(161, 61, 50, 0.32); background: #F8E8DC; color: #6B2A22;
+    font-size: 13px; line-height: 1.35; text-align: center;
+  }
+  .concept-flag strong { letter-spacing: 0.02em; }
+
+  .sheet { width: min(1320px, calc(100% - 32px)); margin: 0 auto; padding: 28px 0 72px; }
+  .sheet-header { display: grid; gap: 20px; padding: 28px 0 24px; border-bottom: 1px solid var(--line); }
+  .eyebrow { color: var(--accent); font-size: 13px; font-weight: 700; letter-spacing: 0.14em; text-transform: uppercase; }
+  .lede { max-width: 84ch; color: var(--dim); font-size: 18px; }
+  .meta-row { display: flex; flex-wrap: wrap; gap: 8px; }
+  .pill { display: inline-flex; gap: 6px; align-items: center; min-height: 32px; padding: 4px 10px; border: 1px solid var(--border); border-radius: 999px; background: var(--panel); color: var(--dim); font-size: 13px; }
+  .pill strong { color: var(--ink); font-weight: 600; }
+  .note { padding: 10px 14px; border-left: 3px solid var(--accent); background: var(--warm); color: var(--dim); font-size: 14px; }
+  .note strong { color: var(--ink); }
+  .note-critical { border-left-color: var(--critical); background: rgba(161, 61, 50, 0.08); }
+  .note-success { border-left-color: var(--success); background: rgba(66, 97, 62, 0.08); }
+  .note-warning { border-left-color: var(--warning); background: rgba(128, 83, 22, 0.08); }
+
+  .toolbar {
+    position: sticky; top: 40px; z-index: 40; display: flex; flex-wrap: wrap; gap: 8px;
+    align-items: center; justify-content: space-between; margin: 20px 0; padding: 12px;
+    border: 1px solid var(--border); border-radius: var(--r-panel);
+    background: rgba(255, 249, 239, 0.96); box-shadow: var(--shadow-soft);
+  }
+  .toolbar-group { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+  .toolbar-label { color: var(--dim); font-size: 13px; }
+  .toolbar button { padding: 8px 14px; font-size: 14px; }
+
+  .section { display: grid; gap: 12px; margin-top: 44px; padding-top: 8px; border-top: 1px solid var(--line); }
+  .section-head { display: grid; gap: 8px; max-width: 88ch; }
+  .section-head p { color: var(--dim); }
+
+  .viewport-stage { display: flex; gap: 20px; align-items: flex-start; width: 100%; overflow: auto; padding: 4px 0 8px; --scale: 1; }
+  .viewport-stage[data-view="desktop"] .frame-mobile,
+  .viewport-stage[data-view="mobile"] .frame-desktop { display: none; }
+  .viewport-stage[data-view="mobile"] { justify-content: center; }
+  .frame-wrap {
+    position: relative; flex: 0 0 auto; width: calc(var(--fw) * var(--scale)); height: calc(var(--fh) * var(--scale) + 22px);
+    overflow: hidden; border: 1px solid var(--border); border-radius: var(--r-panel); background: var(--bg); box-shadow: var(--shadow-panel);
+  }
+  .frame-wrap.frame-desktop { --fw: 1440px; --fh: 900px; }
+  .frame-wrap.frame-mobile { --fw: 390px; --fh: 844px; }
+  .frame { width: var(--fw); height: var(--fh); overflow: hidden; transform: scale(var(--scale)); transform-origin: top left; background: var(--bg); }
+  .frame-slot { width: 100%; height: 100%; }
+  .frame-label { position: static; display: block; height: 22px; line-height: 22px; padding: 0 8px; border: 1px solid var(--border); border-radius: 6px; background: rgba(255, 249, 239, 0.94); color: var(--dim); font-size: 11px; pointer-events: none; }
+
+  .rule-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 12px; }
+  .rule-card { display: grid; gap: 8px; align-content: start; padding: 12px; border: 1px solid var(--border); border-radius: var(--r-panel); background: var(--panel); }
+  .rule-card ul { margin: 0; padding-left: 18px; color: var(--dim); font-size: 14px; display: grid; gap: 4px; }
+  .tag { padding: 2px 8px; border-radius: 999px; font-size: 11px; font-weight: 700; letter-spacing: 0.04em; border: 1px solid var(--border); color: var(--dim); background: var(--bg); }
+  .tag-ok { color: var(--success); border-color: rgba(66, 97, 62, 0.35); background: rgba(66, 97, 62, 0.1); }
+  .tag-bad { color: var(--critical); border-color: rgba(161, 61, 50, 0.35); background: rgba(161, 61, 50, 0.08); }
+  .tag-warn { color: var(--warning); border-color: rgba(128, 83, 22, 0.35); background: rgba(128, 83, 22, 0.08); }
+
+  table { width: 100%; border-collapse: collapse; font-size: 14px; background: var(--panel); border-radius: var(--r-panel); overflow: hidden; }
+  th, td { padding: 9px 12px; border-bottom: 1px solid var(--line); text-align: left; vertical-align: top; }
+  th { font-size: 12px; letter-spacing: 0.05em; text-transform: uppercase; color: var(--dim); background: var(--bg); }
+  tr:last-child td { border-bottom: 0; }
+
+  .footer { display: grid; gap: 6px; margin-top: 48px; padding-top: 16px; border-top: 1px solid var(--line); color: var(--dim); font-size: 13px; }
+  .footer strong { color: var(--ink); }
+
+  /* simulated app shell */
+  .app { width: 100%; height: 100%; display: grid; grid-template-columns: 270px 1fr; grid-template-rows: 88px 1fr; background: var(--bg); }
+  .app .brand { grid-column: 1; grid-row: 1; display: grid; align-content: center; gap: 2px; padding: 0 20px; border-right: 1px solid var(--line); border-bottom: 1px solid var(--line); background: var(--panel); }
+  .app .brand b { font-family: var(--font-head); font-size: 24px; font-weight: 400; }
+  .app .brand span { color: var(--dim); font-size: 12px; }
+  .app .top { grid-column: 2; grid-row: 1; display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 0 24px; border-bottom: 1px solid var(--line); background: var(--panel); }
+  .app .ctx { display: flex; align-items: center; gap: 12px; }
+  .app .avatar { display: grid; place-items: center; width: 44px; height: 44px; border-radius: 50%; background: var(--warm); color: var(--accent); font-size: 13px; font-weight: 700; }
+  .app .who { display: grid; line-height: 1.25; }
+  .app .who b { font-size: 15px; }
+  .app .who span { color: var(--dim); font-size: 12px; }
+  .app .meta { display: flex; flex-wrap: wrap; gap: 8px; }
+  .app .meta span { padding: 4px 9px; border: 1px solid var(--border); border-radius: 999px; font-size: 12px; color: var(--dim); }
+  .app .rail { grid-column: 1; grid-row: 2; display: grid; align-content: start; gap: 2px; padding: 10px; border-right: 1px solid var(--line); background: var(--panel); }
+  .app .rail button { display: flex; align-items: center; gap: 10px; min-height: 46px; padding: 8px 12px; border: 0; border-radius: 8px; background: transparent; font-size: 14px; color: var(--dim); text-align: left; }
+  .app .rail button:hover { background: var(--warm); }
+  .app .rail button[aria-current="page"] { background: var(--warm); color: var(--accent); font-weight: 700; box-shadow: inset 3px 0 0 var(--accent); }
+  .app .rail .ico { width: 22px; text-align: center; font-size: 16px; }
+  .app .content { grid-column: 2; grid-row: 2; overflow: auto; padding: 22px 26px; display: grid; align-content: start; gap: 12px; }
+  .app .route-head { display: grid; gap: 2px; }
+  .app .route-head .eyebrow { font-size: 11px; }
+  .app .route-head h3 { font-size: 30px; }
+  .app .route-head p { color: var(--dim); font-size: 14px; max-width: 74ch; }
+  .app .panel { padding: 12px; border: 1px solid var(--border); border-radius: 12px; background: var(--panel); display: grid; gap: 8px; align-content: start; }
+  .app .panel h4 { font-size: 12px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--dim); font-family: var(--font-body); }
+  .app .row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+  .app .kv { display: flex; justify-content: space-between; gap: 12px; font-size: 13px; }
+  .app .kv span:first-child { color: var(--dim); }
+  .app .muted { color: var(--dim); font-size: 12px; }
+  .app .toast { color: var(--dim); font-size: 12px; min-height: 17px; }
+  .app .herostrip { display: flex; flex-wrap: wrap; gap: 8px 16px; align-items: center; padding: 7px 12px; border: 1px solid var(--border); border-radius: 10px; background: var(--panel); font-size: 12px; color: var(--dim); }
+  .app .herostrip .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--success); }
+  .app .herostrip b { color: var(--ink); }
+
+  .settings-hero { gap: 6px; }
+  .settings-hero h3 { font-size: 30px; }
+  .settings-hero .intro { color: var(--dim); font-size: 14px; max-width: 74ch; }
+  .guide { margin-top: 6px; display: grid; gap: 4px; }
+  .guide-row { display: flex; flex-wrap: wrap; gap: 6px; }
+  .guide-link { padding: 6px 10px; font-size: 12px; min-height: 44px; border-radius: 999px; }
+  .settings-grid { display: grid; grid-template-columns: 1.06fr 0.94fr; gap: 12px; align-items: start; }
+  .settings-grid .span-2 { grid-column: 1 / -1; }
+
+  .preset-group { display: grid; gap: 6px; }
+  .preset { display: grid; gap: 2px; width: 100%; padding: 9px 11px; text-align: left; }
+  .preset .preset-name { font-size: 14px; font-weight: 700; }
+  .preset .preset-note { font-size: 12px; color: var(--dim); line-height: 1.4; }
+  .preset[aria-pressed="true"] .preset-note { color: rgba(255, 249, 239, 0.88); }
+  .preset-mark { margin-left: 6px; padding: 1px 7px; border: 1px solid currentColor; border-radius: 999px; font-size: 10px; font-weight: 700; letter-spacing: 0.03em; vertical-align: 1px; }
+
+  .switch { display: flex; align-items: center; gap: 10px; width: 100%; text-align: left; }
+  .switch-track { position: relative; flex: 0 0 auto; width: 44px; height: 24px; border: 1px solid var(--border); border-radius: 999px; background: var(--bg); transition: background 160ms ease, border-color 160ms ease; }
+  .switch-knob { position: absolute; top: 2px; left: 2px; width: 18px; height: 18px; border-radius: 50%; background: var(--dim); transition: left 160ms ease, background 160ms ease; }
+  .switch[aria-checked="true"] .switch-track { background: var(--accent); border-color: var(--accent); }
+  .switch[aria-checked="true"] .switch-knob { left: 22px; background: var(--panel); }
+
+  .scale-row { display: grid; gap: 6px; }
+  .scale-row input[type="range"] { width: 100%; min-height: 44px; accent-color: var(--accent); }
+  .scale-ends { display: flex; justify-content: space-between; color: var(--dim); font-size: 11px; }
+
+  .honest { display: grid; gap: 2px; padding: 8px 10px; border: 1px dashed var(--border); border-radius: 8px; background: var(--bg); font-size: 13px; }
+  .honest b { color: var(--warning); }
+  .app.status-unavailable .honest { border-style: solid; border-color: rgba(128, 83, 22, 0.5); background: rgba(128, 83, 22, 0.08); }
+
+  .status-slot { min-height: 0; }
+  .status { display: grid; gap: 3px; padding: 8px 10px; border: 1px solid var(--border); border-radius: 8px; background: var(--bg); color: var(--dim); font-size: 12px; }
+  .status b { color: var(--ink); font-size: 13px; }
+  .status.pending { border-color: rgba(128, 83, 22, 0.38); background: rgba(128, 83, 22, 0.07); }
+  .status.ok { border-color: rgba(66, 97, 62, 0.38); background: rgba(66, 97, 62, 0.08); }
+  .status.bad { border-color: rgba(161, 61, 50, 0.38); background: rgba(161, 61, 50, 0.07); }
+  .status.warn { border-color: rgba(128, 83, 22, 0.45); background: rgba(128, 83, 22, 0.09); }
+  .skeleton { display: inline-block; height: 9px; border-radius: 999px; background: linear-gradient(90deg, rgba(48,39,31,0.08), rgba(48,39,31,0.16), rgba(48,39,31,0.08)); }
+
+  .context-map { position: relative; height: 150px; border: 1px solid var(--border); border-radius: 10px; overflow: hidden; background: linear-gradient(180deg, #C6D6D8 0%, #B7CBD0 58%, #AFC3C3 59%, #A7B9B6 100%); }
+  .context-map .land { position: absolute; inset: 34% 0 0 0; background: linear-gradient(180deg, rgba(243, 236, 223, 0.55), rgba(243, 236, 223, 0.85)); clip-path: polygon(0 34%, 12% 24%, 28% 32%, 45% 20%, 62% 28%, 78% 18%, 100% 30%, 100% 100%, 0 100%); }
+  .marker { position: absolute; left: 46%; top: 56%; transform: translate(-50%, -50%); display: flex; align-items: center; gap: 6px; min-height: 44px; padding: 4px 9px 4px 4px; border: 1px solid var(--accent); border-radius: 999px; background: var(--panel); box-shadow: 0 0 0 4px rgba(134, 85, 30, 0.16); font-size: 11px; }
+  .marker .dot { display: grid; place-items: center; width: 28px; height: 28px; border-radius: 50%; background: var(--accent); color: var(--panel); font-size: 10px; font-weight: 700; }
+  .lod { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; font-size: 11px; color: var(--dim); }
+  .lod span { padding: 2px 8px; border: 1px solid var(--border); border-radius: 999px; background: var(--panel); }
+  .lod span.on { border-color: var(--accent); color: var(--accent); font-weight: 700; }
+
+  .app.m { grid-template-columns: 1fr; grid-template-rows: 96px 1fr 78px; }
+  .app.m .brand { display: none; }
+  .app.m .top { grid-column: 1; grid-row: 1; display: grid; align-content: center; gap: 2px; padding: 10px 14px; border-right: 0; }
+  .app.m .top .ctx { gap: 10px; }
+  .app.m .avatar { width: 40px; height: 40px; font-size: 12px; }
+  .app.m .who b { font-size: 14px; }
+  .app.m .meta { display: none; }
+  .app.m .content { grid-column: 1; grid-row: 2; padding: 12px 14px; gap: 9px; overflow: auto; }
+  .app.m .route-head h3, .app.m .settings-hero h3 { font-size: 24px; }
+  .app.m .settings-grid { grid-template-columns: 1fr; gap: 9px; }
+  .app.m .settings-grid .span-2 { grid-column: auto; }
+  .app.m .context-map { height: 120px; }
+  .app.m .dock { grid-column: 1; grid-row: 3; display: grid; grid-template-columns: repeat(9, 1fr); align-items: center; gap: 0; padding: 6px 4px; border-top: 1px solid var(--line); background: var(--panel); }
+  .app.m .dock button { display: grid; justify-items: center; gap: 2px; min-height: 44px; padding: 2px; border: 0; background: transparent; color: var(--dim); font-size: 9px; }
+  .app.m .dock button[aria-current="page"] { color: var(--accent); font-weight: 700; }
+  .app.m .dock .ico { font-size: 15px; }
+  .app .dock { display: none; }
+  .app.m .rail { display: none; }
+
+  .app.preview-reduced *, .app.preview-reduced *::before, .app.preview-reduced *::after {
+    animation-duration: 0.001ms !important; transition-duration: 0.001ms !important;
+  }
+
+  [hidden] { display: none !important; }
+  @media (prefers-reduced-motion: reduce) {
+    html { scroll-behavior: auto; }
+    *, *::before, *::after { animation-duration: 0.001ms !important; transition-duration: 0.001ms !important; }
+  }
+  @media (max-width: 720px) {
+    /* #383: stack the state matrix into cards instead of narrow columns. */
+    table, thead, tbody, tr, th, td { display: block; width: 100%; }
+    thead { display: none; }
+    tr { margin-bottom: 10px; border: 1px solid var(--border); border-radius: 10px; padding: 8px; }
+    td { border-bottom: 0; padding: 4px 6px; overflow-wrap: anywhere; }
+    td::before { content: attr(data-label) ": "; color: var(--dim); font-weight: 700; }
+  }
+</style>
+</head>
+<body>
+<div class="concept-flag" role="note">
+  <strong>ПРЕДВАРИТЕЛЬНЫЙ КОНЦЕПТ, НЕ УТВЕРЖДЁННЫЙ PRODUCTION-АССЕТ</strong>
+  <span>Issue #383 · экран «Настройки» · §27/§27.1 · design handoff, не код и не игровой факт</span>
+</div>
+
+<main class="sheet">
+  <header class="sheet-header">
+    <div class="eyebrow">#383 · Настройки · волна 2</div>
+    <h1>Настройки меняют интерфейс, не мир</h1>
+    <p class="lede">
+      Экран графики и доступности в оболочке «Тёплый вечер». Только существующие параметры:
+      пресет карты, уменьшенное движение и масштаб интерфейса. Изменения применяются сразу в
+      браузере, честно показывают сохранение и отказ, не трогают симуляцию и возвращают к тому же
+      LOD и POI. Переключателя режимов игры здесь нет — присутствие героя определяется сессией (#397).
+    </p>
+    <div class="meta-row">
+      <span class="pill"><strong>Канон:</strong> §27, §27.1, §39</span>
+      <span class="pill"><strong>Компоненты:</strong> #363</span>
+      <span class="pill"><strong>Навигация:</strong> #364</span>
+      <span class="pill"><strong>Контракт:</strong> #397</span>
+      <span class="pill"><strong>Борд:</strong> 383-settings.svg</span>
+    </div>
+    <div class="note">
+      <strong>Граница артефакта.</strong> Это design handoff, а не изменение <code>backend/**</code> и не
+      игровой факт. Настройки относятся только к отображению: карта, анимации и масштаб интерфейса.
+      Симуляция, задачи, экономика, права и присутствие героя остаются прежними.
+    </div>
+  </header>
+
+  <div class="toolbar" role="toolbar" aria-label="Управление просмотром макета">
+    <div class="toolbar-group">
+      <span class="toolbar-label">Композиция:</span>
+      <button type="button" data-view="desktop" aria-pressed="true">Desktop 1440×900</button>
+      <button type="button" data-view="mobile" aria-pressed="false">Mobile 390×844</button>
+      <button type="button" data-view="both" aria-pressed="false">Оба рядом</button>
+    </div>
+    <div class="toolbar-group">
+      <span class="toolbar-label">Состояние:</span>
+      <button type="button" data-state="normal" aria-pressed="true">Обычное</button>
+      <button type="button" data-state="changed" aria-pressed="false">Изменено</button>
+      <button type="button" data-state="saving" aria-pressed="false">Сохраняется</button>
+      <button type="button" data-state="success" aria-pressed="false">Успех</button>
+      <button type="button" data-state="error" aria-pressed="false">Ошибка</button>
+      <button type="button" data-state="unavailable" aria-pressed="false">Недоступно</button>
+      <button type="button" id="settings-reset-demo">Сбросить демо</button>
+    </div>
+  </div>
+
+  <section class="section" id="screen">
+    <div class="section-head">
+      <h2>Экран</h2>
+      <p>
+        Пресет меняет только карту и анимации, переключатель движения — плавность, ползунок —
+        масштаб интерфейса. Каждое изменение проходит состояния «изменено → сохраняется → успех»
+        или честную ошибку записи в браузере. «Назад к карте» возвращает к тому же LOD и POI.
+      </p>
+    </div>
+    <div class="viewport-stage" data-view="desktop" id="viewport-stage">
+      <div class="frame-wrap frame-desktop">
+        <span class="frame-label">DESKTOP · 1440×900 · логический размер</span>
+        <div class="frame"><div class="frame-slot" data-frame="desktop"></div></div>
+      </div>
+      <div class="frame-wrap frame-mobile">
+        <span class="frame-label">MOBILE · 390×844</span>
+        <div class="frame"><div class="frame-slot" data-frame="mobile"></div></div>
+      </div>
+    </div>
+    <div class="note note-critical">
+      <strong>Главное правило.</strong> Настройки никогда не меняют симуляцию и игровое состояние.
+      Они не перемещают героя, не меняют LOD/POI, задачи, экономику или права. Уменьшенное движение
+      и доступность — не режим игры: нет пользовательских AUTONOMOUS/GUIDED/DIRECT и нет переключателя
+      инициативы (#397).
+    </div>
+  </section>
+
+  <section class="section" id="rules">
+    <div class="section-head">
+      <h2>Правила, которым следует макет</h2>
+      <p>Существующие параметры и их границы. Ничего нового не изобретается.</p>
+    </div>
+    <div class="rule-grid">
+      <div class="rule-card">
+        <h3>Только существующие <span class="tag">#79</span></h3>
+        <ul>
+          <li>пресет карты: High / Balanced / Low-Mobile;</li>
+          <li>уменьшенное движение: один переключатель;</li>
+          <li>масштаб интерфейса: 80–120%, шаг 10;</li>
+          <li>качество генерации изображений и звук — недоступны.</li>
+        </ul>
+      </div>
+      <div class="rule-card">
+        <h3>Эффект ограничен <span class="tag tag-ok">UI only</span></h3>
+        <ul>
+          <li>пресет меняет карту и анимации;</li>
+          <li>движение отключает плавную прокрутку и фон;</li>
+          <li>масштаб применяется ко всему интерфейсу;</li>
+          <li>симуляция и игровое состояние не меняются.</li>
+        </ul>
+      </div>
+      <div class="rule-card">
+        <h3>Нет режима игры <span class="tag tag-bad">#397</span></h3>
+        <ul>
+          <li>нет AUTONOMOUS/GUIDED/DIRECT в UX;</li>
+          <li>инициатива — по присутствию в сессии;</li>
+          <li>доступность не переключает режим;</li>
+          <li>никаких raw mode enums в оболочке.</li>
+        </ul>
+      </div>
+      <div class="rule-card">
+        <h3>Возврат без потерь <span class="tag tag-warn">back</span></h3>
+        <ul>
+          <li>вход из профиля и шестерёнки на всех LOD;</li>
+          <li>возврат к тому же LOD и POI;</li>
+          <li>герой, время и задача не меняются;</li>
+          <li>настройки не телепортируют и не перемещают.</li>
+        </ul>
+      </div>
+    </div>
+    <div class="note note-success" style="margin-top:12px">
+      <strong>Пример приёмки (Gherkin).</strong> Дано: герой в «Магазине», карта на LOD «поселение»,
+      пресет «Сбалансированное». Когда игрок открывает настройки из профиля и выбирает «Высокое»,
+      тогда пресет карты меняется и сохраняется в браузере. Когда игрок включает уменьшенное движение,
+      тогда плавная прокрутка и фоновые анимации отключаются, но присутствие и инициатива героя не
+      меняются. Когда браузер запрещает запись, тогда экран честно сообщает, что значения действуют
+      только до закрытия вкладки. Когда игрок нажимает «Вернуться к карте», тогда он оказывается на
+      том же LOD «поселение» и в том же POI «Магазин», а игровое состояние остаётся прежним.
+    </div>
+  </section>
+
+  <section class="section" id="matrix">
+    <div class="section-head">
+      <h2>Матрица состояний</h2>
+      <p>Шесть состояний из #383 и их влияние на мир.</p>
+    </div>
+    <table>
+      <thead><tr><th>Состояние</th><th>Что видит игрок</th><th>Влияние на игру</th></tr></thead>
+      <tbody>
+        <tr><td data-label="Состояние">Обычное</td><td data-label="Видит игрок">текущие значения и «сохранено автоматически в этом браузере»</td><td data-label="Влияние на игру">0</td></tr>
+        <tr><td data-label="Состояние">Изменено</td><td data-label="Видит игрок">новое значение уже применено, запись ещё не подтверждена</td><td data-label="Влияние на игру">0</td></tr>
+        <tr><td data-label="Состояние">Сохраняется</td><td data-label="Видит игрок">скелетон и явная подпись «сохранение в этом браузере»</td><td data-label="Влияние на игру">0</td></tr>
+        <tr><td data-label="Состояние">Успех</td><td data-label="Видит игрок">подтверждение с текущими значениями</td><td data-label="Влияние на игру">0</td></tr>
+        <tr><td data-label="Состояние">Ошибка</td><td data-label="Видит игрок">запись запрещена: значения только до закрытия вкладки</td><td data-label="Влияние на игру">0; прогресс не затронут</td></tr>
+        <tr><td data-label="Состояние">Недоступно</td><td data-label="Видит игрок">качество генерации изображений и звук с причиной</td><td data-label="Влияние на игру">0; новых функций нет</td></tr>
+      </tbody>
+    </table>
+  </section>
+
+  <footer class="footer">
+    <span><strong>#383 · Настройки.</strong> Предварительный концепт, не утверждённый production-ассет. Приёмка владельцем — отдельный шаг.</span>
+    <span>Источники: docs/VISUAL-BIBLE.md §27, §27.1, §39; #363 токены и компоненты; #364 навигация; specs/026-living-personality/spec.md (#397); 383-settings.svg; существующий экран #79 в backend/app/web/app.js. Связанные: #378 Профиль, #394 Место.</span>
+  </footer>
+</main>
+
+<script>
+(function () {
+  "use strict";
+
+  var stage = document.getElementById("viewport-stage");
+  var viewButtons = Array.prototype.slice.call(document.querySelectorAll("button[data-view]"));
+  var stateButtons = Array.prototype.slice.call(document.querySelectorAll("button[data-state]"));
+
+  function fitFrames() {
+    var view = stage.getAttribute("data-view") || "desktop";
+    var available = Math.max(240, stage.clientWidth - 4);
+    var total = view === "desktop" ? 1440 : view === "mobile" ? 390 : 1440 + 390 + 20;
+    stage.style.setProperty("--scale", String(Math.max(0.2, Math.min(1, available / total))));
+  }
+  function setView(view) {
+    stage.setAttribute("data-view", view);
+    viewButtons.forEach(function (b) {
+      b.setAttribute("aria-pressed", b.getAttribute("data-view") === view ? "true" : "false");
+    });
+    fitFrames();
+  }
+  viewButtons.forEach(function (b) {
+    b.addEventListener("click", function () { setView(b.getAttribute("data-view")); });
+  });
+
+  var NAV = ["Мир", "Чат", "Люди", "Инвентарь", "Рынок", "Дела", "Цель", "Профиль", "Образ"];
+  var ICON = { "Мир": "◎", "Чат": "✉", "Люди": "☺", "Инвентарь": "▣", "Рынок": "◇", "Дела": "✎", "Цель": "⚑", "Профиль": "☰", "Образ": "◧" };
+  var PRESET_LABEL = { high: "Высокое", balanced: "Сбалансированное", "low-mobile": "Упрощённое" };
+  var PRESET_NOTE = {
+    high: "Полная яркость ночных огней и погодных эффектов карты",
+    balanced: "Приглушённые огни и погода — рекомендуемый баланс нагрузки",
+    "low-mobile": "Без фоновых анимаций и с приглушёнными огнями; география и игровые маркеры сохраняются полностью — для слабых устройств"
+  };
+  var LOD_LABEL = { island: "остров", settlement: "поселение", poi: "POI" };
+  var ROUTE_LABEL = { settings: "Профиль", map: "Мир", profile: "Профиль" };
+
+  var OS_REDUCED = false;
+  try { OS_REDUCED = window.matchMedia("(prefers-reduced-motion: reduce)").matches; } catch (e) { OS_REDUCED = false; }
+
+  var S = {
+    route: "settings",
+    preset: "balanced",
+    reduced: false,
+    uiScale: 100,
+    lod: "settlement",
+    location: "Магазин",
+    status: "normal",
+    storageFail: false,
+    generation: 0,
+    toast: "Демонстрационные данные. Настройки не меняют игровое состояние."
+  };
+
+  function esc(v) {
+    return String(v == null ? "" : v).replace(/[&<>"']/g, function (c) {
+      return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c];
+    });
+  }
+  function effectiveReduced() { return OS_REDUCED || S.reduced; }
+  function motionWord(on) { return on ? "включено" : "выключено"; }
+
+  function statusHtml() {
+    var tone = "";
+    var title = "";
+    var body = "";
+    if (S.status === "changed") {
+      tone = "pending";
+      title = "Изменено — ещё не сохранено";
+      body = "Новые значения уже применены в интерфейсе; запись в браузер ещё не подтверждена.";
+    } else if (S.status === "saving") {
+      tone = "pending";
+      title = "Сохранение в этом браузере…";
+      body = "Настройки уже действуют. Ждём подтверждения записи; игровое состояние не меняется.";
+    } else if (S.status === "success") {
+      tone = "ok";
+      title = "Сохранено в этом браузере";
+      body = "Пресет: «" + PRESET_LABEL[S.preset] + "» · масштаб: " + S.uiScale + "% · уменьшенное движение: " + motionWord(S.reduced) + ". Игровое состояние не изменилось.";
+    } else if (S.status === "error") {
+      tone = "bad";
+      title = "Не удалось сохранить в браузере";
+      body = "Значения действуют только до закрытия вкладки. Повторите сохранение или сбросьте изменения. Игровой прогресс, задачи и симуляция не затронуты.";
+    } else if (S.status === "unavailable") {
+      tone = "warn";
+      title = "Часть параметров недоступна";
+      body = "Качество генерации изображений и звук не настраиваются — причины указаны в разделах. Это не ошибка загрузки.";
+    } else {
+      tone = "";
+      title = "Сохранено автоматически в этом браузере";
+      body = "Изменения применяются сразу. Симуляция, задачи, экономика и права не меняются.";
+    }
+    var skeleton = S.status === "saving" ? '<span class="skeleton" style="width:78%"></span><span class="skeleton" style="width:52%"></span>' : "";
+    return '<div class="status ' + tone + '"><b>' + esc(title) + "</b><span>" + esc(body) + "</span>" + skeleton + "</div>";
+  }
+
+  function topBar() {
+    return '<div class="top"><div class="ctx"><span class="avatar" aria-hidden="true">АМ</span>' +
+      '<span class="who"><b>Алиса Морозова</b><span>Фермер · ' + esc(S.location.toLowerCase()) + "</span></span></div>" +
+      '<div class="meta"><span>День 17 · 08:03</span><span>+18 °C · ясно</span><span>Настройки</span></div></div>';
+  }
+  function rail() {
+    return NAV.map(function (n) {
+      var active = n === ROUTE_LABEL[S.route] ? ' aria-current="page"' : "";
+      var route = n === "Мир" ? "map" : n === "Профиль" ? "profile" : "";
+      return '<button type="button" data-act="nav" data-route="' + route + '"' + active + '><span class="ico" aria-hidden="true">' + ICON[n] + "</span>" + n + "</button>";
+    }).join("");
+  }
+  function heroStrip() {
+    return '<div class="herostrip"><span class="dot" aria-hidden="true"></span><span>Герой: <b>Алиса Морозова</b></span>' +
+      "<span>Сейчас: <b>" + esc(S.location) + "</b></span>" +
+      "<span>LOD: <b>" + esc(LOD_LABEL[S.lod]) + "</b></span>" +
+      "<span>День 17 · 08:03</span><span>+18 °C · ясно</span></div>";
+  }
+  function screenHead(eyebrow, title, text) {
+    return '<div class="route-head"><div class="eyebrow">' + esc(eyebrow) + "</div><h3>" + esc(title) + "</h3><p>" + esc(text) + "</p></div>";
+  }
+  function paragraph(value) {
+    return '<p class="muted">' + value + "</p>";
+  }
+
+  function presetButtons() {
+    return ["high", "balanced", "low-mobile"].map(function (v) {
+      var mark = v === "balanced" ? ' <span class="preset-mark">рекомендуется</span>' : "";
+      return '<button type="button" class="preset" data-act="preset" data-value="' + v + '" aria-pressed="' + (S.preset === v) + '">' +
+        '<span class="preset-name">' + PRESET_LABEL[v] + mark + "</span>" +
+        '<span class="preset-note">' + PRESET_NOTE[v] + "</span></button>";
+    }).join("");
+  }
+
+  function settingsContent() {
+    var graphics = '<section class="panel" data-section="graphics" tabindex="-1"><h4>1. Графика</h4>' +
+      '<div class="preset-group" role="group" aria-label="Пресет графики">' + presetButtons() + "</div>" +
+      paragraph("Пресет влияет только на карту и анимации — на события мира он не влияет.") +
+      '<div class="honest"><b>Качество генерации изображений — недоступно для настройки</b><span class="muted">Генерация изображений идёт на сервере без параметра качества.</span></div></section>';
+
+    var iface = '<section class="panel" data-section="interface" tabindex="-1"><h4>2. Интерфейс</h4>' +
+      '<div class="scale-row"><label data-bind="scale-label">Масштаб интерфейса: ' + S.uiScale + '%</label>' +
+      '<input type="range" min="80" max="120" step="10" value="' + S.uiScale + '" data-act="scale" aria-label="Масштаб интерфейса">' +
+      '<div class="scale-ends"><span>80%</span><span>120% · шаг 10</span></div></div>' +
+      paragraph("Применяется ко всему интерфейсу сразу. В макете масштаб показан на области контента, чтобы оболочка оставалась в кадре.") + "</section>";
+
+    var motion = '<section class="panel" data-section="motion" tabindex="-1"><h4>3. Специальные возможности</h4>' +
+      '<button type="button" class="switch" role="switch" aria-checked="' + (!!S.reduced) + '" data-act="motion">' +
+      '<span class="switch-track" aria-hidden="true"><span class="switch-knob"></span></span>' +
+      '<span data-bind="motion-label">Уменьшенное движение: ' + motionWord(S.reduced) + "</span></button>" +
+      paragraph("Отключает плавную прокрутку и фоновые анимации. Не переключает режим игры: инициатива определяется присутствием героя в сессии (#397).") +
+      (OS_REDUCED ? paragraph("Система уже требует уменьшенное движение — эффект действует и при выключенном переключателе.") : "") +
+      paragraph('Эффект оболочки: <b data-bind="effective-motion">' + (effectiveReduced() ? "уменьшено" : "обычное") + "</b>.") + "</section>";
+
+    var sound = '<section class="panel" data-section="sound" tabindex="-1"><h4>4. Звук</h4>' +
+      '<div class="honest"><b>Звук — недоступен</b><span class="muted">В игре пока нет звукового движка.</span></div>' +
+      paragraph("Строка честная: выключенный звук не изображается декоративным переключателем.") + "</section>";
+
+    var saving = '<section class="panel" data-section="saving" tabindex="-1"><h4>5. Сохранение</h4>' +
+      paragraph("Настройки сохраняются автоматически в этом браузере. Это не сохранение игры — прогресс хранится на сервере.") +
+      paragraph("Синхронизация между устройствами — недоступна.") +
+      (S.storageFail ? paragraph("Браузер не разрешил запись — значения останутся только в этой сессии.") : "") +
+      '<div class="row"><button type="button" data-act="reset">Сбросить</button></div>' +
+      paragraph("Сброс возвращает Balanced, 100% и выключенное уменьшенное движение — значения по умолчанию, не игровые.") + "</section>";
+
+    var context = '<section class="panel" data-section="return" tabindex="-1"><h4>6. Возврат</h4>' +
+      '<div class="kv"><span>Вы пришли с карты</span><span>' + esc(LOD_LABEL[S.lod]) + " · " + esc(S.location) + "</span></div>" +
+      '<div class="kv"><span>LOD и POI после настроек</span><span class="sel">' + esc(LOD_LABEL[S.lod]) + " · " + esc(S.location) + "</span></div>" +
+      '<div class="context-map" aria-hidden="true"><div class="land"></div><span class="marker"><span class="dot">●</span>' + esc(S.location) + "</span></div>" +
+      '<div class="lod" aria-label="Уровни карты"><span>остров</span><span class="on">поселение</span><span class="on">POI</span></div>' +
+      '<div class="row"><button type="button" data-act="nav" data-route="map">Вернуться к карте</button>' +
+      '<button type="button" data-act="nav" data-route="profile">К профилю</button></div>' +
+      paragraph("Настройки не меняют LOD и POI. Шестерёнка доступна на всех уровнях карты; этот экран — не десятый пункт навигации, а дочерний к профилю.") +
+      '<div class="honest"><b>Админ-настройки — вне экрана</b><span class="muted">Доступ к <code>#/admin</code> — только по полномочиям; здесь админ-параметров нет.</span></div></section>';
+
+    return screenHead("ИЗ ПРОФИЛЯ И КАРТЫ · #383", "Настройки",
+      "Графика, масштаб интерфейса и движение — всё применяется сразу и не меняет мир.") +
+      '<section class="panel settings-hero"><h3>Графика и доступность</h3>' +
+      '<p class="intro">Только существующие параметры. Текущие значения, честное сохранение и возврат к тому же месту.</p>' +
+      '<div class="status-slot" data-status-slot aria-live="polite" aria-atomic="true">' + statusHtml() + "</div>" +
+      '<div class="guide"><span class="muted">Разделы настроек</span><div class="guide-row">' +
+      [[1, "graphics", "1. Графика"], [2, "interface", "2. Интерфейс"], [3, "motion", "3. Доступность"], [4, "sound", "4. Звук"], [5, "saving", "5. Сохранение"], [6, "return", "6. Возврат"]].map(function (g) {
+        return '<button type="button" class="guide-link" data-act="jump" data-target="' + g[1] + '">' + g[2] + "</button>";
+      }).join("") + "</div></div></section>" + heroStrip() +
+      '<div class="settings-grid">' + graphics + iface + motion + sound + saving + context + "</div>" +
+      '<p class="toast" data-toast aria-live="polite">' + esc(S.toast) + "</p>";
+  }
+
+  function mapContent() {
+    return screenHead("КАРТА · #394", "Карта",
+      "Заглушка маршрута: карта — отдельный артефакт #394. Здесь проверяется только возврат с сохранением LOD и POI.") + heroStrip() +
+      '<div class="settings-grid"><section class="panel"><h4>Текущий кадр</h4>' +
+      '<div class="context-map"><div class="land"></div><span class="marker"><span class="dot">●</span>' + esc(S.location) + "</span></div>" +
+      '<div class="lod"><span>остров</span><span class="on">поселение</span><span class="on">POI · ' + esc(S.location) + "</span></div>" +
+      paragraph("Возврат из настроек: тот же LOD «поселение» и тот же POI «" + esc(S.location) + "». Герой не перемещался.") +
+      '<div class="row"><button type="button" data-act="nav" data-route="settings">⚙ Настройки интерфейса</button>' +
+      '<button type="button" data-act="nav" data-route="profile">К профилю</button></div></section>' +
+      '<section class="panel"><h4>Проверка</h4>' +
+      '<div class="kv"><span>Место героя</span><span>' + esc(S.location) + "</span></div>" +
+      '<div class="kv"><span>LOD</span><span>' + esc(LOD_LABEL[S.lod]) + "</span></div>" +
+      '<div class="kv"><span>Время</span><span>День 17 · 08:03</span></div>' +
+      '<div class="kv"><span>Задача</span><span>без изменений</span></div>' +
+      paragraph("Настройки не перемещают героя, не меняют LOD/POI и не запускают действия. Шестерёнка доступна на всех уровнях карты.") + "</section></div>" +
+      '<p class="toast" data-toast aria-live="polite">' + esc(S.toast) + "</p>";
+  }
+
+  function profileContent() {
+    return screenHead("ПРОФИЛЬ · #378", "Профиль",
+      "Заглушка маршрута: профиль — отдельный артефакт #378. Здесь проверяется только вход в настройки.") + heroStrip() +
+      '<div class="settings-grid"><section class="panel"><h4>Герой</h4>' +
+      '<div class="kv"><span>Имя</span><span>Алиса Морозова</span></div>' +
+      '<div class="kv"><span>Роль</span><span>Фермер</span></div>' +
+      '<div class="kv"><span>Сейчас</span><span>' + esc(S.location) + "</span></div>" +
+      paragraph("Профиль показывает героя и вход в настройки; настройки не меняют героя, место или задачу.") +
+      '<div class="row"><button type="button" data-act="nav" data-route="settings" data-from="profile">Настройки интерфейса</button>' +
+      '<button type="button" data-act="nav" data-route="map">К карте</button></div></section>' +
+      '<section class="panel"><h4>Контекст</h4>' +
+      '<div class="kv"><span>LOD</span><span>' + esc(LOD_LABEL[S.lod]) + "</span></div>" +
+      '<div class="kv"><span>День и время</span><span>День 17 · 08:03</span></div>' +
+      paragraph("Возврат из настроек в профиль не меняет выбранное место и уровень карты.") + "</section></div>" +
+      '<p class="toast" data-toast aria-live="polite">' + esc(S.toast) + "</p>";
+  }
+
+  function content() {
+    if (S.route === "map") return mapContent();
+    if (S.route === "profile") return profileContent();
+    return settingsContent();
+  }
+
+  function appHtml(mobile) {
+    return '<div class="app' + (mobile ? " m" : "") + (S.status === "unavailable" ? " status-unavailable" : "") + (effectiveReduced() ? " preview-reduced" : "") + '">' +
+      '<div class="brand"><b>ВЛ1: Рейнеке</b><span>Северный остров · Тёплый вечер</span></div>' +
+      topBar() +
+      '<nav class="rail" aria-label="Разделы">' + rail() + "</nav>" +
+      '<div class="content">' + content() + "</div>" +
+      '<nav class="dock" aria-label="Разделы">' + rail() + "</nav>" +
+      "</div>";
+  }
+
+  function applyScale() {
+    document.querySelectorAll(".app .content").forEach(function (c) {
+      if (S.uiScale === 100) {
+        c.style.removeProperty("zoom");
+        c.style.removeProperty("width");
+        c.style.removeProperty("height");
+      } else {
+        var z = S.uiScale / 100;
+        c.style.zoom = String(z);
+        c.style.width = (100 / z) + "%";
+        c.style.height = (100 / z) + "%";
+      }
+    });
+  }
+
+  function syncControls() {
+    var apps = document.querySelectorAll(".app");
+    apps.forEach(function (app) {
+      app.classList.toggle("status-unavailable", S.status === "unavailable");
+      app.classList.toggle("preview-reduced", effectiveReduced());
+    });
+    document.querySelectorAll('[data-act="preset"]').forEach(function (btn) {
+      btn.setAttribute("aria-pressed", btn.getAttribute("data-value") === S.preset ? "true" : "false");
+    });
+    document.querySelectorAll('[data-act="motion"]').forEach(function (btn) {
+      btn.setAttribute("aria-checked", S.reduced ? "true" : "false");
+    });
+    document.querySelectorAll('[data-bind="motion-label"]').forEach(function (el) {
+      el.textContent = "Уменьшенное движение: " + motionWord(S.reduced);
+    });
+    document.querySelectorAll('[data-bind="effective-motion"]').forEach(function (el) {
+      el.textContent = effectiveReduced() ? "уменьшено" : "обычное";
+    });
+    document.querySelectorAll('[data-bind="scale-label"]').forEach(function (el) {
+      el.textContent = "Масштаб интерфейса: " + S.uiScale + "%";
+    });
+    document.querySelectorAll('[data-act="scale"]').forEach(function (inp) {
+      if (document.activeElement !== inp) inp.value = String(S.uiScale);
+    });
+    document.querySelectorAll("[data-status-slot]").forEach(function (slot) {
+      slot.innerHTML = statusHtml();
+    });
+    document.querySelectorAll("[data-toast]").forEach(function (el) {
+      el.textContent = S.toast;
+    });
+    applyScale();
+  }
+
+  function render(focusSelector) {
+    var d = document.querySelector('[data-frame="desktop"]');
+    var m = document.querySelector('[data-frame="mobile"]');
+    if (d) d.innerHTML = appHtml(false);
+    if (m) m.innerHTML = appHtml(true);
+    syncControls();
+    // #383: keyboard activation must not drop focus to <body>.
+    if (focusSelector) {
+      var next = document.querySelector(focusSelector);
+      if (next && next.focus) next.focus();
+    }
+  }
+
+  function showToast(text) { S.toast = text; syncControls(); }
+
+  function schedulePersist() {
+    var gen = ++S.generation;
+    S.status = "changed";
+    S.toast = "Изменение применено в интерфейсе; сохранение в браузере ещё не подтверждено.";
+    syncControls();
+    window.setTimeout(function () {
+      if (gen !== S.generation) return;
+      S.status = "saving";
+      syncControls();
+    }, 220);
+    window.setTimeout(function () {
+      if (gen !== S.generation) return;
+      S.status = S.storageFail ? "error" : "success";
+      S.toast = S.storageFail
+        ? "Браузер не разрешил запись: значения останутся только в этой вкладке."
+        : "Сохранено в этом браузере. Игровое состояние не изменилось.";
+      syncControls();
+    }, 900);
+  }
+
+  function jumpTo(target) {
+    var app = document.querySelector(".app");
+    var content = app ? app.querySelector(".content") : null;
+    var section = app ? app.querySelector('[data-section="' + target + '"]') : null;
+    if (!content || !section) return;
+    content.scrollTo({ top: Math.max(0, section.offsetTop - 10), behavior: effectiveReduced() ? "auto" : "smooth" });
+    section.focus({ preventScroll: true });
+  }
+
+  document.addEventListener("click", function (ev) {
+    var el = ev.target.closest ? ev.target.closest("[data-act]") : null;
+    if (!el) return;
+    var act = el.getAttribute("data-act");
+    if (act === "preset") {
+      var value = el.getAttribute("data-value");
+      if (!PRESET_LABEL[value] || S.preset === value) return;
+      S.preset = value;
+      schedulePersist();
+    } else if (act === "motion") {
+      S.reduced = !S.reduced;
+      schedulePersist();
+    } else if (act === "reset") {
+      S.preset = "balanced";
+      S.reduced = false;
+      S.uiScale = 100;
+      S.storageFail = false;
+      S.generation += 1;
+      S.status = "success";
+      S.toast = "Сброшено к значениям по умолчанию: Balanced, 100%, движение выключено.";
+      syncControls();
+    } else if (act === "retry") {
+      S.storageFail = false;
+      schedulePersist();
+    } else if (act === "jump") {
+      jumpTo(el.getAttribute("data-target"));
+    } else if (act === "nav") {
+      var route = el.getAttribute("data-route");
+      if (!route) {
+        showToast("«" + el.textContent.trim() + "» — отдельный экран, вне этого макета. Настройки и герой не меняются.");
+        return;
+      }
+      if (route === S.route) {
+        showToast("Вы уже на этом экране.");
+        return;
+      }
+      S.route = route;
+      S.toast = route === "settings"
+        ? "Настройки открыты из " + (el.getAttribute("data-from") === "profile" ? "профиля" : "карты") + ". LOD и POI сохранены."
+        : route === "map"
+          ? "Возврат к карте: тот же LOD «поселение» и тот же POI «Магазин»."
+          : "Профиль как точка входа в настройки; герой и место не изменились.";
+      render('[data-act="nav"][data-route="' + route + '"]');
+    }
+  });
+
+  document.addEventListener("input", function (ev) {
+    var el = ev.target;
+    if (!el || el.getAttribute("data-act") !== "scale") return;
+    var value = Number(el.value);
+    if (!isFinite(value) || value < 80 || value > 120 || value % 10 !== 0) return;
+    if (value === S.uiScale) return;
+    S.uiScale = value;
+    schedulePersist();
+  });
+
+  stateButtons.forEach(function (b) {
+    b.addEventListener("click", function () {
+      var st = b.getAttribute("data-state");
+      stateButtons.forEach(function (x) { x.setAttribute("aria-pressed", x === b ? "true" : "false"); });
+      S.generation += 1;
+      S.status = st;
+      if (st === "error") S.storageFail = true;
+      if (st === "normal" || st === "success" || st === "changed" || st === "saving") S.storageFail = false;
+      if (st === "normal") S.toast = "Обычное состояние: значения сохранены автоматически.";
+      else if (st === "changed") S.toast = "Изменено: значения применены, запись ещё не подтверждена.";
+      else if (st === "saving") S.toast = "Сохранение в этом браузере: игровое состояние не меняется.";
+      else if (st === "success") S.toast = "Успех: настройки сохранены в этом браузере.";
+      else if (st === "error") S.toast = "Ошибка записи: значения только до закрытия вкладки.";
+      else S.toast = "Недоступно: качество генерации изображений и звук.";
+      syncControls();
+    });
+  });
+
+  document.getElementById("settings-reset-demo").addEventListener("click", function () {
+    S.route = "settings";
+    S.preset = "balanced";
+    S.reduced = false;
+    S.uiScale = 100;
+    S.status = "normal";
+    S.storageFail = false;
+    S.generation += 1;
+    S.toast = "Демо сброшено: значения по умолчанию, игровое состояние не менялось.";
+    stateButtons.forEach(function (x) { x.setAttribute("aria-pressed", x.getAttribute("data-state") === "normal" ? "true" : "false"); });
+    render();
+  });
+
+  fitFrames();
+  window.addEventListener("resize", fitFrames);
+  render();
+})();
+</script>
+</body>
+</html>
