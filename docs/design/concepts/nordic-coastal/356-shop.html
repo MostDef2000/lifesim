@@ -1,0 +1,485 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>#356 · Канонический магазин — предварительный концепт</title>
+<style>
+  :root {
+    --bg: #F3ECDF;
+    --panel: #FFF9EF;
+    --ink: #30271F;
+    --dim: #69594C;
+    --accent: #86551E;
+    --accent-hover: #6E4519;
+    --success: #42613E;
+    --warning: #805316;
+    --critical: #A13D32;
+    --border: rgba(48, 39, 31, 0.14);
+    --line: rgba(48, 39, 31, 0.12);
+    --focus: rgba(134, 85, 30, 0.75);
+    --warm: rgba(134, 85, 30, 0.12);
+    --shadow: 0 12px 32px rgba(48, 39, 31, 0.16), 0 2px 8px rgba(48, 39, 31, 0.10);
+    --font-body: system-ui, -apple-system, "Segoe UI", sans-serif;
+    --font-head: Georgia, "Times New Roman", serif;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--ink); font: 16px/1.55 var(--font-body); }
+  h1, h2, h3 { margin: 0; font-family: var(--font-head); font-weight: 400; line-height: 1.16; }
+  h1 { font-size: clamp(30px, 4vw, 46px); }
+  h2 { font-size: 30px; }
+  h3 { font-size: 20px; }
+  p { margin: 0; }
+  a { color: var(--accent); }
+  .concept-flag {
+    position: sticky; top: 0; z-index: 20;
+    display: flex; flex-wrap: wrap; gap: 8px 14px; align-items: center; justify-content: center;
+    padding: 8px 16px; border-bottom: 1px solid rgba(161, 61, 50, 0.32);
+    background: #F8E8DC; color: #6B2A22; font-size: 13px; text-align: center;
+  }
+  .page { width: min(1320px, calc(100% - 32px)); margin: 0 auto; padding: 28px 0 72px; }
+  .header { display: grid; gap: 16px; padding: 26px 0 22px; border-bottom: 1px solid var(--line); }
+  .eyebrow { color: var(--accent); font-size: 13px; font-weight: 700; letter-spacing: 0.14em; text-transform: uppercase; }
+  .lede { max-width: 88ch; color: var(--dim); font-size: 18px; }
+  .meta { display: flex; flex-wrap: wrap; gap: 8px; }
+  .pill { display: inline-flex; align-items: center; min-height: 32px; padding: 4px 10px; border: 1px solid var(--border); border-radius: 999px; background: var(--panel); color: var(--dim); font-size: 13px; }
+  .pill strong { color: var(--ink); margin-right: 4px; }
+  .section { display: grid; gap: 14px; margin-top: 42px; padding-top: 10px; border-top: 1px solid var(--line); }
+  .section-head { display: grid; gap: 8px; max-width: 92ch; }
+  .section-head p { color: var(--dim); }
+  .note { padding: 10px 14px; border-left: 3px solid var(--accent); background: var(--warm); color: var(--dim); font-size: 14px; }
+  .note strong { color: var(--ink); }
+  .note-critical { border-left-color: var(--critical); background: rgba(161, 61, 50, 0.08); }
+  .note-warning { border-left-color: var(--warning); background: rgba(128, 83, 22, 0.08); }
+  .note-success { border-left-color: var(--success); background: rgba(66, 97, 62, 0.08); }
+
+  .controls { display: flex; flex-wrap: wrap; gap: 16px 28px; align-items: flex-end; }
+  .control-group { display: grid; gap: 6px; }
+  .control-label { color: var(--accent); font-size: 12px; font-weight: 700; letter-spacing: 0.1em; text-transform: uppercase; }
+  .control-buttons { display: flex; flex-wrap: wrap; gap: 8px; }
+  .state-btn {
+    min-height: 44px; padding: 8px 16px;
+    border: 1px solid var(--border); border-radius: 8px;
+    background: var(--panel); color: var(--ink);
+    font: 16px/1.3 var(--font-body); cursor: pointer;
+  }
+  .state-btn:hover { background: var(--warm); border-color: rgba(134, 85, 30, 0.45); }
+  .state-btn[aria-pressed="true"] { background: var(--accent); border-color: var(--accent-hover); color: var(--panel); }
+  .state-btn[aria-pressed="true"]:hover { background: var(--accent-hover); }
+  .state-btn:focus-visible { outline: 3px solid var(--focus); outline-offset: 2px; }
+  .control-note { max-width: 90ch; color: var(--dim); font-size: 13px; }
+  .status { padding: 8px 12px; border-left: 3px solid var(--accent); background: var(--warm); color: var(--ink); font-size: 14px; }
+
+  .shop-grid { display: grid; grid-template-columns: minmax(260px, 1fr) minmax(0, 1.55fr); gap: 14px; }
+  .board-card { display: grid; gap: 6px; align-content: start; padding: 10px; border: 1px solid var(--border); border-radius: 12px; background: var(--panel); box-shadow: var(--shadow); }
+  .board-card .tag { justify-self: start; padding: 2px 8px; border: 1px solid var(--border); border-radius: 999px; color: var(--accent); font-size: 11px; letter-spacing: 0.06em; text-transform: uppercase; }
+  .board-card svg { display: block; width: 100%; height: auto; border-radius: 8px; }
+  .board-card .frame-meta { display: flex; flex-wrap: wrap; gap: 4px 12px; justify-content: space-between; color: var(--dim); font-size: 12px; }
+  .board-card .frame-meta strong { color: var(--ink); }
+  .full { grid-column: 1 / -1; }
+
+  .anchors { display: flex; flex-wrap: wrap; gap: 6px; }
+  .accent-chip { padding: 4px 9px; border: 1px solid var(--border); border-radius: 999px; background: var(--bg); color: var(--dim); font-size: 12px; }
+  .accent-chip b { color: var(--ink); }
+  .spec-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  .spec-table th, .spec-table td { padding: 7px 9px; border: 1px solid var(--border); text-align: left; vertical-align: top; }
+  .spec-table th { background: var(--warm); color: var(--ink); font-weight: 600; }
+  .spec-table td { color: var(--dim); }
+  .spec-table td strong { color: var(--ink); }
+  .rules { margin: 0; padding-left: 20px; color: var(--dim); font-size: 14px; display: grid; gap: 6px; }
+  .rules strong { color: var(--ink); }
+  .footer { display: grid; gap: 6px; margin-top: 44px; padding-top: 18px; border-top: 1px solid var(--line); color: var(--dim); font-size: 13px; }
+  .footer strong { color: var(--ink); }
+
+  /* ---- Scene state variables: light/weather only ---- */
+  #shop[data-light="day"] {
+    --sky: #D6DDD8; --hill: #8D9E8C; --hill2: #7C8B7B;
+    --ground: #B7AC91; --ground2: #A69A7E; --water: #7796A1;
+    --wall: #AC6251; --roof: #4C626B; --glass: #8DA6AD; --frame: #EFE1C9;
+    --door: #615748; --sign-bg: #DFD1B5; --clad: #8B5347; --rain: #9FB0B8;
+    --int-wall: #D8C8AF; --int-wall2: #C9B79A; --int-floor: #C3B094; --int-floor2: #AE9B7E;
+    --int-shelf: #998061; --int-window: #8CA3A5; --int-counter: #8E755A; --int-counter2: #7A6751; --int-door: #6D5E4D;
+  }
+  #shop[data-light="evening"] {
+    --sky: #C9C2B2; --hill: #7C8B7B; --hill2: #6B7A6B;
+    --ground: #A99D83; --ground2: #988C72; --water: #6E888C;
+    --wall: #9A6A54; --roof: #40555E; --glass: #E8C98D; --frame: #D8C9AF;
+    --door: #4B4036; --sign-bg: #CBBE9F; --clad: #7E4B3E; --rain: #8FA0A8;
+    --int-wall: #C9B79A; --int-wall2: #B7A383; --int-floor: #A88F6E; --int-floor2: #947C5D;
+    --int-shelf: #7C664D; --int-window: #E8C98D; --int-counter: #7A6751; --int-counter2: #65533F; --int-door: #5B4A3C;
+  }
+  #shop[data-light="rain"] {
+    --sky: #B9C4C6; --hill: #7E9186; --hill2: #6F8479;
+    --ground: #9FA694; --ground2: #8C9484; --water: #6E8589;
+    --wall: #9A6555; --roof: #46585F; --glass: #C9C09B; --frame: #DFD6C2;
+    --door: #57493D; --sign-bg: #CFC4AC; --clad: #7A4A3E; --rain: #A9B8BE;
+    --int-wall: #C2B49C; --int-wall2: #AE9E85; --int-floor: #9E8A6C; --int-floor2: #8A775A;
+    --int-shelf: #75624A; --int-window: #C9C09B; --int-counter: #73614C; --int-counter2: #5F4E3B; --int-door: #54463A;
+  }
+  .scene .sky { fill: var(--sky); }
+  .scene .hill { fill: var(--hill); }
+  .scene .hill2 { fill: var(--hill2); }
+  .scene .ground { fill: var(--ground); }
+  .scene .ground2 { fill: var(--ground2); }
+  .scene .water { fill: var(--water); }
+  .scene .wall { fill: var(--wall); }
+  .scene .roof { fill: var(--roof); }
+  .scene .glass { fill: var(--glass); }
+  .scene .frame { fill: var(--frame); }
+  .scene .door { fill: var(--door); }
+  .scene .signbg { fill: var(--sign-bg); }
+  .scene .clad { stroke: var(--clad); }
+  .scene .int-wall { fill: var(--int-wall); }
+  .scene .int-wall2 { fill: var(--int-wall2); }
+  .scene .int-floor { fill: var(--int-floor); }
+  .scene .int-floor2 { stroke: var(--int-floor2); }
+  .scene .int-shelf { fill: var(--int-shelf); }
+  .scene .int-window { fill: var(--int-window); }
+  .scene .int-counter { fill: var(--int-counter); }
+  .scene .int-counter2 { fill: var(--int-counter2); }
+  .scene .int-door { fill: var(--int-door); }
+
+  .scene .rain { display: none; stroke: var(--rain); }
+  #shop[data-light="rain"] .rain { display: inline; }
+  .scene .evening-glow { display: none; }
+  #shop[data-light="evening"] .evening-glow,
+  #shop[data-light="rain"] .evening-glow { display: inline; }
+  .scene .person { display: none; }
+  #shop[data-presence="occupied"] .person { display: inline; }
+  .scene .occupied-glow { display: none; }
+  #shop[data-presence="occupied"] .occupied-glow { display: inline; }
+
+  @media (max-width: 820px) {
+    .page { width: calc(100% - 20px); }
+    h2 { font-size: 25px; }
+    .shop-grid { grid-template-columns: 1fr; }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .state-btn { transition: none; }
+  }
+</style>
+</head>
+<body>
+<div class="concept-flag" role="note">
+  <strong>ПРЕДВАРИТЕЛЬНЫЙ КОНЦЕПТ, НЕ УТВЕРЖДЁННЫЙ PRODUCTION-АССЕТ</strong>
+  <span>Issue #356 · design-world · волна 2 · не Flux-рендер, не игровой факт и не существующая локация</span>
+</div>
+
+<main class="page">
+  <header class="header">
+    <div class="eyebrow">ВЛ1: Рейнеке · design-world · волна 2</div>
+    <h1>Один канонический магазин: карта · улица · интерьер</h1>
+    <p class="lede">
+      Эталон одного магазина, который узнаётся на схематичном маркере карты, с улицы и внутри.
+      Постоянные признаки — крыша, вход, две группы окон, вывеска, полки и прилавок; меняются только
+      свет, погода и подтверждённое присутствие. Это макет для согласования, не production-ассет.
+    </p>
+    <div class="meta">
+      <span class="pill"><strong>Канон:</strong> Visual Bible §27.1</span>
+      <span class="pill"><strong>Связанные:</strong> #387, #353, #356</span>
+      <span class="pill"><strong>География:</strong> не меняется</span>
+      <span class="pill"><strong>Функциональные комнаты:</strong> не добавляются</span>
+    </div>
+    <div class="note">
+      <strong>Граница артефакта.</strong> Магазин — условный эталон, а не существующая игровая локация и
+      не утверждённая планировка. Размеры, материалы и расстановка — ориентиры для design review.
+      Изображение не подтверждает покупку, наличие товара, перемещение героя или любую другую игровую
+      операцию. Неизвестное не дополняется вымышленными фактами.
+    </div>
+  </header>
+
+  <section class="section" id="scene">
+    <div class="section-head">
+      <h2>Магазин: маркер, улица, интерьер</h2>
+      <p>
+        Три кадра одного и того же магазина. Архитектурные якоря не двигаются между состояниями;
+        переключатели ниже меняют только подачу света, погоду и присутствие — это просмотр макета,
+        а не игровой выбор режима.
+      </p>
+    </div>
+
+    <div class="controls" role="group" aria-label="Инструмент проверки макета — не настройки игры">
+      <div class="control-group">
+        <span class="control-label">Проверка: свет и погода</span>
+        <div class="control-buttons">
+          <button type="button" class="state-btn" data-light="day" aria-pressed="true">День</button>
+          <button type="button" class="state-btn" data-light="evening" aria-pressed="false">Вечер</button>
+          <button type="button" class="state-btn" data-light="rain" aria-pressed="false">Дождь</button>
+        </div>
+      </div>
+      <div class="control-group">
+        <span class="control-label">Проверка: присутствие</span>
+        <div class="control-buttons">
+          <button type="button" class="state-btn" data-presence="empty" aria-pressed="false">Пустой магазин</button>
+          <button type="button" class="state-btn" data-presence="occupied" aria-pressed="true">Занятый магазин</button>
+        </div>
+      </div>
+    </div>
+    <p class="control-note">
+      Переключатель нужен только для проверки макета. В игре время, погода и присутствие приходят из
+      мира; отдельного пользовательского режима нет (§397). Присутствие — иллюстрация, не подтверждение
+      покупки или наличия товара.
+    </p>
+    <p class="status" id="state-status" aria-live="polite">
+      День · занятый магазин — архитектура постоянна; меняются только свет, погода и подтверждённое присутствие.
+    </p>
+
+    <div id="shop" data-light="day" data-presence="occupied">
+
+      <div class="shop-grid">
+        <article class="board-card">
+          <span class="tag">Карта</span>
+          <svg class="scene" viewBox="0 0 480 380" role="img" aria-label="Схематичный маркер магазина на карте: домик с двускатной крышей, дверью и двумя окнами">
+            <rect class="water" width="480" height="380"/>
+            <path class="ground" d="M0 0 H480 V236 Q330 258 240 250 Q120 242 0 262 Z"/>
+            <path class="ground2" d="M0 0 H480 V150 Q320 176 180 164 Q80 156 0 174 Z" opacity="0.55"/>
+            <path d="M12 300 Q120 246 196 196 Q226 174 240 150" fill="none" stroke="#C7B79A" stroke-width="8" opacity="0.7" stroke-linecap="round"/>
+            <g fill="#D8CBB0" opacity="0.75">
+              <circle cx="60" cy="206" r="16"/>
+              <circle cx="404" cy="212" r="19"/>
+            </g>
+            <g transform="translate(240 128)">
+              <ellipse class="occupied-glow" cx="0" cy="-20" rx="44" ry="22" fill="#E8C98D" opacity="0.45"/>
+              <g transform="translate(0 -38)">
+                <path class="roof" d="M-42 0 L0 -24 L42 0 Z" stroke="#3E4B50" stroke-width="2" stroke-linejoin="round"/>
+                <rect class="wall" x="-34" y="0" width="68" height="24" stroke="#4A4036" stroke-width="2"/>
+                <rect class="glass" x="-26" y="5" width="12" height="12"/>
+                <rect class="door" x="-6" y="5" width="12" height="19"/>
+                <rect class="glass" x="14" y="5" width="12" height="12"/>
+              </g>
+              <circle cx="0" cy="0" r="9" fill="#86551E" stroke="#FFF9EF" stroke-width="3"/>
+              <path d="M-5 7 L0 20 L5 7 Z" fill="#86551E"/>
+              <rect x="-58" y="28" width="116" height="24" rx="12" fill="#FFF9EF" stroke="#B9A98C" stroke-width="2"/>
+              <text x="0" y="44" text-anchor="middle" font-family="Arial, sans-serif" font-size="12" font-weight="700" fill="#30271F">МАГАЗИН</text>
+            </g>
+            <g class="rain" fill="none" stroke-width="2" opacity="0.6">
+              <path d="M40 30 L22 90"/><path d="M110 12 L92 72"/><path d="M180 40 L162 100"/>
+              <path d="M300 26 L282 86"/><path d="M370 10 L352 70"/><path d="M440 36 L422 96"/>
+            </g>
+          </svg>
+          <div class="frame-meta"><span><strong>Маркер</strong> · условная схема</span><span>не новая география</span></div>
+        </article>
+
+        <article class="board-card">
+          <span class="tag">Улица · фасад</span>
+          <svg class="scene" viewBox="0 0 680 380" role="img" aria-label="Фасад магазина: двускатная крыша, вывеска, две группы окон, центральная дверь с крыльцом и деревянная обшивка">
+            <rect class="sky" width="680" height="380"/>
+            <path class="hill" d="M0 196 Q140 156 280 184 Q420 212 560 172 Q630 152 680 176 V300 H0Z" opacity="0.7"/>
+            <path class="hill2" d="M0 226 Q160 196 320 220 Q480 244 680 212 V300 H0Z" opacity="0.85"/>
+            <rect class="ground" x="0" y="300" width="680" height="80"/>
+            <path class="ground2" d="M0 330 H680 V380 H0 Z"/>
+            <path d="M0 306 Q170 296 340 306 T680 300" fill="none" stroke="#8F866F" stroke-width="2" opacity="0.5"/>
+
+            <g class="evening-glow" fill="#E8C98D" opacity="0.35">
+              <ellipse cx="230" cy="218" rx="62" ry="40"/>
+              <ellipse cx="280" cy="218" rx="46" ry="34"/>
+              <ellipse cx="427" cy="218" rx="58" ry="40"/>
+              <ellipse cx="340" cy="322" rx="130" ry="22"/>
+            </g>
+
+            <rect class="wall" x="170" y="132" width="340" height="170" stroke="#4A4036" stroke-width="2"/>
+            <path class="clad" d="M187 134 V300 M209 134 V300 M231 134 V300 M253 134 V300 M275 134 V300 M297 134 V300 M319 134 V300 M341 134 V300 M363 134 V300 M385 134 V300 M407 134 V300 M429 134 V300 M451 134 V300 M473 134 V300 M495 134 V300" fill="none" stroke-width="2" opacity="0.45"/>
+
+            <path class="roof" d="M146 132 L340 42 L534 132 Z" stroke="#3E4B50" stroke-width="3" stroke-linejoin="round"/>
+            <path d="M170 132 L340 56 L510 132" fill="none" stroke="#EFE1C9" stroke-width="5" stroke-linejoin="round"/>
+
+            <rect class="signbg" x="268" y="146" width="144" height="24" rx="2" stroke="#665B50" stroke-width="2"/>
+            <text x="340" y="163" text-anchor="middle" font-family="Arial, sans-serif" font-size="13" font-weight="700" fill="#55453A">МАГАЗИН</text>
+
+            <g>
+              <rect class="frame" x="192" y="188" width="52" height="58" rx="2" stroke="#665B50" stroke-width="2"/>
+              <rect class="glass" x="198" y="194" width="40" height="46" rx="1"/>
+              <path d="M218 194 V240 M198 217 H238" fill="none" stroke="#EFE1C9" stroke-width="2"/>
+              <rect class="frame" x="254" y="188" width="52" height="58" rx="2" stroke="#665B50" stroke-width="2"/>
+              <rect class="glass" x="260" y="194" width="40" height="46" rx="1"/>
+              <path d="M280 194 V240 M260 217 H300" fill="none" stroke="#EFE1C9" stroke-width="2"/>
+            </g>
+            <g>
+              <rect class="frame" x="392" y="186" width="70" height="60" rx="2" stroke="#665B50" stroke-width="2"/>
+              <rect class="glass" x="398" y="192" width="58" height="48" rx="1"/>
+              <path d="M427 192 V240 M398 216 H456" fill="none" stroke="#EFE1C9" stroke-width="2"/>
+              <g class="person" fill="#4B4036">
+                <circle cx="427" cy="210" r="7"/>
+                <path d="M415 240 q0 -16 12 -16 q12 0 12 16 Z"/>
+              </g>
+            </g>
+
+            <rect class="door" x="316" y="212" width="50" height="90" rx="2" stroke="#3E352B" stroke-width="2"/>
+            <rect class="glass" x="322" y="220" width="38" height="34" rx="1"/>
+            <circle cx="358" cy="262" r="2.5" fill="#D9B879"/>
+            <rect x="310" y="300" width="62" height="5" fill="#736B5D"/>
+            <path d="M300 306 H382 L394 326 H288 Z" fill="#AC9B83" stroke="#736B5D" stroke-width="2" stroke-linejoin="round"/>
+            <path d="M294 318 H388" fill="none" stroke="#786B58" stroke-width="3"/>
+
+            <rect x="372" y="204" width="10" height="16" fill="#4A4036"/>
+            <circle class="evening-glow" cx="377" cy="212" r="24" fill="#E8C98D" opacity="0.3"/>
+
+            <g class="rain" fill="none" stroke-width="2" opacity="0.65">
+              <path d="M46 24 L26 92"/><path d="M104 8 L84 76"/><path d="M162 30 L142 98"/>
+              <path d="M236 10 L216 78"/><path d="M470 18 L450 86"/><path d="M534 4 L514 72"/>
+              <path d="M598 26 L578 94"/><path d="M652 6 L632 74"/>
+              <path d="M0 336 Q170 328 340 336 T680 332" stroke-width="3"/>
+            </g>
+          </svg>
+          <div class="frame-meta"><span><strong>Фасад</strong> · постоянные якоря</span><span>условный кадр · не игровой факт</span></div>
+        </article>
+
+        <article class="board-card full">
+          <span class="tag">Интерьер</span>
+          <svg class="scene" viewBox="0 0 680 380" role="img" aria-label="Интерьер магазина: вход слева, стеллажи с полками, две группы окон справа и прилавок; за прилавком может стоять продавец">
+            <rect x="0" y="0" width="680" height="380" fill="#E7DECF"/>
+            <rect class="int-wall" x="48" y="44" width="584" height="204" stroke="#6D5E4D" stroke-width="3"/>
+            <rect class="int-wall2" x="48" y="44" width="584" height="14"/>
+            <path class="int-floor" d="M48 248 H632 L680 380 H0 Z"/>
+            <path class="int-floor2" d="M120 248 L70 380 M200 248 L170 380 M280 248 L270 380 M360 248 L370 380 M440 248 L470 380 M520 248 L570 380 M600 248 L660 380" fill="none" stroke-width="2" opacity="0.5"/>
+            <path d="M48 248 H632" fill="none" stroke="#5B4A3C" stroke-width="4"/>
+
+            <rect class="int-door" x="74" y="120" width="72" height="128" stroke="#3E352B" stroke-width="3"/>
+            <rect x="82" y="128" width="56" height="48" fill="#8CA3A5" stroke="#EFE1C9" stroke-width="2"/>
+            <circle cx="138" cy="200" r="3" fill="#D9B879"/>
+            <rect x="84" y="252" width="56" height="10" fill="#7A6751" opacity="0.7"/>
+            <text x="110" y="278" text-anchor="middle" font-family="Arial, sans-serif" font-size="13" font-weight="700" fill="#86551E">ВХОД</text>
+
+            <rect class="int-shelf" x="196" y="92" width="8" height="156" stroke="#5B4A3C" stroke-width="2"/>
+            <rect class="int-shelf" x="368" y="92" width="8" height="156" stroke="#5B4A3C" stroke-width="2"/>
+            <rect class="int-shelf" x="196" y="128" width="180" height="7" stroke="#5B4A3C" stroke-width="2"/>
+            <rect class="int-shelf" x="196" y="168" width="180" height="7" stroke="#5B4A3C" stroke-width="2"/>
+            <rect class="int-shelf" x="196" y="208" width="180" height="7" stroke="#5B4A3C" stroke-width="2"/>
+            <g>
+              <rect x="210" y="106" width="30" height="20" rx="2" fill="#A07D52"/>
+              <rect x="252" y="106" width="30" height="20" rx="2" fill="#899783"/>
+              <rect x="294" y="106" width="30" height="20" rx="2" fill="#D4C3A6"/>
+              <rect x="336" y="106" width="30" height="20" rx="2" fill="#9C755E"/>
+              <rect x="210" y="146" width="30" height="20" rx="2" fill="#C6B8A1"/>
+              <rect x="252" y="146" width="30" height="20" rx="2" fill="#A07D52"/>
+              <rect x="294" y="146" width="30" height="20" rx="2" fill="#899783"/>
+              <rect x="336" y="146" width="30" height="20" rx="2" fill="#D4C3A6"/>
+              <rect x="210" y="186" width="30" height="20" rx="2" fill="#9C755E"/>
+              <rect x="252" y="186" width="30" height="20" rx="2" fill="#C6B8A1"/>
+              <rect x="294" y="186" width="30" height="20" rx="2" fill="#A07D52"/>
+              <rect x="336" y="186" width="30" height="20" rx="2" fill="#899783"/>
+            </g>
+
+            <g class="evening-glow" fill="#E8C98D" opacity="0.3">
+              <ellipse cx="462" cy="152" rx="70" ry="62"/>
+              <ellipse cx="340" cy="110" rx="80" ry="46"/>
+            </g>
+            <path d="M340 44 V70" fill="none" stroke="#4A4036" stroke-width="2"/>
+            <path class="int-shelf" d="M316 70 H364 L354 88 H326 Z" stroke="#4A4036" stroke-width="2"/>
+
+            <rect class="int-window" x="414" y="104" width="96" height="96" stroke="#665B50" stroke-width="3"/>
+            <path d="M462 104 V200 M414 152 H510" fill="none" stroke="#EFE1C9" stroke-width="2"/>
+            <!-- #356: second window group — the same anchor as the facade. -->
+            <rect class="int-window" x="414" y="222" width="96" height="72" stroke="#665B50" stroke-width="3"/>
+            <path d="M462 222 V294 M414 258 H510" fill="none" stroke="#EFE1C9" stroke-width="2"/>
+            <g class="rain" fill="none" stroke-width="2" opacity="0.55">
+              <path d="M424 112 L418 142"/><path d="M446 112 L440 142"/><path d="M474 112 L468 142"/>
+              <path d="M500 112 L494 142"/><path d="M430 162 L424 192"/><path d="M456 162 L450 192"/>
+              <path d="M482 162 L476 192"/><path d="M504 162 L498 192"/>
+            </g>
+
+            <text x="250" y="306" font-family="Arial, sans-serif" font-size="13" fill="#69594C">ТОРГОВЫЙ ЗАЛ</text>
+
+            <g class="person" fill="#4B4036">
+              <circle cx="548" cy="190" r="12"/>
+              <path d="M528 228 q0 -26 20 -26 q20 0 20 26 Z"/>
+            </g>
+            <rect class="int-counter2" x="462" y="224" width="190" height="18" rx="2" stroke="#5B4A3C" stroke-width="2"/>
+            <rect class="int-counter" x="470" y="242" width="174" height="80" stroke="#5B4A3C" stroke-width="2"/>
+            <text x="557" y="290" text-anchor="middle" font-family="Arial, sans-serif" font-size="12" font-weight="700" fill="#E7D6B9" opacity="0.85">ПРИЛАВОК</text>
+          </svg>
+          <div class="frame-meta"><span><strong>Интерьер</strong> · вход, полки, две группы окон, прилавок</span><span>без выдуманных комнат · не игровой факт</span></div>
+        </article>
+      </div>
+    </div>
+  </section>
+
+  <section class="section" id="anchors">
+    <div class="section-head">
+      <h2>Постоянные якоря и допустимые изменения</h2>
+      <p>
+        Узнаваемость держится на повторяемых признаках, а не на декоре. Один и тот же магазин должен
+        читаться на карте, с улицы и внутри; меняются только свет, погода и подтверждённое присутствие.
+      </p>
+    </div>
+    <div class="anchors">
+      <span class="accent-chip"><b>Крыша</b> · двускатная</span>
+      <span class="accent-chip"><b>Вход</b> · одно положение двери</span>
+      <span class="accent-chip"><b>Окна</b> · две группы</span>
+      <span class="accent-chip"><b>Вывеска</b> · «Магазин»</span>
+      <span class="accent-chip"><b>Полки</b> · вдоль стены</span>
+      <span class="accent-chip"><b>Прилавок</b> · справа от входа</span>
+    </div>
+    <table class="spec-table">
+      <tr><th>Параметр</th><th>Правило</th></tr>
+      <tr><td><strong>Постоянные</strong></td><td>крыша, вход, две группы окон, материалы, силуэт, полки и прилавок — не меняются от света, погоды или ракурса</td></tr>
+      <tr><td><strong>Изменяемые</strong></td><td>свет, погода, присутствие людей — по фактическому состоянию мира, а не по выбору пользователя</td></tr>
+      <tr><td><strong>Помещения</strong></td><td>только вход, торговый зал, полки и прилавок; новые функциональные комнаты не добавляются</td></tr>
+      <tr><td><strong>География</strong></td><td>маркер схематичный; существующая карта и локации не переописываются</td></tr>
+    </table>
+  </section>
+
+  <section class="section" id="boundaries">
+    <div class="section-head">
+      <h2>Границы и правила</h2>
+    </div>
+    <ul class="rules">
+      <li><strong>Декорации не обещают товар.</strong> Предметы на полках — иллюстрация, а не подтверждение наличия, цены или доступности.</li>
+      <li><strong>Нет выдуманных комнат.</strong> Показаны только вход, торговый зал, полки и прилавок; склад, подсобки и иные помещения не вводятся.</li>
+      <li><strong>География не меняется.</strong> Маркер обозначает магазин схематично и не задаёт новую локацию или координаты.</li>
+      <li><strong>Изображение не подтверждает действие.</strong> Кадр не означает покупку, перемещение, выдачу предмета или иную игровую операцию.</li>
+      <li><strong>Нет пользовательского режима.</strong> День, вечер, дождь, пусто и занято — факты мира и просмотр макета, а не выбор AUTONOMOUS/GUIDED/DIRECT (§397).</li>
+    </ul>
+    <div class="note note-critical">
+      <strong>Что не делает этот макет:</strong> не меняет симуляцию, экономику, инвентарь, карту, историю
+      здания или расписание NPC. Не является production-кодом и не заменяет визуальную приёмку владельца.
+    </div>
+    <div class="note note-success">
+      <strong>Одинаковый магазин.</strong> Крыша, вход, окна, вывеска, полки и прилавок совпадают между
+      картой, улицей и интерьером. Меняются только свет, погода и присутствие.
+    </div>
+  </section>
+
+  <footer class="footer">
+    <span><strong>#356 · Канонический магазин.</strong> Предварительный концепт, не утверждённый production-ассет.</span>
+    <span>Источник: docs/VISUAL-BIBLE.md §27.1; паттерн: #387; контракт присутствия: specs/026-living-personality/spec.md (#397).</span>
+    <span>Приёмка владельца ожидается; карта, экстерьер и интерьер сохраняют узнаваемые признаки одного места.</span>
+  </footer>
+</main>
+
+<script>
+(function () {
+  var shop = document.getElementById('shop');
+  var status = document.getElementById('state-status');
+  var lights = { day: 'День', evening: 'Вечер', rain: 'Дождь' };
+  var presence = { empty: 'пустой магазин', occupied: 'занятый магазин' };
+
+  function sync() {
+    var light = shop.getAttribute('data-light');
+    var people = shop.getAttribute('data-presence');
+    var buttons = document.querySelectorAll('.state-btn');
+    for (var i = 0; i < buttons.length; i++) {
+      var b = buttons[i];
+      var on = (b.getAttribute('data-light') === light) ||
+               (b.getAttribute('data-presence') === people);
+      b.setAttribute('aria-pressed', on ? 'true' : 'false');
+    }
+    status.textContent = lights[light] + ' · ' + presence[people] +
+      ' — архитектура постоянна; меняются только свет, погода и подтверждённое присутствие.';
+  }
+
+  var buttons = document.querySelectorAll('.state-btn');
+  for (var i = 0; i < buttons.length; i++) {
+    buttons[i].addEventListener('click', function () {
+      var light = this.getAttribute('data-light');
+      var people = this.getAttribute('data-presence');
+      if (light) { shop.setAttribute('data-light', light); }
+      if (people) { shop.setAttribute('data-presence', people); }
+      sync();
+    });
+  }
+  sync();
+})();
+</script>
+</body>
+</html>
